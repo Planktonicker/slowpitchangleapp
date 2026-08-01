@@ -77,6 +77,13 @@ final class CaptureController: NSObject, ObservableObject {
         setStatus(.configuring)
         sessionQueue.async { [weak self] in
             guard let self else { return }
+            // Already live (e.g. .task re-fired without a matching stop):
+            // reconfiguring a running session for no reason just glitches
+            // the preview.
+            if self.session.isRunning {
+                self.setStatus(.running)
+                return
+            }
             do {
                 try self.configure()
                 self.session.startRunning()
@@ -112,6 +119,15 @@ final class CaptureController: NSObject, ObservableObject {
         session.automaticallyConfiguresApplicationAudioSession = false
         session.beginConfiguration()
         defer { session.commitConfiguration() }
+
+        // Strip any previous graph. Reconfiguration is routine — every tab
+        // switch and every return from the wizard's AR step lands here — and
+        // canAddInput answers false while the old inputs are still attached,
+        // which would otherwise kill the camera permanently.
+        for input in session.inputs { session.removeInput(input) }
+        for output in session.outputs { session.removeOutput(output) }
+        encoder?.invalidate()
+        encoder = nil
 
         // `.inputPriority` keeps our chosen 240fps format; a preset would
         // override it.

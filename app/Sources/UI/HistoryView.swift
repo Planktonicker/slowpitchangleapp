@@ -69,7 +69,11 @@ struct HistoryView: View {
                 }
             }
             .onDelete { offsets in
-                for index in offsets { model.delete(visible[index]) }
+                // Resolve rows before deleting anything: `visible` is a
+                // computed filter, so deleting inside the loop shifts every
+                // later index onto the wrong swing.
+                let doomed = offsets.map { visible[$0] }
+                for swing in doomed { model.delete(swing) }
             }
         }
     }

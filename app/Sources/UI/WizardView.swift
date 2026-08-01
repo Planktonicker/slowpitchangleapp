@@ -31,7 +31,26 @@ struct WizardView: View {
                 }
             }
             .onAppear { wizard.startSensors() }
-            .onDisappear { wizard.distance.stop() }
+            .onChange(of: wizard.step) { _, newStep in
+                // ARKit and the 240fps capture session cannot both hold the
+                // camera. Hand it over: capture stops before AR starts, and
+                // restarts the moment the distance step is left — the plate
+                // step right after it needs the live preview back.
+                if newStep == .distance && !wizard.useManualDistance {
+                    model.capture.stop()
+                    wizard.distance.start()
+                } else if case .idle = model.capture.status {
+                    model.capture.configureAndStart()
+                }
+            }
+            .onDisappear {
+                wizard.distance.stop()
+                // Closing the wizard from the distance step would otherwise
+                // strand the capture screen with a dead camera.
+                if case .idle = model.capture.status {
+                    model.capture.configureAndStart()
+                }
+            }
         }
     }
 
@@ -147,7 +166,13 @@ struct WizardView: View {
                     get: { wizard.useManualDistance },
                     set: { on in
                         wizard.useManualDistance = on
-                        on ? wizard.distance.stop() : wizard.distance.start()
+                        if on {
+                            wizard.distance.stop()
+                            model.capture.configureAndStart()
+                        } else {
+                            model.capture.stop()
+                            wizard.distance.start()
+                        }
                     }))
                     .font(.callout)
             }

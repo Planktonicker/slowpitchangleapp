@@ -81,8 +81,11 @@ final class TrajectoryDetector {
     init(imageWidth: Int, imageHeight: Int, trajectoryLength: Int = SLA.minTrackFrames) {
         self.imageWidth = imageWidth
         self.imageHeight = imageHeight
+        // completionHandler is spelled out: the initializer is imported from
+        // Objective-C without a default for it.
         request = VNDetectTrajectoriesRequest(frameAnalysisSpacing: .zero,
-                                              trajectoryLength: max(5, trajectoryLength))
+                                              trajectoryLength: max(5, trajectoryLength),
+                                              completionHandler: nil)
         // A softball at 15-20 ft on a 1080-wide frame is roughly 1-3% of the
         // frame width. Keep the window generous — cage clips sit at the small
         // end and the tee at the large end.

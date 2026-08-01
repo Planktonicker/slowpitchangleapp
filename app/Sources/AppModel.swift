@@ -42,17 +42,25 @@ final class AppModel: ObservableObject {
         capture.onError = { [weak self] message in
             self?.banner = Banner(kind: .error, text: message)
         }
-        reload()
-    }
 
-    // MARK: - Session
+        // SwiftUI observes AppModel, not the objects hanging off it — a
+        // nested ObservableObject's @Published changes never invalidate a
+        // view that reached it via `model.capture...`. Republish both, or
+        // the bubble level, distance readout and trigger meter render once
+        // and freeze.
+        capture.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        wizard.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
 
-    private var cancellables = Set<AnyCancellable>()
-
-    func startCapture() {
-        capture.configureAndStart()
         // Field of view and frame width are only known once the capture
         // format has been chosen, and the plate scale check needs both.
+        // Wired once here — wiring in startCapture() would stack a duplicate
+        // subscription on every tab switch.
         capture.$fieldOfViewDeg
             .receive(on: DispatchQueue.main)
             .sink { [weak self] fov in self?.wizard.fieldOfViewDeg = fov }
@@ -66,6 +74,16 @@ final class AppModel: ObservableObject {
                 }
             }
             .store(in: &cancellables)
+
+        reload()
+    }
+
+    // MARK: - Session
+
+    private var cancellables = Set<AnyCancellable>()
+
+    func startCapture() {
+        capture.configureAndStart()
     }
 
     func stopCapture() {

@@ -115,41 +115,68 @@ final class ContactTrigger {
         let isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
         let isPlanar = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
 
+        // Planar audio carries one AudioBuffer per channel, so the list's
+        // size depends on the format — query it first. A fixed
+        // single-buffer list makes the copy call fail outright on planar
+        // formats, which would silently kill the trigger.
+        var listSize = 0
+        var status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+            sb,
+            bufferListSizeNeededOut: &listSize,
+            bufferListOut: nil,
+            bufferListSize: 0,
+            blockBufferAllocator: nil,
+            blockBufferMemoryAllocator: nil,
+            flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
+            blockBufferOut: nil
+        )
+        guard status == noErr, listSize >= MemoryLayout<AudioBufferList>.size else { return nil }
+
+        let rawList = UnsafeMutableRawPointer.allocate(
+            byteCount: listSize,
+            alignment: MemoryLayout<AudioBufferList>.alignment
+        )
+        defer { rawList.deallocate() }
+        let ablPtr = rawList.bindMemory(to: AudioBufferList.self, capacity: 1)
+
         var blockBuffer: CMBlockBuffer?
-        var abl = AudioBufferList()
-        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+        status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
             sb,
             bufferListSizeNeededOut: nil,
-            bufferListOut: &abl,
-            bufferListSize: MemoryLayout<AudioBufferList>.size,
+            bufferListOut: ablPtr,
+            bufferListSize: listSize,
             blockBufferAllocator: kCFAllocatorDefault,
             blockBufferMemoryAllocator: kCFAllocatorDefault,
             flags: kCMSampleBufferFlag_AudioBufferList_Assure16ByteAlignment,
             blockBufferOut: &blockBuffer
         )
-        guard status == noErr, blockBuffer != nil else { return nil }
+        guard status == noErr, let retained = blockBuffer else { return nil }
 
-        let buffers = UnsafeMutableAudioBufferListPointer(&abl)
-        guard let first = buffers.first, let raw = first.mData else { return nil }
-        let byteCount = Int(first.mDataByteSize)
-        // Planar layouts put channel 0 alone in the first buffer; interleaved
-        // layouts stride by channel count.
-        let stride = isPlanar ? 1 : channels
+        // The sample memory belongs to the block buffer — keep it alive for
+        // the whole read.
+        return withExtendedLifetime(retained) { () -> [Double]? in
+            let buffers = UnsafeMutableAudioBufferListPointer(ablPtr)
+            guard let first = buffers.first, let raw = first.mData else { return nil }
+            let byteCount = Int(first.mDataByteSize)
+            // Planar layouts put channel 0 alone in the first buffer;
+            // interleaved layouts stride by channel count.
+            let stride = isPlanar ? 1 : channels
 
-        var out: [Double] = []
-        if isFloat {
-            let count = byteCount / MemoryLayout<Float>.size
-            let p = raw.bindMemory(to: Float.self, capacity: count)
-            out.reserveCapacity(count / stride)
-            var i = 0
-            while i < count { out.append(Double(p[i])); i += stride }
-        } else {
-            let count = byteCount / MemoryLayout<Int16>.size
-            let p = raw.bindMemory(to: Int16.self, capacity: count)
-            out.reserveCapacity(count / stride)
-            var i = 0
-            while i < count { out.append(Double(p[i]) / 32768.0); i += stride }
+            var out: [Double] = []
+            if isFloat {
+                let count = byteCount / MemoryLayout<Float>.size
+                let p = raw.bindMemory(to: Float.self, capacity: count)
+                out.reserveCapacity(count / stride)
+                var i = 0
+                while i < count { out.append(Double(p[i])); i += stride }
+            } else {
+                let count = byteCount / MemoryLayout<Int16>.size
+                let p = raw.bindMemory(to: Int16.self, capacity: count)
+                out.reserveCapacity(count / stride)
+                var i = 0
+                while i < count { out.append(Double(p[i]) / 32768.0); i += stride }
+            }
+            return out
         }
-        return out
     }
 }

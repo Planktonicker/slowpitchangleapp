@@ -135,7 +135,9 @@ final class PlacementWizard: ObservableObject {
 
     func startSensors() {
         level.start()
-        if step == .distance && !useManualDistance { distance.start() }
+        // The AR distance sensor is NOT started here. ARKit and the capture
+        // session both need the camera, so the view that owns this wizard
+        // starts AR only after stopping capture — see WizardView.onChange.
     }
 
     func stopSensors() {
@@ -144,13 +146,7 @@ final class PlacementWizard: ObservableObject {
     }
 
     func enter(_ newStep: Step) {
-        // ARKit only runs while its own step is on screen: it wants the
-        // camera, and so does capture.
-        if newStep == .distance && !useManualDistance {
-            distance.start()
-        } else {
-            distance.stop()
-        }
+        if newStep != .distance { distance.stop() }
         step = newStep
     }
 
