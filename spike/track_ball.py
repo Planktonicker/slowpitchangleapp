@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SwingLab — Copyright (C) 2026 Planktonicker
+# SPDX-License-Identifier: AGPL-3.0-only
+# Full terms in LICENSE at the repository root. No warranty.
 """
 track_ball.py — extract the hit ball's flight path from one slo-mo clip.
 

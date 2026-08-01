@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SwingLab — Copyright (C) 2026 Planktonicker
+# SPDX-License-Identifier: AGPL-3.0-only
+# Full terms in LICENSE at the repository root. No warranty.
 """
 check_audio_trigger.py — measure how loud bat-ball contact is vs ambient (G5).
 

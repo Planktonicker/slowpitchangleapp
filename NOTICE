@@ -1,0 +1,75 @@
+SwingLab — slow-pitch softball swing tracker
+Copyright (C) 2026 Planktonicker
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License, version 3 only, as
+published by the Free Software Foundation.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+details.
+
+You should have received a copy of the GNU Affero General Public License along
+with this program. If not, see <https://www.gnu.org/licenses/>.
+
+The full text is in the LICENSE file at the root of this repository.
+
+
+-------------------------------------------------------------------------------
+MEASUREMENT DISCLAIMER
+-------------------------------------------------------------------------------
+
+SwingLab reports launch angle, exit velocity and bat attack angle. Those
+numbers have NOT been validated against real footage or against any calibrated
+reference instrument. The Phase 0 validation described in docs/VALIDATION.md
+has not been carried out.
+
+Do not rely on any output of this software for coaching decisions, equipment
+purchases, player evaluation, recruitment, competition, wagering, or medical
+or injury-related judgements. Sections 15 and 16 of the GNU Affero General
+Public License apply: the software is provided without warranty of any kind,
+and no copyright holder is liable for any damages arising from its use.
+
+
+-------------------------------------------------------------------------------
+TRADEMARKS
+-------------------------------------------------------------------------------
+
+"SwingLab" and any associated logos are not licensed under the AGPL. The
+license grants rights in the software's copyright; it does not grant any right
+to use the project's name, or a confusingly similar name, to identify or
+promote derivative works. You may of course state accurately that your work is
+derived from SwingLab.
+
+Apple, iPhone, Xcode, TestFlight, ARKit, SwiftUI, SwiftData, AVFoundation,
+Vision and VideoToolbox are trademarks of Apple Inc., used here only to
+identify the platform and frameworks this software targets. This project is
+not affiliated with, endorsed by, or sponsored by Apple Inc.
+
+
+-------------------------------------------------------------------------------
+THIRD-PARTY SOFTWARE
+-------------------------------------------------------------------------------
+
+No third-party source code is vendored into this repository. The Python
+reference implementation in spike/ depends on the following packages, which
+are installed separately via spike/requirements.txt and remain under their own
+licenses:
+
+  OpenCV (opencv-python)     Apache License 2.0
+                             https://github.com/opencv/opencv/blob/master/LICENSE
+
+  NumPy                      BSD 3-Clause License
+                             https://github.com/numpy/numpy/blob/main/LICENSE.txt
+
+  Matplotlib                 Matplotlib License (BSD-compatible, PSF-derived)
+                             https://matplotlib.org/stable/users/project/license.html
+
+The iOS app links only against frameworks supplied by Apple's SDK. It bundles
+no third-party libraries.
+
+The text of the GNU Affero General Public License v3.0 in LICENSE is
+Copyright (C) 2007 Free Software Foundation, Inc. Everyone is permitted to
+copy and distribute verbatim copies of that license document, but changing it
+is not allowed.

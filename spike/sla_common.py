@@ -1,3 +1,6 @@
+# SwingLab — Copyright (C) 2026 Planktonicker
+# SPDX-License-Identifier: AGPL-3.0-only
+# Full terms in LICENSE at the repository root. No warranty.
 """
 sla_common.py — SwingLab reference implementation.
 

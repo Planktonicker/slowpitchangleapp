@@ -1,3 +1,7 @@
+// SwingLab — Copyright (C) 2026 Planktonicker
+// SPDX-License-Identifier: AGPL-3.0-only
+// Full terms in LICENSE at the repository root. No warranty.
+
 import Foundation
 
 /// Reads and writes the track CSV format of `sla_common.write_track_csv`.

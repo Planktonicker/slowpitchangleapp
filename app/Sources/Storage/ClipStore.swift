@@ -1,3 +1,7 @@
+// SwingLab — Copyright (C) 2026 Planktonicker
+// SPDX-License-Identifier: AGPL-3.0-only
+// Full terms in LICENSE at the repository root. No warranty.
+
 import Foundation
 
 /// Where clips, track CSVs and exports live on the device.

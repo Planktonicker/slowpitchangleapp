@@ -1,5 +1,9 @@
 # SwingLab — slow-pitch softball swing tracker
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+![Status: unvalidated](https://img.shields.io/badge/measurements-unvalidated-orange.svg)
+![Platform: iOS 17+](https://img.shields.io/badge/platform-iOS%2017%2B-lightgrey.svg)
+
 An iPhone app (native Swift/SwiftUI) that measures, from a single tripod-mounted
 phone filming side-on at 240fps:
 
@@ -10,6 +14,13 @@ phone filming side-on at 240fps:
 All data stays **on the device** (no accounts, no cloud). Camera placement is
 wizard-guided (bubble level, AR distance readout, home-plate scale check) so
 readings are consistent session to session.
+
+> [!WARNING]
+> **The numbers are not validated.** SwingLab has never been run against real
+> footage or a calibrated reference. The Phase 0 validation in
+> [docs/VALIDATION.md](docs/VALIDATION.md) has not been carried out, and the app
+> has not been compiled. Don't use its output for coaching, equipment or player
+> decisions. See [NOTICE](NOTICE).
 
 ## How measurement works (and why you can trust it without a radar gun)
 
@@ -103,3 +114,28 @@ checked in; `spike/out/` holds all script outputs and is disposable.
 **The Python is the referee.** If a device number and a Python number disagree
 on the same clip, the Python is right until proven otherwise — and the parity
 tests exist to make that disagreement impossible to reach by accident.
+
+## License
+
+Copyright (C) 2026 Planktonicker.
+
+SwingLab is free software licensed under the **GNU Affero General Public
+License v3.0 only** — see [LICENSE](LICENSE) for the full text, and
+[NOTICE](NOTICE) for trademarks, third-party dependencies and the measurement
+disclaimer.
+
+In short: you may use, study, modify and share it, but anything you build on
+it has to stay under the AGPL and ship its source — including if you only ever
+offer it to people over a network (AGPL §13). That is deliberate. The
+drag-aware scale solve and the sub-pixel diameter method are the hard-won parts
+of this project, and the license is what keeps them open.
+
+The license covers copyright in the software. It does not grant rights to the
+SwingLab name.
+
+Contributions are welcome under the terms in [CONTRIBUTING.md](CONTRIBUTING.md),
+which asks for an extra relicensing grant so the app can still be distributed
+through TestFlight and the App Store.
+
+- [Security policy](SECURITY.md) — report vulnerabilities privately
+- [Code of conduct](CODE_OF_CONDUCT.md)

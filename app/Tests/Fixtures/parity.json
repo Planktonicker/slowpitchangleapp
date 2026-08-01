@@ -1,6 +1,8 @@
 {
  "_generated_by": "spike/gen_parity_fixtures.py",
  "_source_of_truth": "spike/sla_common.py",
+ "_copyright": "Copyright (C) 2026 Planktonicker",
+ "_license": "AGPL-3.0-only",
  "constants": {
   "G": 9.80665,
   "BALL_CIRCUMFERENCE_M": 0.30479999999999996,

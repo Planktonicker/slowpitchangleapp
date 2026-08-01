@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SwingLab — Copyright (C) 2026 Planktonicker
+# SPDX-License-Identifier: AGPL-3.0-only
+# Full terms in LICENSE at the repository root. No warranty.
 """
 gen_parity_fixtures.py — freeze the reference math into golden vectors.
 
@@ -261,6 +264,8 @@ def main():
     out = {
         "_generated_by": "spike/gen_parity_fixtures.py",
         "_source_of_truth": "spike/sla_common.py",
+        "_copyright": "Copyright (C) 2026 Planktonicker",
+        "_license": "AGPL-3.0-only",
         "constants": {
             "G": sla.G,
             "BALL_CIRCUMFERENCE_M": sla.BALL_CIRCUMFERENCE_M,

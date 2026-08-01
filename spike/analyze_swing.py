@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SwingLab — Copyright (C) 2026 Planktonicker
+# SPDX-License-Identifier: AGPL-3.0-only
+# Full terms in LICENSE at the repository root. No warranty.
 """
 analyze_swing.py — turn a tracked ball path (CSV from track_ball.py) into
 launch angle + exit velocity, with confidence flags and diagnostic plots.

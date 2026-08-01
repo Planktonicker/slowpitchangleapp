@@ -1,3 +1,7 @@
+// SwingLab — Copyright (C) 2026 Planktonicker
+// SPDX-License-Identifier: AGPL-3.0-only
+// Full terms in LICENSE at the repository root. No warranty.
+
 import Foundation
 
 /// Links per-frame ball candidates into tracks and picks the hit ball.
