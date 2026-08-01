@@ -39,8 +39,11 @@ struct CameraPreview: UIViewRepresentable {
         override func layoutSubviews() {
             super.layoutSubviews()
             guard let connection = videoPreviewLayer.connection else { return }
+            // Resolve the optional before switching, rather than relying on
+            // enum patterns matching through Optional.
+            let orientation = window?.windowScene?.interfaceOrientation ?? .portrait
             let angle: CGFloat
-            switch window?.windowScene?.interfaceOrientation {
+            switch orientation {
             case .landscapeLeft:      angle = 180
             case .landscapeRight:     angle = 0
             case .portraitUpsideDown: angle = 270

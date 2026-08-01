@@ -85,18 +85,20 @@ final class ARDistanceSensor: NSObject, ObservableObject, ARSessionDelegate {
 
         // Distance: raycast straight out of the middle of the frame — the
         // user aims the centre at the plate or tee.
+        // ARFrame hands back a query unconditionally — it is the view-based
+        // raycastQuery that can fail. Only the raycast itself may come back
+        // empty, when nothing is in front of the camera yet.
         let centre = CGPoint(x: 0.5, y: 0.5)
-        if let query = frame.raycastQuery(from: centre,
-                                          allowing: .estimatedPlane,
-                                          alignment: .any) {
-            if let hit = session.raycast(query).first {
-                let cam = frame.camera.transform.columns.3
-                let target = hit.worldTransform.columns.3
-                let dx = Double(cam.x - target.x)
-                let dy = Double(cam.y - target.y)
-                let dz = Double(cam.z - target.z)
-                distanceM = (dx * dx + dy * dy + dz * dz).squareRoot()
-            }
+        let query = frame.raycastQuery(from: centre,
+                                       allowing: .estimatedPlane,
+                                       alignment: .any)
+        if let hit = session.raycast(query).first {
+            let cam = frame.camera.transform.columns.3
+            let target = hit.worldTransform.columns.3
+            let dx = Double(cam.x - target.x)
+            let dy = Double(cam.y - target.y)
+            let dz = Double(cam.z - target.z)
+            distanceM = (dx * dx + dy * dy + dz * dz).squareRoot()
         }
 
         // Height: camera above the lowest horizontal plane ARKit has found,
