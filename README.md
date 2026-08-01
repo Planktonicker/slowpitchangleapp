@@ -31,12 +31,29 @@ readings are consistent session to session.
 
 | Phase | What | Status |
 |-------|------|--------|
-| 0 | Validation spike: prove the measurement core on real footage (Python/OpenCV, no app yet) | **← you are here** |
-| 1 | Capture app: guided placement wizard + auto-triggered 240fps clip capture | gated on Phase 0 |
-| 2 | On-device analysis, local storage, trends, CSV export | |
-| 3 | Bat attack angle + replay overlay, TestFlight | |
+| 0 | Validation spike: measurement core proven on synthetic footage (Python/OpenCV) | core done; **not yet run on real footage** |
+| 1 | Capture app: guided placement wizard + auto-triggered 240fps clip capture | built, unproven in the field |
+| 2 | On-device analysis, local storage, trends, CSV export | built, unproven in the field |
+| 3 | Bat attack angle + replay overlay, TestFlight | attack angle + overlay built; TestFlight not started |
 
-## Quickstart (Phase 0)
+The app was brought forward deliberately so that filming and validating happen
+in one pass: the app records the clips **and** computes the go/no-go
+scoreboard, instead of the footage making a round trip to the Mac first. The
+measurement core it runs is the Phase 0 reference, ported to Swift and pinned
+to it by `app/Tests/ParityTests.swift`. What remains unproven is the capture
+half — real ball, real light, real cage. See [docs/APP_GUIDE.md](docs/APP_GUIDE.md).
+
+## Quickstart — the app
+
+```
+cd app && xcodegen generate && open SwingLab.xcodeproj
+```
+
+Set your signing team, Run to your iPhone, then follow
+[docs/APP_GUIDE.md](docs/APP_GUIDE.md): placement wizard, arm, hit. The
+**Validation** tab computes the Phase 0 gates live from what you capture.
+
+## Quickstart — the Python reference (the referee)
 
 1. **Set up the Mac** — follow [docs/MAC_SETUP.md](docs/MAC_SETUP.md) §1–3
    (Python only for now; Xcode matters from Phase 1).
@@ -57,18 +74,32 @@ readings are consistent session to session.
    python track_ball.py clips/cage_02.mov --debug-video    # eyeball a track
    ```
 5. **Record results** in [docs/VALIDATION.md](docs/VALIDATION.md) and make the
-   go/no-go call. Phase 1 app code starts only after outdoor tee passes.
+   go/no-go call.
+
+The go/no-go call still governs. The app existing does not pre-empt it: if
+outdoor tee trackability (G1) fails on real footage, the answer is to rethink
+capture — distance, ball, background — not to keep building on top of it.
 
 ## Repo layout
 
 ```
-docs/       MAC_SETUP, CAPTURE_PROTOCOL, VALIDATION (+ SETUP_GUIDE, TESTFLIGHT later)
+docs/       MAC_SETUP, CAPTURE_PROTOCOL, VALIDATION, APP_GUIDE
 spike/      Python reference implementation + field-validation scripts
-  sla_common.py   ← single source of truth for all tracking/physics math;
-                    the Phase 2 Swift port must match it number-for-number
-app/        (from Phase 1) XcodeGen project.yml + Swift sources
+  sla_common.py          ← single source of truth for all tracking/physics math
+  gen_parity_fixtures.py ← freezes that math into golden vectors for the port
+app/        XcodeGen project.yml + Swift sources
+  Sources/Core/          ← the port of sla_common.py; must match it number-for-number
+  Sources/Capture/       ← 240fps capture, pre-roll ring, audio contact trigger
+  Sources/Vision/        ← detection, Vision trajectory locator, bat tracking
+  Sources/Wizard/        ← guided placement (level, ARKit distance, plate scale)
+  Sources/Storage/       ← SwiftData behind a thin protocol + the validation scoreboard
+  Tests/                 ← parity tests against spike/, plus pipeline tests
 ```
 
 Conventions: video files and live databases are never committed (see
 `.gitignore`); the `.xcodeproj` is generated on your Mac by XcodeGen, not
 checked in; `spike/out/` holds all script outputs and is disposable.
+
+**The Python is the referee.** If a device number and a Python number disagree
+on the same clip, the Python is right until proven otherwise — and the parity
+tests exist to make that disagreement impossible to reach by accident.
