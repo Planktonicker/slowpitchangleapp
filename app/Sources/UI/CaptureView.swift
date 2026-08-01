@@ -4,6 +4,7 @@
 
 import AVFoundation
 import SwiftUI
+import UIKit
 
 /// The field screen: preview, arm/disarm, and the last swing's numbers.
 struct CaptureView: View {

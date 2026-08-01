@@ -26,7 +26,7 @@ struct AppSettings: Codable, Equatable {
     static let storageKey = "swinglab.settings.v1"
 
     static func load() -> AppSettings {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
+        guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
               let decoded = try? JSONDecoder().decode(AppSettings.self, from: data) else {
             return AppSettings()
         }
@@ -35,7 +35,7 @@ struct AppSettings: Codable, Equatable {
 
     func save() {
         guard let data = try? JSONEncoder().encode(self) else { return }
-        UserDefaults.standard.set(data, forKey: storageKey)
+        UserDefaults.standard.set(data, forKey: Self.storageKey)
     }
 
     var analyzerOptions: ClipAnalyzer.Options {

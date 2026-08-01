@@ -3,6 +3,7 @@
 // Full terms in LICENSE at the repository root. No warranty.
 
 import SwiftUI
+import UIKit
 
 /// A single big number with its unit and label.
 struct MetricTile: View {
