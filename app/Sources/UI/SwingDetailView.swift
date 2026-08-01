@@ -144,10 +144,37 @@ struct SwingDetailView: View {
 
     private func batSection(_ attack: Double) -> some View {
         VStack(spacing: 8) {
-            MetricTile(label: "Attack angle", value: String(format: "%.1f", attack), unit: "°")
+            HStack {
+                MetricTile(label: "Attack angle", value: String(format: "%.1f", attack), unit: "°")
+                if let bs = swing.batSpeedMph {
+                    MetricTile(label: "Bat speed", value: String(format: "%.1f", bs), unit: "mph")
+                }
+            }
+            if let smash = swing.smashFactor {
+                HStack {
+                    Text("Smash factor").foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%.2f", smash)).monospacedDigit()
+                    Text(swing.smashQuality.label)
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .foregroundStyle(smashColour)
+                }
+                .font(.callout)
+            }
             detail("Frames on the barrel", swing.batFrames.map(String.init) ?? "—")
-            Text("Measured from the tape on the barrel over the few milliseconds before contact, from one side-on view. True swing plane needs two synced cameras and is deferred to v2 — treat this as indicative.")
+            Text("Bat speed is the barrel-tape speed at contact, converted with the same scale the exit-velocity reading uses. Smash factor is exit velocity ÷ bat speed — how flush the contact was; ~1.35+ is a well-struck ball. It's exact off a tee and approximate off live pitching, where the ball carries its own speed into the collision.")
                 .font(.caption).foregroundStyle(.secondary)
+            Text("Attack angle and swing plane come from one side-on view over the few milliseconds before contact — indicative, not a true 3D swing plane (that needs two synced cameras, deferred to v2).")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var smashColour: Color {
+        switch swing.smashQuality {
+        case .flush: return Theme.pass
+        case .fair: return Theme.yellow
+        case .poor: return Theme.fail
+        case .unknown: return Theme.steel
         }
     }
 

@@ -19,7 +19,12 @@
   "DIAMETER_DRIFT_TOL": 0.1,
   "RESIDUAL_TOL_PX": 3.0,
   "DIAMETER_PROFILE_STEP_PX": 0.25,
-  "k_over_m": 0.011201351130243472
+  "k_over_m": 0.011201351130243472,
+  "SMASH_POOR_BELOW": 1.2,
+  "SMASH_GOOD_LO": 1.35,
+  "SMASH_GOOD_HI": 1.45,
+  "SLOWPITCH_LAUNCH_LO": 10.0,
+  "SLOWPITCH_LAUNCH_HI": 25.0
  },
  "fit_quadratic": [
   {
@@ -7454,6 +7459,52 @@
   {
    "hang_s": 4.1,
    "expected": 20.103632499999996
+  }
+ ],
+ "bat_metrics": [
+  {
+   "name": "solid_swing",
+   "vx_px_s": 6800.0,
+   "vy_px_s": -1600.0,
+   "scale_m_per_px": 0.004166666666666667,
+   "exit_velo_mps": 34.869062201042496,
+   "bat_speed_mps": 29.1070819942883,
+   "bat_speed_mph": 65.11079599630328,
+   "smash_factor": 1.1979580161242158,
+   "smash_quality": "poor"
+  },
+  {
+   "name": "flush_contact",
+   "vx_px_s": 5000.0,
+   "vy_px_s": -500.0,
+   "scale_m_per_px": 0.004,
+   "exit_velo_mps": 34.0,
+   "bat_speed_mps": 20.099751242241783,
+   "bat_speed_mph": 44.96193754382034,
+   "smash_factor": 1.6915632233569813,
+   "smash_quality": "flush"
+  },
+  {
+   "name": "poor_contact",
+   "vx_px_s": 7000.0,
+   "vy_px_s": -1000.0,
+   "scale_m_per_px": 0.004166666666666667,
+   "exit_velo_mps": 20.0,
+   "bat_speed_mps": 29.462782549439478,
+   "bat_speed_mph": 65.90647679614315,
+   "smash_factor": 0.6788225099390857,
+   "smash_quality": "poor"
+  },
+  {
+   "name": "bat_not_tracked",
+   "vx_px_s": 0.0,
+   "vy_px_s": 0.0,
+   "scale_m_per_px": 0.004166666666666667,
+   "exit_velo_mps": 30.0,
+   "bat_speed_mps": 0.0,
+   "bat_speed_mph": 0.0,
+   "smash_factor": null,
+   "smash_quality": "unknown"
   }
  ]
 }

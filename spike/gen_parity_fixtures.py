@@ -241,6 +241,26 @@ def fit_cases():
     ]
 
 
+def bat_cases():
+    """Inputs for bat_speed_mps / smash_factor / smash_quality, covering the
+    poor/fair/flush bands and the bat-not-tracked (None) path."""
+    return [
+        # ~65 mph barrel at contact (7000 px/s downward-ish at 240 px/m), a
+        # solid slow-pitch swing; EV 78 mph -> smash ~1.20 (fair/flush edge).
+        {"name": "solid_swing", "vx_px_s": 6800.0, "vy_px_s": -1600.0,
+         "scale_m_per_px": 1.0 / 240.0, "exit_velo_mps": 78.0 / sla.MPH_PER_MPS},
+        # Flush: high EV relative to bat speed.
+        {"name": "flush_contact", "vx_px_s": 5000.0, "vy_px_s": -500.0,
+         "scale_m_per_px": 1.0 / 250.0, "exit_velo_mps": 34.0},
+        # Poor: mishit, EV well below bat speed.
+        {"name": "poor_contact", "vx_px_s": 7000.0, "vy_px_s": -1000.0,
+         "scale_m_per_px": 1.0 / 240.0, "exit_velo_mps": 20.0},
+        # Bat not tracked: zero speed -> smash None -> quality "unknown".
+        {"name": "bat_not_tracked", "vx_px_s": 0.0, "vy_px_s": 0.0,
+         "scale_m_per_px": 1.0 / 240.0, "exit_velo_mps": 30.0},
+    ]
+
+
 def flight_cases():
     return [
         {"name": "synth_test_reference", "ev_mps": 65.0 / sla.MPH_PER_MPS,
@@ -284,12 +304,18 @@ def main():
             "DIAMETER_PROFILE_STEP_PX": sla.DIAMETER_PROFILE_STEP_PX,
             "k_over_m": (0.5 * sla.AIR_DENSITY * sla.DRAG_CD * math.pi
                          * (sla.BALL_DIAMETER_M / 2) ** 2 / sla.BALL_MASS_KG),
+            "SMASH_POOR_BELOW": sla.SMASH_POOR_BELOW,
+            "SMASH_GOOD_LO": sla.SMASH_GOOD_LO,
+            "SMASH_GOOD_HI": sla.SMASH_GOOD_HI,
+            "SLOWPITCH_LAUNCH_LO": sla.SLOWPITCH_LAUNCH_LO,
+            "SLOWPITCH_LAUNCH_HI": sla.SLOWPITCH_LAUNCH_HI,
         },
         "fit_quadratic": [],
         "solve_gravity_scale": [],
         "analyze_track": [],
         "simulate_flight": [],
         "vy0_from_hang_time": [],
+        "bat_metrics": [],
     }
 
     for c in fit_cases():
@@ -327,6 +353,17 @@ def main():
         out["vy0_from_hang_time"].append(
             {"hang_s": hang, "expected": sla.vy0_from_hang_time(hang)})
 
+    for c in bat_cases():
+        bs = sla.bat_speed_mps(c["vx_px_s"], c["vy_px_s"], c["scale_m_per_px"])
+        smash = sla.smash_factor(c["exit_velo_mps"], bs)
+        out["bat_metrics"].append({
+            **c,
+            "bat_speed_mps": bs,
+            "bat_speed_mph": bs * sla.MPH_PER_MPS,
+            "smash_factor": smash,
+            "smash_quality": sla.smash_quality(smash),
+        })
+
     dst = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "..", "app", "Tests", "Fixtures", "parity.json")
     dst = os.path.normpath(dst)
@@ -340,7 +377,8 @@ def main():
     print(f"  {len(out['fit_quadratic'])} fit cases, "
           f"{len(out['solve_gravity_scale'])} gravity-scale cases, "
           f"{len(out['analyze_track'])} analyze cases ({n_obs} observations), "
-          f"{len(out['simulate_flight'])} flight cases")
+          f"{len(out['simulate_flight'])} flight cases, "
+          f"{len(out['bat_metrics'])} bat cases")
 
 
 if __name__ == "__main__":

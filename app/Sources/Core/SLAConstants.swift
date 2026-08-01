@@ -72,6 +72,62 @@ enum SLA {
     /// Contact impulse must stand this far above the rolling noise floor.
     /// Matches `PASS_DB` in `spike/check_audio_trigger.py` (G5).
     static let triggerDb = 15.0
+
+    // MARK: - Bat / contact quality (Phase 3+)
+
+    /// Smash-factor (collision-efficiency) reference band, matching
+    /// `sla_common.py`. Coaching references (Driveline: good ~1.35-1.40, poor
+    /// below ~1.20), NOT slow-pitch population norms — used only to colour a
+    /// reading. See `docs/BIOMECHANICS.md` for why these are guidance, not gates.
+    static let smashPoorBelow = 1.20
+    static let smashGoodLo = 1.35
+    static let smashGoodHi = 1.45
+
+    /// Slow-pitch line-drive launch window (degrees). MLB's 25-35° guidance
+    /// misleads slow-pitch hitters — a heavier ball at low bat speed makes high
+    /// fly balls die. Guidance for display, not a validated norm.
+    static let slowpitchLaunchLo = 10.0
+    static let slowpitchLaunchHi = 25.0
+
+    /// Barrel-tape speed at contact in m/s, using the ball-size scale the ball
+    /// pipeline already trusts. Port of `bat_speed_mps`.
+    static func batSpeedMps(vxPxS: Double, vyPxS: Double, scaleMPerPx: Double) -> Double {
+        (vxPxS * vxPxS + vyPxS * vyPxS).squareRoot() * scaleMPerPx
+    }
+
+    /// Exit velocity ÷ bat speed — collision efficiency. `nil` when the bat was
+    /// not tracked (non-positive speed). Port of `smash_factor`.
+    static func smashFactor(exitVeloMps: Double, batSpeedMps: Double) -> Double? {
+        batSpeedMps <= 0 ? nil : exitVeloMps / batSpeedMps
+    }
+
+    /// True when a launch angle sits in the slow-pitch line-drive band.
+    static func inSlowpitchLaunchWindow(_ launchAngleDeg: Double) -> Bool {
+        launchAngleDeg >= slowpitchLaunchLo && launchAngleDeg <= slowpitchLaunchHi
+    }
+}
+
+/// Coarse label for a smash-factor reading. Raw values match the strings
+/// returned by `smash_quality` in `sla_common.py` so fixtures compare directly.
+/// "flush" borrows b4-app's framing for a well-struck ball.
+enum SmashQuality: String, Codable, Sendable {
+    case unknown, poor, fair, flush
+
+    init(smash: Double?) {
+        guard let s = smash else { self = .unknown; return }
+        if s < SLA.smashPoorBelow { self = .poor }
+        else if s < SLA.smashGoodLo { self = .fair }
+        else { self = .flush }
+    }
+
+    var label: String {
+        switch self {
+        case .unknown: return "—"
+        case .poor: return "Poor contact"
+        case .fair: return "Fair contact"
+        case .flush: return "Flush"
+        }
+    }
 }
 
 /// A point in OpenCV's HSV convention, so venue tuning transfers directly

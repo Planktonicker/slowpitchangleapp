@@ -91,6 +91,15 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     // Phase 3
     var batAttackAngleDeg: Double?
     var batFrames: Int?
+    /// Barrel-tape speed at contact (mph). The tape sits on the barrel, so this
+    /// is bat speed "at the tape marker" — a disclosed bat point, the way
+    /// Statcast reports "at the sweet spot". `nil` when the bat was not tracked.
+    var batSpeedMph: Double?
+    /// Exit velocity ÷ bat speed (collision efficiency / b4-app's "flush"),
+    /// exact off a tee and approximate off live pitching. `nil` without bat.
+    var smashFactor: Double?
+
+    var smashQuality: SmashQuality { SmashQuality(smash: smashFactor) }
 
     // G3 ground truth, entered by hand after a fly ball
     var hangS: Double?
@@ -132,6 +141,17 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
         self.flags = m.flags
         self.batAttackAngleDeg = analysis.bat?.attackAngleDeg
         self.batFrames = analysis.bat?.nFrames
+
+        // Bat speed + smash factor need both the bat velocity (px/s at contact)
+        // and the ball-size scale (m/px). Only compute when the bat was tracked
+        // with enough confidence and the ball scale is sound.
+        if let bat = analysis.bat, !bat.isLowConfidence, m.scaleBallMPerPx > 0 {
+            let bs = SLA.batSpeedMps(vxPxS: bat.vxPxS, vyPxS: bat.vyPxS,
+                                     scaleMPerPx: m.scaleBallMPerPx)
+            self.batSpeedMph = bs * SLA.mphPerMps
+            self.smashFactor = SLA.smashFactor(exitVeloMps: m.exitVeloMps,
+                                               batSpeedMps: bs)
+        }
     }
 }
 

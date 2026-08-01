@@ -566,6 +566,82 @@ def vy0_from_hang_time(hang_s: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Bat / contact quality (Phase 3+)
+# ---------------------------------------------------------------------------
+#
+# These turn the barrel-tape path (already tracked for attack angle) plus the
+# ball exit velocity into the two metrics hitters actually chase: bat speed and
+# contact quality. This is the b4-app / Blast / Statcast headline pairing, and
+# SwingLab is unusual in measuring BOTH the bat and the ball from one phone, so
+# it can report them together with no extra hardware.
+#
+# Honesty boundaries (see docs/BIOMECHANICS.md):
+#  - Bat speed is the speed of the TAPE MARKER on the barrel, not a modelled
+#    sweet-spot 6 in from the tip. Report it "at the tape", the same way
+#    Statcast reports "at the sweet spot" — a defined, disclosed bat point.
+#  - Smash factor here is the simple EV / bat-speed ratio (Driveline's hit-tool
+#    form). It ignores pitch speed, so it is exact off a tee and only
+#    approximate off live pitching, where the ball carries its own inbound
+#    speed into the collision. Flagged, not hidden.
+
+# Collision efficiency (smash factor) reference band. Driveline treats ~1.35-1.40
+# as good bat-to-ball contact and < ~1.20 as poor; the rigid-bat physical
+# ceiling sits around 1.4-1.5. These are coaching references, NOT slow-pitch
+# population norms (none are published) — used only to colour a reading.
+SMASH_POOR_BELOW = 1.20
+SMASH_GOOD_LO = 1.35
+SMASH_GOOD_HI = 1.45
+
+# Slow-pitch line-drive launch window (degrees). A heavier ball at low bat
+# speed makes MLB's 25-35 deg guidance misleading: fly balls die. Physics and
+# coaching consensus put the productive slow-pitch window near 10-25 deg, with
+# ~15-20 for max carry. Guidance for display colouring, not a validated norm.
+SLOWPITCH_LAUNCH_LO = 10.0
+SLOWPITCH_LAUNCH_HI = 25.0
+
+
+def bat_speed_mps(vx_px_s: float, vy_px_s: float, scale_m_per_px: float) -> float:
+    """Barrel-tape speed at contact, converted to m/s with the ball-size scale.
+
+    vx/vy are the tape path's velocity components at t=0 (contact), in px/s,
+    as fitted by BatTracker/analyze. The scale is the same [m/px] the ball
+    pipeline already trusts, so no new calibration is introduced.
+    """
+    return math.hypot(vx_px_s, vy_px_s) * scale_m_per_px
+
+
+def smash_factor(exit_velo_mps: float, bat_speed_mps_val: float) -> float | None:
+    """Exit velocity divided by bat speed — collision efficiency (hit tool).
+
+    Returns None when bat speed is non-positive (bat not tracked / bad fit),
+    so callers show "—" rather than a divide-by-zero artefact.
+    """
+    if bat_speed_mps_val <= 0:
+        return None
+    return exit_velo_mps / bat_speed_mps_val
+
+
+def smash_quality(smash: float | None) -> str:
+    """Coarse label for a smash-factor reading: poor / fair / flush.
+
+    "flush" borrows the b4-app framing for a well-struck ball. Boundaries are
+    the coaching references above, not slow-pitch norms.
+    """
+    if smash is None:
+        return "unknown"
+    if smash < SMASH_POOR_BELOW:
+        return "poor"
+    if smash < SMASH_GOOD_LO:
+        return "fair"
+    return "flush"
+
+
+def in_slowpitch_launch_window(launch_angle_deg: float) -> bool:
+    """True when a launch angle sits in the slow-pitch line-drive band."""
+    return SLOWPITCH_LAUNCH_LO <= launch_angle_deg <= SLOWPITCH_LAUNCH_HI
+
+
+# ---------------------------------------------------------------------------
 # Video + CSV I/O
 # ---------------------------------------------------------------------------
 

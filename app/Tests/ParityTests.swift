@@ -26,6 +26,7 @@ final class ParityTests: XCTestCase {
         var analyze_track: [AnalyzeCase]
         var simulate_flight: [FlightCase]
         var vy0_from_hang_time: [Vy0Case]
+        var bat_metrics: [BatCase]
     }
 
     struct FitCase: Decodable {
@@ -101,6 +102,18 @@ final class ParityTests: XCTestCase {
         var expected: Double
     }
 
+    struct BatCase: Decodable {
+        var name: String
+        var vx_px_s: Double
+        var vy_px_s: Double
+        var scale_m_per_px: Double
+        var exit_velo_mps: Double
+        var bat_speed_mps: Double
+        var bat_speed_mph: Double
+        var smash_factor: Double?
+        var smash_quality: String
+    }
+
     private static var fixtures: Fixtures!
 
     override class func setUp() {
@@ -154,6 +167,12 @@ final class ParityTests: XCTestCase {
 
         // The bundled drag term is the one finding #1 hangs on.
         assertClose(SLA.kOverM, c["k_over_m"]!, rel: 1e-12, "k/m")
+
+        assertClose(SLA.smashPoorBelow, c["SMASH_POOR_BELOW"]!, "smash poor")
+        assertClose(SLA.smashGoodLo, c["SMASH_GOOD_LO"]!, "smash good lo")
+        assertClose(SLA.smashGoodHi, c["SMASH_GOOD_HI"]!, "smash good hi")
+        assertClose(SLA.slowpitchLaunchLo, c["SLOWPITCH_LAUNCH_LO"]!, "slow-pitch launch lo")
+        assertClose(SLA.slowpitchLaunchHi, c["SLOWPITCH_LAUNCH_HI"]!, "slow-pitch launch hi")
     }
 
     // MARK: - Least squares
@@ -268,6 +287,27 @@ final class ParityTests: XCTestCase {
         for c in Self.fixtures.vy0_from_hang_time {
             assertClose(FlightModel.vy0FromHangTime(c.hang_s), c.expected,
                         rel: 1e-12, "vy0(\(c.hang_s))")
+        }
+    }
+
+    // MARK: - Bat speed + smash factor (learned from b4-app)
+
+    func testBatMetricsMatchReference() {
+        for c in Self.fixtures.bat_metrics {
+            let bs = SLA.batSpeedMps(vxPxS: c.vx_px_s, vyPxS: c.vy_px_s,
+                                     scaleMPerPx: c.scale_m_per_px)
+            assertClose(bs, c.bat_speed_mps, rel: 1e-9, "\(c.name) bat speed m/s")
+            assertClose(bs * SLA.mphPerMps, c.bat_speed_mph, rel: 1e-9, "\(c.name) bat speed mph")
+
+            let smash = SLA.smashFactor(exitVeloMps: c.exit_velo_mps, batSpeedMps: bs)
+            switch (smash, c.smash_factor) {
+            case (nil, nil): break
+            case let (.some(a), .some(e)): assertClose(a, e, rel: 1e-9, "\(c.name) smash")
+            default: XCTFail("\(c.name): smash presence differs")
+            }
+
+            XCTAssertEqual(SmashQuality(smash: smash).rawValue, c.smash_quality,
+                           "\(c.name) smash quality")
         }
     }
 }

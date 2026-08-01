@@ -38,6 +38,8 @@ final class SwingEntity {
 
     var batAttackAngleDeg: Double?
     var batFrames: Int?
+    var batSpeedMph: Double?
+    var smashFactor: Double?
 
     var hangS: Double?
     var carryFt: Double?
@@ -71,6 +73,8 @@ final class SwingEntity {
         autoTriggered = dto.autoTriggered
         batAttackAngleDeg = dto.batAttackAngleDeg
         batFrames = dto.batFrames
+        batSpeedMph = dto.batSpeedMph
+        smashFactor = dto.smashFactor
         hangS = dto.hangS
         carryFt = dto.carryFt
         cameraDistanceFt = dto.cameraDistanceFt
@@ -101,6 +105,8 @@ final class SwingEntity {
         autoTriggered = dto.autoTriggered
         batAttackAngleDeg = dto.batAttackAngleDeg
         batFrames = dto.batFrames
+        batSpeedMph = dto.batSpeedMph
+        smashFactor = dto.smashFactor
         hangS = dto.hangS
         carryFt = dto.carryFt
         cameraDistanceFt = dto.cameraDistanceFt
@@ -133,6 +139,8 @@ final class SwingEntity {
         d.autoTriggered = autoTriggered
         d.batAttackAngleDeg = batAttackAngleDeg
         d.batFrames = batFrames
+        d.batSpeedMph = batSpeedMph
+        d.smashFactor = smashFactor
         d.hangS = hangS
         d.carryFt = carryFt
         d.cameraDistanceFt = cameraDistanceFt
