@@ -32,6 +32,8 @@ struct TrendsView: View {
                 }
             }
             .navigationTitle("Trends")
+            .scrollContentBackground(.hidden)
+            .background(Theme.black)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {

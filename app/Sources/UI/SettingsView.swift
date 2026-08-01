@@ -87,6 +87,8 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .scrollContentBackground(.hidden)
+            .background(Theme.black)
             .confirmationDialog("Delete every stored swing and clip?",
                                 isPresented: $showDeleteConfirm, titleVisibility: .visible) {
                 Button("Delete everything", role: .destructive) {

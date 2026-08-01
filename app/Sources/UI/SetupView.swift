@@ -29,28 +29,54 @@ struct SetupView: View {
     @State private var showTips = false
 
     var body: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-            CameraPreview(session: model.capture.session)
-                .ignoresSafeArea()
+        GeometryReader { geo in
+            let isLandscape = geo.size.width > geo.size.height
+            ZStack {
+                Color.black.ignoresSafeArea()
+                CameraPreview(session: model.capture.session)
+                    .ignoresSafeArea()
 
-            framingGuide
+                framingGuide
 
-            VStack(spacing: 10) {
-                topBar
-                levelBar
-                Spacer()
-                if wizard.showPlateMarkers { plateHint }
-                distanceCard
-                armButton
-            }
-            .padding(14)
+                if isLandscape {
+                    // Landscape is how the phone sits on the tripod: keep the
+                    // middle of the frame clear and park the work on the
+                    // right, level strip along the top.
+                    VStack(spacing: 10) {
+                        topBar
+                        levelBar
+                        Spacer()
+                    }
+                    .padding(14)
+                    HStack {
+                        Spacer()
+                        VStack(spacing: 10) {
+                            Spacer()
+                            if wizard.showPlateMarkers { plateHint }
+                            distanceCard
+                            armButton
+                        }
+                        .frame(width: 340)
+                        .padding(14)
+                    }
+                } else {
+                    VStack(spacing: 10) {
+                        topBar
+                        levelBar
+                        Spacer()
+                        if wizard.showPlateMarkers { plateHint }
+                        distanceCard
+                        armButton
+                    }
+                    .padding(14)
+                }
 
-            if wizard.showPlateMarkers {
-                GeometryReader { geo in
-                    PlateMarkers(start: plateBinding(\.plateStart),
-                                 end: plateBinding(\.plateEnd),
-                                 size: geo.size)
+                if wizard.showPlateMarkers {
+                    GeometryReader { markerGeo in
+                        PlateMarkers(start: plateBinding(\.plateStart),
+                                     end: plateBinding(\.plateEnd),
+                                     size: markerGeo.size)
+                    }
                 }
             }
         }

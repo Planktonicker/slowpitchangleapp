@@ -39,6 +39,8 @@ struct SwingDetailView: View {
         }
         .navigationTitle(swing.clipFilename ?? "Swing")
         .navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden)
+        .background(Theme.black)
         .task { await load() }
         .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }
     }

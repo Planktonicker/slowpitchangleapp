@@ -29,6 +29,8 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle("Swings")
+            .scrollContentBackground(.hidden)
+            .background(Theme.black)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { filterMenu }
                 ToolbarItem(placement: .topBarTrailing) {

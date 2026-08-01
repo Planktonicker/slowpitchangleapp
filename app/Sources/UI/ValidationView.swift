@@ -26,6 +26,8 @@ struct ValidationView: View {
                 g5Section
             }
             .navigationTitle("Validation")
+            .scrollContentBackground(.hidden)
+            .background(Theme.black)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

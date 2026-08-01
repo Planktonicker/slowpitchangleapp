@@ -8,6 +8,12 @@ import UIKit
 
 /// The field screen: preview, arm/disarm, and the last swing's numbers big
 /// enough to read from the batter's box.
+///
+/// Two deliberate layouts. Filming happens in landscape — the phone is
+/// mounted sideways on the tripod — so landscape is the primary design:
+/// status rail down the left, controls down the right, nothing covering the
+/// hitting zone in the middle of the frame. Portrait is for checking the
+/// phone in hand.
 struct CaptureView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showSetup = false
@@ -15,23 +21,20 @@ struct CaptureView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                CameraPreview(session: model.capture.session)
-                    .ignoresSafeArea()
-                    .onTapGesture { model.capture.lockExposureAndFocus() }
+            GeometryReader { geo in
+                let isLandscape = geo.size.width > geo.size.height
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    CameraPreview(session: model.capture.session)
+                        .ignoresSafeArea()
+                        .onTapGesture { model.capture.lockExposureAndFocus() }
 
-                VStack(spacing: 10) {
-                    topBar
-                    if let interruption = model.capture.interruptionMessage {
-                        StatChip(text: interruption, color: Theme.warn, filled: true)
+                    if isLandscape {
+                        landscapeOverlay
+                    } else {
+                        portraitOverlay
                     }
-                    Spacer()
-                    if let swing = model.lastSwing { lastSwingCard(swing) }
-                    if let progress = model.analysisProgress { analysisBar(progress) }
-                    controlBar
                 }
-                .padding(12)
             }
             .navigationBarHidden(true)
             .task { await begin() }
@@ -63,51 +66,110 @@ struct CaptureView: View {
         model.wizard.startSensors()
     }
 
-    // MARK: - Pieces
+    // MARK: - Layouts
 
-    private var topBar: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(model.capture.activeFormatDescription.isEmpty
-                     ? "STARTING CAMERA…" : model.capture.activeFormatDescription)
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.9))
-                HStack(spacing: 5) {
-                    if model.settings.requireHitter {
-                        StatChip(text: model.capture.hitterPresent ? "Hitter in frame" : "No hitter",
-                                 color: model.capture.hitterPresent ? Theme.pass : Theme.steel)
-                    }
-                    if model.capture.exposureLocked {
-                        StatChip(text: "AE/AF locked", color: Theme.pass)
-                    }
-                }
-                if model.capture.droppedFrameCount > 0 {
-                    // Dropped frames corrupt the constant frame interval every
-                    // measurement rests on, so this is never hidden.
-                    StatChip(text: "\(model.capture.droppedFrameCount) dropped frames",
-                             color: Theme.warn)
-                }
-                if model.capture.suppressedTriggerCount > 0 {
-                    StatChip(text: "\(model.capture.suppressedTriggerCount) noises ignored (no hitter)",
-                             color: Theme.steel)
-                }
+    private var portraitOverlay: some View {
+        VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                statusColumn
+                Spacer(minLength: 12)
+                sessionColumn
             }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 6) {
-                Picker("Setting", selection: $model.currentSetting) {
-                    ForEach(SwingSetting.allCases) { setting in
-                        Text(setting.displayName).tag(setting)
-                    }
-                }
-                .pickerStyle(.menu)
-                .tint(Theme.yellow)
-                .font(.system(size: 13, weight: .bold))
+            .padding(12)
+            .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 16))
 
-                triggerMeter
+            interruptionChip
+            Spacer()
+            resultStack
+            controlRow
+        }
+        .padding(14)
+    }
+
+    private var landscapeOverlay: some View {
+        HStack(alignment: .top, spacing: 14) {
+            // Left rail: what state the instrument is in.
+            VStack(alignment: .leading, spacing: 12) {
+                statusColumn
+                    .padding(12)
+                    .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 16))
+                interruptionChip
+                Spacer()
+                resultStack
+                    .frame(maxWidth: 440, alignment: .leading)
+            }
+
+            Spacer(minLength: 0)
+
+            // Right rail: session choices and the three controls, stacked
+            // where a thumb reaches them on a mounted phone.
+            VStack(alignment: .trailing, spacing: 12) {
+                sessionColumn
+                    .padding(12)
+                    .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 16))
+                Spacer()
+                controlColumn
+                    .frame(width: 190)
             }
         }
-        .padding(10)
-        .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
+        .padding(14)
+    }
+
+    // MARK: - Shared pieces
+
+    private var statusColumn: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(model.capture.activeFormatDescription.isEmpty
+                 ? "STARTING CAMERA…" : model.capture.activeFormatDescription)
+                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.9))
+            HStack(spacing: 6) {
+                if model.settings.requireHitter {
+                    StatChip(text: model.capture.hitterPresent ? "Hitter in frame" : "No hitter",
+                             color: model.capture.hitterPresent ? Theme.pass : Theme.steel)
+                }
+                if model.capture.exposureLocked {
+                    StatChip(text: "AE/AF locked", color: Theme.pass)
+                }
+            }
+            if model.capture.droppedFrameCount > 0 {
+                // Dropped frames corrupt the constant frame interval every
+                // measurement rests on, so this is never hidden.
+                StatChip(text: "\(model.capture.droppedFrameCount) dropped frames",
+                         color: Theme.warn)
+            }
+            if model.capture.suppressedTriggerCount > 0 {
+                StatChip(text: "\(model.capture.suppressedTriggerCount) noises ignored (no hitter)",
+                         color: Theme.steel)
+            }
+        }
+    }
+
+    private var sessionColumn: some View {
+        VStack(alignment: .trailing, spacing: 8) {
+            Picker("Setting", selection: $model.currentSetting) {
+                ForEach(SwingSetting.allCases) { setting in
+                    Text(setting.displayName).tag(setting)
+                }
+            }
+            .pickerStyle(.menu)
+            .tint(Theme.yellow)
+            .font(.system(size: 13, weight: .bold))
+
+            triggerMeter
+        }
+    }
+
+    @ViewBuilder private var interruptionChip: some View {
+        if let interruption = model.capture.interruptionMessage {
+            StatChip(text: interruption, color: Theme.warn, filled: true)
+        }
+    }
+
+    /// Last swing + analysis progress, stacked above the controls.
+    @ViewBuilder private var resultStack: some View {
+        if let swing = model.lastSwing { lastSwingCard(swing) }
+        if let progress = model.analysisProgress { analysisBar(progress) }
     }
 
     /// Live contact-impulse level against the trigger threshold — the same
@@ -131,7 +193,7 @@ struct CaptureView: View {
 
     private func lastSwingCard(_ swing: SwingDTO) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top) {
+            HStack(alignment: .top, spacing: 12) {
                 MetricTile(label: "Launch",
                            value: String(format: "%.1f", swing.launchAngleDeg),
                            unit: "°")
@@ -172,36 +234,47 @@ struct CaptureView: View {
                 .tint(Theme.yellow)
         }
         .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
     }
 
-    private var controlBar: some View {
-        HStack(spacing: 8) {
-            Button {
-                showSetup = true
-            } label: {
-                Text("Set up")
-            }
-            .buttonStyle(OutlineButtonStyle())
-            .frame(width: 96)
+    // MARK: - Controls (one set of buttons, two arrangements)
 
-            Button {
-                model.capture.isArmed ? model.disarm() : model.arm()
-            } label: {
-                Text(model.capture.isArmed ? "● Armed" : "Arm")
-            }
-            .buttonStyle(SlabButtonStyle(fill: model.capture.isArmed ? Theme.fail : Theme.yellow,
-                                         textColor: model.capture.isArmed ? .white : .black))
-            .disabled(model.capture.isRecordingClip)
-
-            Button {
-                model.triggerManually()
-            } label: {
-                Text("Manual")
-            }
+    private var setupButton: some View {
+        Button { showSetup = true } label: { Text("Set up") }
             .buttonStyle(OutlineButtonStyle())
-            .frame(width: 96)
+    }
+
+    private var armButton: some View {
+        Button {
+            model.capture.isArmed ? model.disarm() : model.arm()
+        } label: {
+            Text(model.capture.isArmed ? "● Armed" : "Arm")
+        }
+        .buttonStyle(SlabButtonStyle(fill: model.capture.isArmed ? Theme.fail : Theme.yellow,
+                                     textColor: model.capture.isArmed ? .white : .black))
+        .disabled(model.capture.isRecordingClip)
+    }
+
+    private var manualButton: some View {
+        Button { model.triggerManually() } label: { Text("Manual") }
+            .buttonStyle(OutlineButtonStyle())
             .disabled(model.capture.isRecordingClip)
+    }
+
+    private var controlRow: some View {
+        HStack(spacing: 10) {
+            setupButton.frame(width: 96)
+            armButton
+            manualButton.frame(width: 96)
+        }
+    }
+
+    private var controlColumn: some View {
+        VStack(spacing: 10) {
+            armButton
+            manualButton
+            setupButton
         }
     }
 }

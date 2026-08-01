@@ -24,6 +24,8 @@ struct MetricTile: View {
                     .font(Theme.numeral(38))
                     .foregroundStyle(tint)
                     .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
                 Text(unit)
                     .font(Theme.label(12))
                     .foregroundStyle(Theme.steel)
