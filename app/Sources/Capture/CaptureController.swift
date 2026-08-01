@@ -5,6 +5,7 @@
 import AVFoundation
 import Combine
 import CoreMedia
+import CoreVideo
 import Foundation
 
 /// Owns the camera: 240fps capture, the rolling pre-roll ring, the audio
@@ -31,9 +32,19 @@ final class CaptureController: NSObject, ObservableObject {
     @Published private(set) var droppedFrameCount = 0
     @Published private(set) var isRecordingClip = false
     @Published private(set) var exposureLocked = false
+    /// A person is currently detected in frame (pose gate, ~10 Hz).
+    @Published private(set) var hitterPresent = false
+    /// Audio impulses that fired with nobody in frame and were ignored.
+    @Published private(set) var suppressedTriggerCount = 0
+    /// Non-nil while the system holds the camera (phone call, another app).
+    @Published private(set) var interruptionMessage: String?
     @Published var isArmed = false {
         didSet { pipelineQueue.async { [weak self] in self?.syncArmed() } }
     }
+
+    /// When true, an audio trigger only records if a person was seen in the
+    /// last ~1.5 s. Synced from Settings; manual capture always bypasses it.
+    var requireHitterToTrigger = true
 
     /// Fired on the main queue once a swing has been written to disk.
     var onClip: ((ClipRecorder.Output) -> Void)?
@@ -54,13 +65,73 @@ final class CaptureController: NSObject, ObservableObject {
     private let audioRing = SampleRing(maxDuration: SLA.preRollS + 0.5, keyframeAligned: false)
     private let recorder = ClipRecorder()
     private let trigger = ContactTrigger()
+    private let presenceGate = HumanPresenceGate()
     private var clipCounter = 0
+    private var videoFrameCounter = 0
+    /// Newest camera frame, for on-demand measurements (ball-size setup).
+    /// Touched only on `videoQueue`.
+    private var latestFrame: CVPixelBuffer?
+    private var notificationTokens: [NSObjectProtocol] = []
 
     override init() {
         super.init()
         trigger.onContact = { [weak self] pts in
-            self?.pipelineQueue.async { self?.startClip(contactPTS: pts) }
+            self?.pipelineQueue.async { self?.startClip(contactPTS: pts, gated: true) }
         }
+        presenceGate.onPresenceChange = { [weak self] present in
+            self?.hitterPresent = present
+        }
+        installInterruptionObservers()
+    }
+
+    deinit {
+        for token in notificationTokens {
+            NotificationCenter.default.removeObserver(token)
+        }
+    }
+
+    /// The camera can be taken away at any time — a phone call, another app,
+    /// the system. Without these observers that manifests as a silently black
+    /// preview; with them the UI says what happened and the session restarts
+    /// itself when the camera comes back.
+    private func installInterruptionObservers() {
+        let center = NotificationCenter.default
+        notificationTokens.append(center.addObserver(
+            forName: AVCaptureSession.wasInterruptedNotification,
+            object: session, queue: .main
+        ) { [weak self] _ in
+            self?.interruptionMessage = "Camera paused by the system — waiting to get it back…"
+        })
+        notificationTokens.append(center.addObserver(
+            forName: AVCaptureSession.interruptionEndedNotification,
+            object: session, queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.interruptionMessage = nil
+            // The session usually resumes on its own; kick it if it didn't.
+            self.sessionQueue.async {
+                if !self.session.isRunning { self.session.startRunning() }
+            }
+        })
+        notificationTokens.append(center.addObserver(
+            forName: AVCaptureSession.runtimeErrorNotification,
+            object: session, queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            let error = note.userInfo?[AVCaptureSessionErrorKey] as? NSError
+            self.interruptionMessage = "Camera error — restarting…"
+            // One automatic recovery attempt after a beat.
+            self.sessionQueue.asyncAfter(deadline: .now() + 0.5) {
+                if !self.session.isRunning { self.session.startRunning() }
+                DispatchQueue.main.async {
+                    if self.session.isRunning {
+                        self.interruptionMessage = nil
+                    } else {
+                        self.setStatus(.failed(error?.localizedDescription ?? "camera failed"))
+                    }
+                }
+            }
+        })
     }
 
     // MARK: - Permissions
@@ -238,12 +309,31 @@ final class CaptureController: NSObject, ObservableObject {
 
     /// Force a clip without waiting for a contact impulse — the escape hatch
     /// for a venue where G5 fails, and how the cage gets used if its acoustics
-    /// defeat the trigger.
+    /// defeat the trigger. Bypasses the hitter gate: a human pressed it.
     func triggerManually() {
         pipelineQueue.async { [weak self] in
             guard let self else { return }
             let now = CMClockGetTime(CMClockGetHostTimeClock())
-            self.startClip(contactPTS: now)
+            self.startClip(contactPTS: now, gated: false)
+        }
+    }
+
+    /// Measure the ball in the newest camera frame — the one-tap setup path.
+    /// Finds the largest ball-coloured blob at rest and hands back its
+    /// sub-pixel diameter. Completion on the main queue.
+    func measureBall(detector: DetectorSettings,
+                     completion: @escaping (Double?) -> Void) {
+        videoQueue.async { [weak self] in
+            guard let self, let frame = self.latestFrame else {
+                DispatchQueue.main.async { completion(nil) }
+                return
+            }
+            let diameter = PixelImage.withImage(frame) { img -> Double? in
+                let candidates = BallDetector.detect(image: img, frame: 0, t: 0,
+                                                     settings: detector)
+                return candidates.map(\.diameterPx).max()
+            } ?? nil
+            DispatchQueue.main.async { completion(diameter) }
         }
     }
 
@@ -252,9 +342,17 @@ final class CaptureController: NSObject, ObservableObject {
         if isArmed { trigger.reset() }
     }
 
-    private func startClip(contactPTS: CMTime) {
+    private func startClip(contactPTS: CMTime, gated: Bool) {
         guard !recorder.isRecording else { return }
         guard !videoRing.isEmpty else { return }
+        // The no-human false trigger from field testing: a sharp noise with
+        // nobody in frame. Recording it would waste a clip AND corrupt G1
+        // with a clip that never contained a swing, so it is suppressed —
+        // counted, so the miss is visible, but never written to disk.
+        if gated && requireHitterToTrigger && !presenceGate.recentlyPresent {
+            DispatchQueue.main.async { self.suppressedTriggerCount += 1 }
+            return
+        }
         trigger.isArmed = false
         recorder.begin(videoRing: videoRing.samples,
                        audioRing: audioRing.samples,
@@ -321,6 +419,13 @@ extension CaptureController: AVCaptureVideoDataOutputSampleBufferDelegate,
                        from connection: AVCaptureConnection) {
         if output === videoOutput {
             guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+            latestFrame = pb
+            // Feed the pose gate roughly every 100 ms — every 240fps frame
+            // would be waste; presence does not change at 240 Hz.
+            videoFrameCounter += 1
+            if videoFrameCounter % max(1, Int(fps / 10)) == 0 {
+                presenceGate.submit(pixelBuffer: pb)
+            }
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             let duration = CMSampleBufferGetDuration(sampleBuffer)
             encoder?.encode(pixelBuffer: pb, pts: pts, duration: duration)

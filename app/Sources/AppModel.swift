@@ -20,7 +20,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var lastSwing: SwingDTO?
     @Published var banner: Banner?
     @Published var settings = AppSettings.load() {
-        didSet { settings.save() }
+        didSet {
+            settings.save()
+            capture.requireHitterToTrigger = settings.requireHitter
+        }
     }
 
     struct Banner: Identifiable, Equatable {
@@ -75,6 +78,7 @@ final class AppModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        capture.requireHitterToTrigger = settings.requireHitter
         reload()
     }
 
@@ -94,7 +98,7 @@ final class AppModel: ObservableObject {
     func arm() {
         guard wizard.isArmingAllowed else {
             banner = Banner(kind: .warning,
-                            text: wizard.blockingReason ?? "Finish the placement wizard first.")
+                            text: wizard.blockingReason ?? "Finish camera setup first.")
             return
         }
         capture.isArmed = true

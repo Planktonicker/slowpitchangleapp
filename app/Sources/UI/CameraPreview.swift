@@ -2,9 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Full terms in LICENSE at the repository root. No warranty.
 
-import ARKit
 import AVFoundation
-import SceneKit
 import SwiftUI
 import UIKit
 
@@ -53,27 +51,5 @@ struct CameraPreview: UIViewRepresentable {
                 connection.videoRotationAngle = angle
             }
         }
-    }
-}
-
-/// ARKit preview for the distance step of the wizard.
-///
-/// The sensor owns the `ARSession` and keeps running it; this view only
-/// renders it, so moving between wizard steps does not restart tracking.
-struct ARPreview: UIViewRepresentable {
-    let session: ARSession
-
-    func makeUIView(context: Context) -> ARSCNView {
-        let view = ARSCNView()
-        view.session = session
-        view.automaticallyUpdatesLighting = true
-        // Feature points make it obvious when there is too little texture for
-        // ARKit to lock on, which is the usual cause of a bad distance.
-        view.debugOptions = [.showFeaturePoints]
-        return view
-    }
-
-    func updateUIView(_ view: ARSCNView, context: Context) {
-        if view.session !== session { view.session = session }
     }
 }

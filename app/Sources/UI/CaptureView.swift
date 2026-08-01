@@ -6,10 +6,11 @@ import AVFoundation
 import SwiftUI
 import UIKit
 
-/// The field screen: preview, arm/disarm, and the last swing's numbers.
+/// The field screen: preview, arm/disarm, and the last swing's numbers big
+/// enough to read from the batter's box.
 struct CaptureView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var showWizard = false
+    @State private var showSetup = false
     @State private var permissionDenied = false
 
     var body: some View {
@@ -20,20 +21,23 @@ struct CaptureView: View {
                     .ignoresSafeArea()
                     .onTapGesture { model.capture.lockExposureAndFocus() }
 
-                VStack {
+                VStack(spacing: 10) {
                     topBar
+                    if let interruption = model.capture.interruptionMessage {
+                        StatChip(text: interruption, color: Theme.warn, filled: true)
+                    }
                     Spacer()
                     if let swing = model.lastSwing { lastSwingCard(swing) }
                     if let progress = model.analysisProgress { analysisBar(progress) }
                     controlBar
                 }
-                .padding()
+                .padding(12)
             }
             .navigationBarHidden(true)
             .task { await begin() }
             .onDisappear { model.stopCapture() }
-            .sheet(isPresented: $showWizard) {
-                WizardView().environmentObject(model)
+            .sheet(isPresented: $showSetup) {
+                SetupView().environmentObject(model)
             }
             .alert("Camera and microphone access needed",
                    isPresented: $permissionDenied) {
@@ -47,6 +51,7 @@ struct CaptureView: View {
                 Text("SwingLab films at 240fps and listens for bat-on-ball contact. Both stay on this device.")
             }
         }
+        .preferredColorScheme(.dark)
     }
 
     private func begin() async {
@@ -62,22 +67,29 @@ struct CaptureView: View {
 
     private var topBar: some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(model.capture.activeFormatDescription.isEmpty
-                     ? "starting camera…" : model.capture.activeFormatDescription)
-                    .font(.caption.monospaced())
+                     ? "STARTING CAMERA…" : model.capture.activeFormatDescription)
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.9))
+                HStack(spacing: 5) {
+                    if model.settings.requireHitter {
+                        StatChip(text: model.capture.hitterPresent ? "Hitter in frame" : "No hitter",
+                                 color: model.capture.hitterPresent ? Theme.pass : Theme.steel)
+                    }
+                    if model.capture.exposureLocked {
+                        StatChip(text: "AE/AF locked", color: Theme.pass)
+                    }
+                }
                 if model.capture.droppedFrameCount > 0 {
                     // Dropped frames corrupt the constant frame interval every
                     // measurement rests on, so this is never hidden.
-                    Label("\(model.capture.droppedFrameCount) dropped frames",
-                          systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
+                    StatChip(text: "\(model.capture.droppedFrameCount) dropped frames",
+                             color: Theme.warn)
                 }
-                if model.capture.exposureLocked {
-                    Label("AE/AF locked", systemImage: "lock.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.green)
+                if model.capture.suppressedTriggerCount > 0 {
+                    StatChip(text: "\(model.capture.suppressedTriggerCount) noises ignored (no hitter)",
+                             color: Theme.steel)
                 }
             }
             Spacer()
@@ -88,14 +100,14 @@ struct CaptureView: View {
                     }
                 }
                 .pickerStyle(.menu)
-                .tint(.white)
+                .tint(Theme.yellow)
+                .font(.system(size: 13, weight: .bold))
 
                 triggerMeter
             }
         }
-        .foregroundStyle(.white)
         .padding(10)
-        .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 12))
+        .background(.black.opacity(0.5), in: RoundedRectangle(cornerRadius: 14))
     }
 
     /// Live contact-impulse level against the trigger threshold — the same
@@ -104,92 +116,92 @@ struct CaptureView: View {
     private var triggerMeter: some View {
         let db = model.capture.triggerLevelDb
         let fraction = max(0, min(1, db / max(1, model.settings.triggerDb * 1.5)))
-        return VStack(alignment: .trailing, spacing: 2) {
-            Text(String(format: "%.0f dB over floor", max(0, db)))
-                .font(.caption2.monospacedDigit())
+        return VStack(alignment: .trailing, spacing: 3) {
+            Text(String(format: "%.0f dB", max(0, db)))
+                .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                .foregroundStyle(.white)
             ZStack(alignment: .leading) {
-                Capsule().fill(.white.opacity(0.25)).frame(width: 110, height: 5)
+                Capsule().fill(.white.opacity(0.25)).frame(width: 110, height: 6)
                 Capsule()
-                    .fill(db >= model.settings.triggerDb ? Color.green : Color.yellow)
-                    .frame(width: 110 * fraction, height: 5)
+                    .fill(db >= model.settings.triggerDb ? Theme.pass : Theme.yellow)
+                    .frame(width: 110 * fraction, height: 6)
             }
         }
     }
 
     private func lastSwingCard(_ swing: SwingDTO) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                MetricTile(label: "Launch angle",
+            HStack(alignment: .top) {
+                MetricTile(label: "Launch",
                            value: String(format: "%.1f", swing.launchAngleDeg),
                            unit: "°")
                 MetricTile(label: "Exit velo",
                            value: String(format: "%.1f", swing.exitVeloMph),
                            unit: "mph")
                 if let attack = swing.batAttackAngleDeg {
-                    MetricTile(label: "Attack angle",
+                    MetricTile(label: "Attack",
                                value: String(format: "%.1f", attack),
                                unit: "°",
-                               tint: .secondary)
+                               tint: .white)
                 }
             }
             if swing.trackedFrames == 0 {
-                Label("No ball track in that clip", systemImage: "eye.slash")
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                StatChip(text: "No ball track in that clip", color: Theme.warn)
             } else {
-                HStack {
+                HStack(spacing: 8) {
                     Text("\(swing.trackedFrames) frames")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(Theme.steel)
                     ConfidenceRow(flags: swing.flags)
                 }
             }
         }
-        .padding(12)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16)
+            .strokeBorder(Theme.yellow.opacity(0.6), lineWidth: 1.5))
     }
 
     private func analysisBar(_ progress: Double) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Analyzing swing…").font(.caption)
+        VStack(alignment: .leading, spacing: 5) {
+            Text("ANALYZING SWING…")
+                .font(Theme.label(11)).tracking(1.5)
+                .foregroundStyle(Theme.yellow)
             ProgressView(value: progress)
+                .tint(Theme.yellow)
         }
         .padding(12)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var controlBar: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             Button {
-                showWizard = true
+                showSetup = true
             } label: {
-                Label("Placement", systemImage: "scope")
-                    .frame(maxWidth: .infinity)
+                Text("Set up")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(OutlineButtonStyle())
+            .frame(width: 96)
 
             Button {
                 model.capture.isArmed ? model.disarm() : model.arm()
             } label: {
-                Label(model.capture.isArmed ? "Armed" : "Arm",
-                      systemImage: model.capture.isArmed ? "record.circle.fill" : "record.circle")
-                    .frame(maxWidth: .infinity)
+                Text(model.capture.isArmed ? "● Armed" : "Arm")
             }
-            .buttonStyle(.borderedProminent)
-            .tint(model.capture.isArmed ? .red : .accentColor)
+            .buttonStyle(SlabButtonStyle(fill: model.capture.isArmed ? Theme.fail : Theme.yellow,
+                                         textColor: model.capture.isArmed ? .white : .black))
             .disabled(model.capture.isRecordingClip)
 
             Button {
                 model.triggerManually()
             } label: {
-                Label("Manual", systemImage: "hand.tap")
-                    .frame(maxWidth: .infinity)
+                Text("Manual")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(OutlineButtonStyle())
+            .frame(width: 96)
             .disabled(model.capture.isRecordingClip)
         }
-        .padding(10)
-        .background(.black.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
-        .tint(.white)
     }
 }

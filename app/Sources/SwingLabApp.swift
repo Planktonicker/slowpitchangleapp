@@ -9,6 +9,7 @@ struct SwingLabApp: App {
     @StateObject private var model: AppModel
 
     init() {
+        Theme.installAppearance()
         // A storage failure must not brick the app in a car park an hour from
         // home: fall back to memory, and the UI says so.
         let store: SwingStoring

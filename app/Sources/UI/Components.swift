@@ -5,26 +5,28 @@
 import SwiftUI
 import UIKit
 
-/// A single big number with its unit and label.
+/// A single scoreboard number with its unit and label. Loud on purpose —
+/// these get read from twenty feet away in sunlight.
 struct MetricTile: View {
     var label: String
     var value: String
     var unit: String
-    var tint: Color = .primary
+    var tint: Color = Theme.yellow
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 1) {
             Text(label.uppercased())
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                .font(Theme.label(10))
+                .tracking(1.2)
+                .foregroundStyle(Theme.steel)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(value)
-                    .font(.system(.title, design: .rounded).weight(.semibold))
+                    .font(Theme.numeral(38))
                     .foregroundStyle(tint)
                     .monospacedDigit()
                 Text(unit)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(Theme.label(12))
+                    .foregroundStyle(Theme.steel)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -37,10 +39,12 @@ struct GateBadge: View {
 
     var body: some View {
         Text(text)
-            .font(.caption2.weight(.bold))
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(colour.opacity(0.18), in: Capsule())
+            .font(.system(size: 11, weight: .black, design: .rounded))
+            .tracking(0.5)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(colour.opacity(0.2), in: Capsule())
+            .overlay(Capsule().strokeBorder(colour.opacity(0.7), lineWidth: 1))
             .foregroundStyle(colour)
     }
 
@@ -54,9 +58,9 @@ struct GateBadge: View {
 
     private var colour: Color {
         switch passes {
-        case .some(true): return .green
-        case .some(false): return .red
-        case nil: return .secondary
+        case .some(true): return Theme.pass
+        case .some(false): return Theme.fail
+        case nil: return Theme.steel
         }
     }
 }
@@ -71,11 +75,11 @@ struct FlagChip: View {
             showExplanation.toggle()
         } label: {
             Text(flag.rawValue.replacingOccurrences(of: "_", with: " ").lowercased())
-                .font(.caption2.weight(.medium))
+                .font(.system(size: 10, weight: .bold, design: .rounded))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(Color.orange.opacity(0.18), in: Capsule())
-                .foregroundStyle(.orange)
+                .background(Theme.warn.opacity(0.18), in: Capsule())
+                .foregroundStyle(Theme.warn)
         }
         .buttonStyle(.plain)
         .popover(isPresented: $showExplanation) {
@@ -95,8 +99,8 @@ struct ConfidenceRow: View {
     var body: some View {
         if flags.isEmpty {
             Label("High confidence", systemImage: "checkmark.seal.fill")
-                .font(.caption)
-                .foregroundStyle(.green)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .foregroundStyle(Theme.pass)
         } else {
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 4) { chips }

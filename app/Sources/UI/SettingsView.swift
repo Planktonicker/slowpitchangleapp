@@ -28,6 +28,9 @@ struct SettingsView: View {
                 }
 
                 Section("Trigger") {
+                    Toggle("Only trigger with a person in frame", isOn: $model.settings.requireHitter)
+                    Text("Uses on-device body-pose detection to ignore bangs and rattles when nobody is at the plate. Suppressed noises are counted on the capture screen. Manual capture always works.")
+                        .font(.caption).foregroundStyle(.secondary)
                     stepper("Threshold over noise floor", value: $model.settings.triggerDb,
                             range: 6...30, step: 1, unit: "dB")
                     stepper("Pre-roll", value: $model.settings.preRollS,

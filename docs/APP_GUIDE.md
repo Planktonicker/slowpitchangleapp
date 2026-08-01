@@ -55,28 +55,30 @@ that is the whole point of them.
 
 ## 2. Set the camera up
 
-Same geometry as [CAPTURE_PROTOCOL.md](CAPTURE_PROTOCOL.md), except the app
-checks it instead of trusting you.
+Same geometry as [CAPTURE_PROTOCOL.md](CAPTURE_PROTOCOL.md), but it is now one
+screen and needs no tape measure and no AR:
 
-1. Tripod perpendicular to the line of play, on the hitter's **open** side,
-   lens at roughly contact height.
-2. Open the app, **Capture** tab, tap **Placement**.
-3. **Level** — get the bubble green. Roll is fed into the maths as a
-   correction, so a small error is survivable. Tilt is not: a camera pointing
-   up or down turns the flight into a projection.
-4. **Distance** — aim the cross at the plate or tee. 15-20 ft, preferring 20.
-   Without ARKit, switch to manual entry and use the tape.
-5. **Plate scale** — drag the two handles onto the ends of home plate's front
-   edge (the 17 in one facing the pitcher). The app compares what it measures
-   against what the distance and lens geometry predict. This is a third scale
-   estimate, independent of the ball and of gravity, and it catches a wrong
-   distance before you hit anything.
-6. **Ready** — tap **Lock focus and exposure** aimed at the hitting zone, then
-   **Arm**.
+1. Tripod side-on, on the hitter's **open** side, lens at belt height,
+   6-7 big steps back. Tap the **?** on the setup screen for the diagram.
+2. Match the dashed guides: hitter fills the tall box, ball on the circle.
+3. Level the tripod until the bar goes green. Roll is fed into the maths as a
+   correction; tilt cannot be corrected, so the bar is strict about it.
+4. Put the ball on the tee and press **Tap the ball**. The app measures the
+   ball (known 3.82 in) against the lens field of view and derives the
+   distance itself. No plate? No problem — the ball is always there.
+   Alternatives under **Other**: mark home plate's 17 in front edge, or type
+   a paced-off distance.
+5. **Arm.** Focus and exposure lock automatically at that moment.
 
-Arming is blocked until level, distance and plate scale all pass. That is
-deliberate: every number is scaled from pixels, so a camera that moved between
-sessions silently changes the readings.
+Arming stays blocked until level and distance pass — every number is scaled
+from pixels, so a camera that moved between sessions silently changes the
+readings. 15-20 ft reads "Good"; 12-28 ft is accepted as "Workable".
+
+The app also refuses to auto-trigger unless a person has been seen in frame
+within the last ~1.5 s (on-device body-pose detection, ~10 checks a second).
+A slammed car door with nobody at the plate no longer becomes a "swing" — it
+is counted on the capture screen as an ignored noise instead. Manual capture
+always bypasses the gate. Settings → "Only trigger with a person in frame".
 
 ## 3. Hit
 

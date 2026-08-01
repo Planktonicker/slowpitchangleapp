@@ -16,6 +16,10 @@ struct AppSettings: Codable, Equatable {
     var preRollS = SLA.preRollS
     var postRollS = SLA.postRollS
     var direction: TrackBuilder.Direction = .auto
+    /// Audio triggers only fire when a person has been seen in frame within
+    /// the last second and a half. Kills the no-human false trigger; manual
+    /// capture always bypasses it.
+    var requireHitter = true
     var forceFallbackDetector = false
     /// Keep clips after analysis. Off would save space, but the whole point
     /// of Phase 0 is being able to go back to the footage when a number looks

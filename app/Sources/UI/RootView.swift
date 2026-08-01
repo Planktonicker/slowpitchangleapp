@@ -32,6 +32,8 @@ struct RootView: View {
                 .tabItem { Label("Settings", systemImage: "gearshape") }
                 .tag(Tab.settings)
         }
+        .tint(Theme.yellow)
+        .preferredColorScheme(.dark)
         .overlay(alignment: .top) {
             if let banner = model.banner {
                 BannerView(banner: banner) { model.banner = nil }
