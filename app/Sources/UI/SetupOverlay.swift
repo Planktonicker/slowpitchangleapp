@@ -51,8 +51,16 @@ struct SetupOverlay: View {
                 // not cover. Without this the ball-flight arrow and its label
                 // ran straight under the distance card in landscape, so the
                 // one thing the guide exists to say was the one thing hidden.
-                framingGuide(rightInset: isLandscape
-                             ? Double((Self.panelWidth + 28) / max(1, geo.size.width)) : 0)
+                framingGuide(
+                    // Only while the card is open. Collapsed, the column is a
+                    // header and a button in the bottom corner, and fencing off
+                    // 45% of the width for it shrank the flight arrow to a stub.
+                    rightInset: isLandscape && !cardCollapsed
+                        ? Double((Self.panelWidth + 28) / max(1, geo.size.width)) : 0,
+                    // Height of the top control block, so the flight arc passes
+                    // under the bubble level instead of through it.
+                    topInset: Double(Self.topBlockHeight(isLandscape: isLandscape)
+                                     / max(1, geo.size.height)))
 
                 if isLandscape {
                     VStack(spacing: 10) {
@@ -61,8 +69,12 @@ struct SetupOverlay: View {
                         Spacer()
                     }
                     .padding(14)
-                    HStack {
-                        Spacer()
+                    // The column sits on whichever side the ball flies toward,
+                    // because that is the side the guide leaves empty. Pinned
+                    // to the right it buried the batter, the tee and both
+                    // captions the moment the guide was mirrored.
+                    HStack(spacing: 0) {
+                        if model.settings.hitterOnLeft { Spacer(minLength: 0) }
                         VStack(spacing: 10) {
                             Spacer()
                             if wizard.showPlateMarkers { plateHint }
@@ -71,6 +83,7 @@ struct SetupOverlay: View {
                         }
                         .frame(width: Self.panelWidth)
                         .padding(14)
+                        if !model.settings.hitterOnLeft { Spacer(minLength: 0) }
                     }
                 } else {
                     VStack(spacing: 10) {
@@ -99,6 +112,15 @@ struct SetupOverlay: View {
     /// Width of the landscape control column. Named because the framing guide
     /// has to know it too — it draws around the panel, not under it.
     private static let panelWidth: CGFloat = 300
+
+    /// Vertical space the close/title/level block occupies at the top. Points,
+    /// not a fraction: it is the same stack of controls in both orientations,
+    /// and a fraction of a 393pt landscape height is a very different thing
+    /// from a fraction of an 852pt portrait one.
+    private static func topBlockHeight(isLandscape: Bool) -> CGFloat {
+        // 14 padding + 44 top bar + 10 spacing + 26 beam + 20 chip + slack.
+        isLandscape ? 124 : 132
+    }
 
     // MARK: - Pieces
 
@@ -160,9 +182,9 @@ struct SetupOverlay: View {
     /// a ball flying at the camera is foreshortened, reads slow, and gets
     /// flagged for depth motion. Hence hitter near one edge, tee in front of
     /// them, and most of the frame left empty for the ball to travel through.
-    private func framingGuide(rightInset: Double) -> some View {
+    private func framingGuide(rightInset: Double, topInset: Double) -> some View {
         GeometryReader { geo in
-            guideDrawing(in: geo.size, rightInset: rightInset)
+            guideDrawing(in: geo.size, rightInset: rightInset, topInset: topInset)
         }
         // Critical: the whole point of the overlay is that taps reach the
         // preview underneath so the user can tap the ball.
@@ -173,9 +195,10 @@ struct SetupOverlay: View {
     /// declares local helpers and returns explicitly, neither of which a result
     /// builder allows.
     ///
-    /// `rightInset` is the fraction of the width the control column covers.
-    /// Everything the guide draws stays left of it.
-    private func guideDrawing(in size: CGSize, rightInset: Double) -> some View {
+    /// `rightInset` and `topInset` are the fractions of the frame the control
+    /// panels cover. Everything the guide draws stays out of them, so nothing
+    /// has to be nudged by hand when a panel changes size.
+    private func guideDrawing(in size: CGSize, rightInset: Double, topInset: Double) -> some View {
         let w = size.width, h = size.height
         let isLandscape = w > h
         let flip = model.settings.hitterOnLeft ? 1.0 : -1.0
@@ -184,29 +207,30 @@ struct SetupOverlay: View {
         func py(_ ny: Double) -> Double { ny * h }
         func pt(_ nx: Double, _ ny: Double) -> CGPoint { CGPoint(x: px(nx), y: py(ny)) }
 
-        // The outline is sized from the real optics, so standing the hitter
-        // inside it *is* the distance check: if they fit, the camera is about
-        // 5 m away. Guessing a fraction of the screen instead would be wrong
-        // by a factor of two between portrait and landscape, because filling
-        // the screen crops a different amount of the sensor in each.
-        let figureH = batterHeightFraction(isLandscape: isLandscape,
-                                           screenAspect: w / max(1, h))
+        // Both the size AND the height in frame come from the real optics, so
+        // standing the hitter inside the outline *is* the distance check.
+        // Guessing either would be wrong by a factor of two between portrait
+        // and landscape, because filling the screen crops a different amount of
+        // the sensor in each.
+        let g = guideGeometry(isLandscape: isLandscape, screenAspect: w / max(1, h))
+        let figureH = g.heightFraction
         let figureW = figureH * BatterOutline.aspect * (h / max(1, w))
-        // Where the hitter's feet go. Not a style choice — it is whatever the
-        // panels leave free. In landscape they sit in a column on the right, so
-        // the full height is available bar the floating tab bar. In portrait
-        // they stack across the bottom, and at 0.90 the batter and the caption
-        // under them were simply drawn behind the distance card.
-        let footY = isLandscape ? 0.84 : (cardCollapsed ? 0.74 : 0.50)
+        // Where a standing hitter's feet actually land, not where a panel
+        // leaves room. An earlier version picked this from the panel layout and
+        // switched between two values, so the whole guide jumped down the
+        // screen the moment the distance card collapsed. The panels are drawn
+        // over the guide instead — that is what the z-order is for.
+        let footY = g.footFraction
         let headY = footY - figureH
         let centreX = 0.22
         // Contact happens around belt height, a little over half way up.
         let ballY = footY - figureH * 0.46
         let teeX = centreX + figureW * 0.62
-        // Where the flight arrow may run to. In landscape the control column
-        // owns the right of the screen, so the arrow stops before it.
+        // Where the flight arrow may run. `rightInset` keeps it clear of the
+        // control column; `topInset` keeps the arc from climbing through the
+        // bubble level, which a bare 0.10 screen-top floor did not.
         let flightEndX = min(0.93, 1 - rightInset - 0.04)
-        let arrowTopY = max(0.10, ballY - (isLandscape ? 0.30 : 0.22))
+        let arrowTopY = max(topInset + 0.03, ballY - (isLandscape ? 0.30 : 0.22))
 
         return ZStack {
             BatterOutline()
@@ -227,9 +251,11 @@ struct SetupOverlay: View {
                 .strokeBorder(Theme.yellow, lineWidth: 2.5)
                 .frame(width: 0.042 * min(w, h), height: 0.042 * min(w, h))
                 .position(pt(teeX, ballY))
-            // Above the ball, not below: below is where the hitter's caption
-            // goes, and the two labels collided into "STAND HERETEE".
-            guideLabel("BALL ON TEE", at: pt(teeX, ballY - 0.055), small: true)
+            // One short word, clear of the artwork. "BALL ON TEE" was long
+            // enough to reach back across the batter's shoulder, and below the
+            // ball is where the hitter's caption goes — that pair collided into
+            // "STAND HERETEE".
+            guideLabel("BALL", at: pt(teeX, ballY - 0.075), small: true)
 
             // Where the ball goes — the whole reason the frame is composed
             // this way, and the thing the old guide never said.
@@ -253,42 +279,63 @@ struct SetupOverlay: View {
             }
             .stroke(Theme.yellow,
                     style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-            // Under the arc, not above it: above lands on the level bar in
-            // landscape, and the arc itself runs through the middle.
+            // Under the arc: above it lands on the level bar in landscape, and
+            // the arc itself runs through the middle.
             guideLabel("BALL FLIES THIS WAY",
                        at: pt((teeX + flightEndX) / 2, min(footY - 0.03, ballY + 0.07)))
 
-            // One caption, not two stacked ones. Two lines under the feet is
-            // what pushed the second off the bottom of the picture.
-            guideLabel("STAND HERE · FACING THE CAMERA",
-                       at: pt(centreX, footY + 0.042))
+            // Two short lines rather than one long one. A single 30-character
+            // caption centred on the batter — who stands near the edge, which
+            // is the whole point of the framing — ran off the side of the
+            // screen in portrait, and nothing clips or wraps a positioned Text.
+            VStack(spacing: 1) {
+                Text("STAND HERE")
+                    .font(Theme.label(11)).tracking(1.4)
+                Text("FACING CAMERA")
+                    .font(Theme.label(9)).tracking(1.2)
+                    .opacity(0.8)
+            }
+            .foregroundStyle(Theme.yellow)
+            .shadow(color: .black.opacity(0.9), radius: 3)
+            .position(pt(centreX, min(0.95, footY + 0.045)))
         }
     }
 
-    /// How tall a 1.75 m hitter standing 5 m away actually appears, as a
-    /// fraction of screen height.
+    /// How a 1.75 m hitter standing 5.25 m from a level, contact-height camera
+    /// appears: how tall, as a fraction of screen height, and where their feet
+    /// land in the frame.
     ///
-    /// The preview fills the screen, which crops the sensor differently in each
-    /// orientation: in portrait the screen's long axis spans the camera's full
-    /// horizontal field of view, while in landscape the screen's *width* spans
-    /// it and the visible vertical angle is narrowed by the screen's aspect
-    /// ratio. The same person is therefore about a third of the height in
-    /// portrait and roughly two thirds in landscape — a fixed fraction would be
-    /// wrong in one of them, and the outline would quietly teach the wrong
-    /// distance.
-    private func batterHeightFraction(isLandscape: Bool, screenAspect: Double) -> Double {
+    /// Both numbers come from the same projection, which is the point — the
+    /// outline is a calibration target, so its size and its position have to be
+    /// the same claim about the same geometry. The preview fills the screen and
+    /// crops the sensor differently in each orientation: in portrait the
+    /// screen's long axis spans the camera's full horizontal field of view,
+    /// while in landscape the screen's *width* spans it and the visible
+    /// vertical angle is narrowed by the screen's aspect ratio. The same person
+    /// is therefore about a third of the height in portrait and roughly two
+    /// thirds in landscape.
+    private func guideGeometry(isLandscape: Bool,
+                               screenAspect: Double) -> (heightFraction: Double, footFraction: Double) {
         let targetDistanceM = 5.25      // middle of the 4.5-6 m window
         let hitterHeightM = 1.75
+        let lensHeightM = 1.1           // contact height, per CAPTURE_PROTOCOL
         let fov = capture.fieldOfViewDeg
-        guard fov > 5 else { return isLandscape ? 0.62 : 0.30 }
+        let fallback = (heightFraction: isLandscape ? 0.62 : 0.30,
+                        footFraction: isLandscape ? 0.80 : 0.64)
+        guard fov > 5 else { return fallback }
 
         let horizontalHalf = fov * .pi / 360
         let visibleVerticalHalf = isLandscape
             ? atan(tan(horizontalHalf) / max(0.1, screenAspect))
             : horizontalHalf
         let visibleMetres = 2 * targetDistanceM * tan(visibleVerticalHalf)
-        guard visibleMetres > 0.1 else { return isLandscape ? 0.62 : 0.30 }
-        return min(0.80, max(0.15, hitterHeightM / visibleMetres))
+        guard visibleMetres > 0.1 else { return fallback }
+
+        // The lens is at contact height, so the ground is `lensHeightM` below
+        // the optical axis — which is the centre of the frame.
+        let height = min(0.80, max(0.15, hitterHeightM / visibleMetres))
+        let foot = min(0.90, max(height + 0.12, 0.5 + lensHeightM / visibleMetres))
+        return (height, foot)
     }
 
     private func guideLabel(_ text: String, at point: CGPoint,

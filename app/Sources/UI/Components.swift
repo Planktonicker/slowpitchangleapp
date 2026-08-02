@@ -171,7 +171,7 @@ struct BannerView: View {
             Text(banner.text)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(.white)
-                .lineLimit(4)
+                .lineLimit(BannerMetrics.maxLines)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             Image(systemName: "xmark")
@@ -182,13 +182,14 @@ struct BannerView: View {
         .padding(.vertical, 10)
         .background(Theme.black.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(tint.opacity(0.8), lineWidth: 1.5))
+        // Gesture before the outer margin, or the bar swallows taps 12pt
+        // outside itself — over a camera preview where a tap means "measure
+        // the ball here", that is a stolen tap.
+        .contentShape(Rectangle())
+        // The whole bar dismisses, not a 12pt glyph.
+        .onTapGesture(perform: onDismiss)
         .frame(maxWidth: 620)
         .padding(.horizontal, 12)
-        // The whole bar dismisses, not a 12pt glyph. It lives over a camera
-        // preview whose taps mean "measure the ball here", so it has to be
-        // easy to get rid of and impossible to miss.
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onDismiss)
         .task(id: banner.id) {
             guard banner.kind != .error else { return }
             try? await Task.sleep(nanoseconds: 6_000_000_000)

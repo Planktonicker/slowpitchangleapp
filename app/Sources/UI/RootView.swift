@@ -34,7 +34,15 @@ struct RootView: View {
         }
         .tint(Theme.yellow)
         .preferredColorScheme(.dark)
-        .overlay(alignment: .top) {
+        // A safe-area inset, not an overlay. The banner draws on top of
+        // whatever tab is showing, so every screen it can cover has to move out
+        // of its way — and an overlay does not tell them to. Guessing the
+        // offset instead does not work either: the banner's height depends on
+        // how long the message is, and a fixed step-down that is right for one
+        // line covers the exception chips and the setup overlay's close button
+        // when it wraps to two. This reserves the height the banner actually
+        // measures, so both screens step down by exactly the right amount.
+        .safeAreaInset(edge: .top, spacing: 0) {
             if let banner = model.banner {
                 BannerView(banner: banner) { model.banner = nil }
                     .padding(.top, 6)

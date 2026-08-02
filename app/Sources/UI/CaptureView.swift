@@ -53,8 +53,12 @@ struct CaptureScreen: View {
     private var hudState: HUDState {
         if capture.interruptionMessage != nil { return .interrupted }
         if capture.isRecordingClip { return .recording }
-        if model.analysisProgress != nil { return .analysing }
+        // Armed outranks analysing. Analysis is background work on the last
+        // swing — the camera is still armed and still listening, so saying
+        // WORKING would misreport what the app is doing, and it also replaced
+        // the STOP button's meaning. Progress shows on the swing card instead.
         if capture.isArmed { return .armed }
+        if model.analysisProgress != nil { return .analysing }
         if capture.status != .running { return .starting }
         if wizard.scaleSource == .none { return .needsSetup }
         return .ready
@@ -95,7 +99,9 @@ struct CaptureScreen: View {
                     break
                 }
             }
-            .sheet(isPresented: $showStatus) { StatusSheet().environmentObject(model) }
+            .sheet(isPresented: $showStatus) {
+                StatusSheet(capture: capture, wizard: wizard).environmentObject(model)
+            }
             .alert("Camera and microphone access needed", isPresented: $permissionDenied) {
                 Button("Open Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -121,15 +127,9 @@ struct CaptureScreen: View {
             VStack(spacing: 0) {
                 ExceptionRibbon(chips: exceptionChips,
                                 onChipTap: { showStatus = true },
-                                settingMenu: AnyView(settingMenu))
+                                trailing: AnyView(persistentControls))
                     .padding(.horizontal, 16)
-                    // The transient banner is an overlay on the whole TabView
-                    // and lands here. Rather than letting the two draw through
-                    // each other — which is exactly how the top of the screen
-                    // became unreadable — the persistent row steps aside for
-                    // the temporary one.
-                    .padding(.top, model.banner == nil ? 4 : 62)
-                    .animation(.easeInOut(duration: 0.2), value: model.banner == nil)
+                    .padding(.top, 4)
                     .background(
                         LinearGradient(colors: [.black.opacity(0.8), .clear],
                                        startPoint: .top, endPoint: .bottom)
@@ -217,14 +217,18 @@ struct CaptureScreen: View {
                         Image(systemName: icon.symbol).font(.system(size: 17, weight: .bold))
                         Text(icon.caption).font(Theme.label(9)).tracking(0.5)
                     }
-                    .frame(width: 52, height: Self.controlHeight)
+                    .frame(width: 52)
                 }
-                .buttonStyle(OutlineButtonStyle(verticalPadding: 0, cornerRadius: 14, fillsHeight: true))
+                .buttonStyle(OutlineButtonStyle(verticalPadding: 0, cornerRadius: 14,
+                                                minHeight: Self.controlHeight))
                 .frame(width: 52)
                 .disabled(icon.disabled)
             }
-            primaryButton.frame(height: Self.controlHeight)
+            primaryButton
         }
+        // Nothing in this row may grow taller than the row. Left to itself a
+        // control with a flexible height takes the whole screen in portrait.
+        .frame(height: Self.controlHeight)
     }
 
     @ViewBuilder private var primaryButton: some View {
@@ -232,25 +236,30 @@ struct CaptureScreen: View {
         case .starting:
             Button {} label: { Text("Starting camera…") }
                 .buttonStyle(SlabButtonStyle(fill: Theme.surface, textColor: Theme.steel,
-                                             size: 14, verticalPadding: 0, fillsHeight: true))
+                                             size: 14, verticalPadding: 0, minHeight: Self.controlHeight))
                 .disabled(true)
         case .interrupted:
             Button { model.startCapture() } label: { Text("Retry") }
-                .buttonStyle(SlabButtonStyle(size: 17, verticalPadding: 0, fillsHeight: true))
+                .buttonStyle(SlabButtonStyle(size: 17, verticalPadding: 0, minHeight: Self.controlHeight))
         case .needsSetup:
             Button { openSetup() } label: { Text("1 · Set up camera") }
-                .buttonStyle(SlabButtonStyle(size: 15, verticalPadding: 0, fillsHeight: true))
+                .buttonStyle(SlabButtonStyle(size: 15, verticalPadding: 0, minHeight: Self.controlHeight))
         case .ready:
             Button { model.arm() } label: { Text("2 · Arm") }
-                .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 0, fillsHeight: true))
-        case .armed, .analysing:
+                .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 0, minHeight: Self.controlHeight))
+        case .armed:
             Button { model.disarm() } label: { Text("Stop") }
                 .buttonStyle(SlabButtonStyle(fill: Theme.fail, textColor: .white,
-                                             size: 19, verticalPadding: 0, fillsHeight: true))
+                                             size: 19, verticalPadding: 0, minHeight: Self.controlHeight))
+        case .analysing:
+            Button {} label: { Text("Measuring…") }
+                .buttonStyle(SlabButtonStyle(fill: Theme.surface, textColor: Theme.steel,
+                                             size: 15, verticalPadding: 0, minHeight: Self.controlHeight))
+                .disabled(true)
         case .recording:
             Button {} label: { Text("Stop") }
                 .buttonStyle(SlabButtonStyle(fill: Theme.fail, textColor: .white,
-                                             size: 19, verticalPadding: 0, fillsHeight: true))
+                                             size: 19, verticalPadding: 0, minHeight: Self.controlHeight))
                 .disabled(true)
         }
     }
@@ -261,7 +270,9 @@ struct CaptureScreen: View {
             return nil   // exactly one control when there is exactly one thing to do
         case .ready:
             return ("viewfinder", "FRAME", false, { openSetup() })
-        case .armed, .recording, .analysing:
+        case .analysing:
+            return nil   // not armed, so there is nothing to trigger manually
+        case .armed, .recording:
             return ("bolt.fill", "MANUAL", capture.isRecordingClip,
                     { model.triggerManually() })
         }
@@ -325,6 +336,29 @@ struct CaptureScreen: View {
             out.append(("\(Int(capture.fps)) fps", "speedometer", Theme.fail))
         }
         return out
+    }
+
+    /// The controls that must exist in every state, at one fixed address.
+    ///
+    /// Setup lives here rather than only in the bottom row. The bottom row's
+    /// secondary button is FRAME when ready and MANUAL once armed, so arming —
+    /// or an analysis that is still running — used to take away the only route
+    /// back to setup, and the screen became a dead end.
+    private var persistentControls: some View {
+        HStack(spacing: 8) {
+            Button { openSetup() } label: {
+                Image(systemName: "viewfinder")
+                    .font(.system(size: 15, weight: .heavy))
+                    .frame(width: 32, height: 32)
+                    .background(.black.opacity(0.75), in: Circle())
+                    .foregroundStyle(Theme.yellow)
+                    .frame(height: 44)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Set up the camera")
+
+            settingMenu
+        }
     }
 
     /// A plain button and a confirmation dialog rather than a `Menu`.
@@ -480,46 +514,52 @@ struct CaptureScreen: View {
 /// ignored triggers corrupt or lose measurements, so they stay one tap away.
 struct StatusSheet: View {
     @EnvironmentObject private var model: AppModel
+    /// Observed directly. Every number on this sheet is a live camera or
+    /// placement reading, and AppModel no longer republishes their changes —
+    /// reaching them through `model` would render the sheet once and freeze
+    /// it, which is worse than not having it.
+    @ObservedObject var capture: CaptureController
+    @ObservedObject var wizard: PlacementWizard
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             List {
                 Section("Camera") {
-                    row("Format", model.capture.activeFormatDescription.isEmpty
-                        ? "starting…" : model.capture.activeFormatDescription)
-                    row("Frame rate", String(format: "%.0f fps", model.capture.fps))
-                    row("Field of view", String(format: "%.0f°", model.capture.fieldOfViewDeg))
-                    row("Exposure", model.capture.exposureLocked ? "locked" : "auto")
-                    if let interruption = model.capture.interruptionMessage {
+                    row("Format", capture.activeFormatDescription.isEmpty
+                        ? "starting…" : capture.activeFormatDescription)
+                    row("Frame rate", String(format: "%.0f fps", capture.fps))
+                    row("Field of view", String(format: "%.0f°", capture.fieldOfViewDeg))
+                    row("Exposure", capture.exposureLocked ? "locked" : "auto")
+                    if let interruption = capture.interruptionMessage {
                         Text(interruption).foregroundStyle(Theme.warn)
                     }
                 }
                 Section {
-                    row("Dropped frames", "\(model.capture.droppedFrameCount)")
+                    row("Dropped frames", "\(capture.droppedFrameCount)")
                     Text("Every measurement assumes a constant frame interval. Dropped frames break that, so any swing captured while this was climbing is flagged.")
                         .font(.caption).foregroundStyle(.secondary)
                 } header: { Text("Timing") }
 
                 Section {
-                    row("Contact level", String(format: "%.0f dB", max(0, model.capture.triggerLevelDb)))
+                    row("Contact level", String(format: "%.0f dB", max(0, capture.triggerLevelDb)))
                     row("Threshold", String(format: "%.0f dB", model.settings.triggerDb))
-                    row("Ignored — no hitter", "\(model.capture.suppressedTriggerCount)")
+                    row("Ignored — no hitter", "\(capture.suppressedTriggerCount)")
                     Text("Clap near the phone: the bar above the buttons should jump past the notch. If it does not, the trigger will not hear contact either — use Manual.")
                         .font(.caption).foregroundStyle(.secondary)
                 } header: { Text("Trigger") }
 
                 Section("Placement") {
-                    row("Distance", model.wizard.derivedDistanceM.map { Fmt.m($0) } ?? "—")
-                    row("Scale source", model.wizard.scaleSource.rawValue)
-                    row("Roll", model.wizard.level.hasReading
-                        ? String(format: "%+.1f°", model.wizard.level.rollDeg) : "unknown")
-                    row("Tilt", model.wizard.level.hasReading
-                        ? String(format: "%+.1f°", model.wizard.level.tiltDeg) : "unknown")
-                    ForEach(model.wizard.advisories.indices, id: \.self) { i in
-                        Text(model.wizard.advisories[i].text)
+                    row("Distance", wizard.derivedDistanceM.map { Fmt.m($0) } ?? "—")
+                    row("Scale source", wizard.scaleSource.rawValue)
+                    row("Roll", wizard.level.hasReading
+                        ? String(format: "%+.1f°", wizard.level.rollDeg) : "unknown")
+                    row("Tilt", wizard.level.hasReading
+                        ? String(format: "%+.1f°", wizard.level.tiltDeg) : "unknown")
+                    ForEach(wizard.advisories.indices, id: \.self) { i in
+                        Text(wizard.advisories[i].text)
                             .font(.caption)
-                            .foregroundStyle(model.wizard.advisories[i].level == .blocking
+                            .foregroundStyle(wizard.advisories[i].level == .blocking
                                              ? Theme.warn : .secondary)
                     }
                 }

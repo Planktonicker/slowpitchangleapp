@@ -72,6 +72,16 @@ enum Theme {
     }
 }
 
+/// Bounds on the transient banner.
+///
+/// It reserves real layout space as a top safe-area inset (see `RootView`), so
+/// its height is measured rather than guessed — but it still must not be free
+/// to grow without limit, or a long error message would push the whole capture
+/// HUD down the screen.
+enum BannerMetrics {
+    static let maxLines = 3
+}
+
 // MARK: - Button styles
 
 /// The big commitment button: yellow slab, black text.
@@ -84,11 +94,14 @@ struct SlabButtonStyle: ButtonStyle {
     var textColor: Color = .black
     var size: CGFloat = 17
     var verticalPadding: CGFloat = 16
-    /// Stretch to whatever height the caller framed the button at, instead of
-    /// sizing from padding. The HUD row pins one height for the score bug and
-    /// every control beside it; padding alone leaves a short slab floating in
-    /// a tall frame, which is what made that row look unproportioned.
-    var fillsHeight = false
+    /// Pin the slab to one height so a row of controls lines up, instead of
+    /// each sizing itself from its own padding.
+    ///
+    /// `minHeight`, deliberately not `maxHeight: .infinity`. Infinity does not
+    /// mean "fill the frame my caller gave me" — it means "take every point of
+    /// vertical space available", and in a portrait VStack that is the entire
+    /// screen. That is exactly how the MANUAL button became a full-height bar.
+    var minHeight: CGFloat?
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -99,7 +112,7 @@ struct SlabButtonStyle: ButtonStyle {
             .lineLimit(1)
             .minimumScaleFactor(0.7)
             .padding(.vertical, verticalPadding)
-            .frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil)
+            .frame(maxWidth: .infinity, minHeight: minHeight)
             .background(isEnabled ? fill : Theme.surface,
                         in: RoundedRectangle(cornerRadius: 14))
             .foregroundStyle(isEnabled ? textColor : Theme.steel)
@@ -112,8 +125,8 @@ struct SlabButtonStyle: ButtonStyle {
 struct OutlineButtonStyle: ButtonStyle {
     var verticalPadding: CGFloat = 12
     var cornerRadius: CGFloat = 12
-    /// See `SlabButtonStyle.fillsHeight`.
-    var fillsHeight = false
+    /// See `SlabButtonStyle.minHeight`.
+    var minHeight: CGFloat?
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -122,7 +135,7 @@ struct OutlineButtonStyle: ButtonStyle {
             .textCase(.uppercase)
             .tracking(0.8)
             .padding(.vertical, verticalPadding)
-            .frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil)
+            .frame(maxWidth: .infinity, minHeight: minHeight)
             .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: cornerRadius))
             .overlay(RoundedRectangle(cornerRadius: cornerRadius)
                 .strokeBorder(Theme.yellow.opacity(isEnabled ? 0.85 : 0.3), lineWidth: 1.5))

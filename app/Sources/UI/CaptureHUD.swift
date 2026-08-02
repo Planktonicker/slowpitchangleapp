@@ -111,7 +111,10 @@ struct ScoreBug: View {
                         .minimumScaleFactor(0.7)
                 }
                 .foregroundStyle(state.onTint)
-                .frame(width: height, height: height)
+                // Wider than tall: the tile has no horizontal padding, and at
+                // a bare 60pt square "WORKING" ran edge to edge and scaled
+                // itself down rather than fitting at the size it asks for.
+                .frame(width: max(height + 12, 72), height: height)
                 .background(state.tint)
 
                 VStack(alignment: .leading, spacing: 0) {
@@ -163,7 +166,10 @@ struct ScoreBug: View {
 struct ExceptionRibbon: View {
     var chips: [(text: String, symbol: String, color: Color)]
     var onChipTap: () -> Void
-    var settingMenu: AnyView
+    /// Controls that are available in every state, pinned top-right. Anything
+    /// that must never become unreachable belongs here rather than in the
+    /// bottom row, which changes shape with the state.
+    var trailing: AnyView
 
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
@@ -187,7 +193,7 @@ struct ExceptionRibbon: View {
                 .buttonStyle(.plain)
             }
             Spacer(minLength: 0)
-            settingMenu
+            trailing
         }
     }
 }
