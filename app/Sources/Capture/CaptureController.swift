@@ -574,18 +574,34 @@ final class CaptureController: NSObject, ObservableObject {
             let result: BallMeasureResult = PixelImage.withImage(snapshot) { img in
                 let px = Double(devicePoint.x) * Double(img.width)
                 let py = Double(devicePoint.y) * Double(img.height)
-                // Widen once before giving up: a tap can land a little off the
-                // ball, and a second pass is far cheaper than a failed trip.
-                for r in [radius, radius * 2] {
-                    if let found = BallDetector.measureAt(image: img,
-                                                          nearX: px, nearY: py,
-                                                          searchRadiusPx: r,
-                                                          settings: detector,
-                                                          fovDeg: fov) {
-                        return .found(found)
+                // Widen before giving up: a tap can land a little off the ball,
+                // and a ball close to the lens needs room for the shape tests.
+                var last: SetupBallMeasure.Outcome = .nothingThere
+                for r in [radius, radius * 2, radius * 3] {
+                    last = SetupBallMeasure.measure(image: img,
+                                                    tapX: px, tapY: py,
+                                                    searchRadiusPx: r,
+                                                    settings: detector,
+                                                    fovDeg: fov)
+                    switch last {
+                    case .found(let m):
+                        return .found(m)
+                    case .needsWiderSearch:
+                        continue          // only this one is worth retrying
+                    default:
+                        break
                     }
+                    break
                 }
-                return .noBallNearTap(searchRadiusPx: radius * 2)
+                switch last {
+                case .found(let m):          return .found(m)
+                case .notAnEdge:             return .notAnEdge
+                case .mergedWithBackground:  return .mergedWithBackground
+                case .shadowed:              return .shadowed
+                case .truncatedByFrame:      return .truncatedByFrame
+                case .needsWiderSearch, .nothingThere:
+                    return .noBallNearTap(searchRadiusPx: radius * 3)
+                }
             } ?? .conversionFailed
             DispatchQueue.main.async { completion(result) }
         }

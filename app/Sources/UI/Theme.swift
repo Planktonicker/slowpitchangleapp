@@ -82,15 +82,19 @@ enum Theme {
 struct SlabButtonStyle: ButtonStyle {
     var fill: Color = Theme.yellow
     var textColor: Color = .black
+    var size: CGFloat = 17
+    var verticalPadding: CGFloat = 16
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.system(size: 17, weight: .black, design: .rounded))
+            .font(.system(size: size, weight: .black, design: .rounded))
             .textCase(.uppercase)
             .tracking(1.2)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 16)
+            .padding(.vertical, verticalPadding)
             .background(isEnabled ? fill : Theme.surface,
                         in: RoundedRectangle(cornerRadius: 14))
             .foregroundStyle(isEnabled ? textColor : Theme.steel)

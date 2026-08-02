@@ -23,6 +23,11 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
     case distanceOutsideProtocol = "DISTANCE_OUTSIDE_PROTOCOL"
     case scaleFromManualDistance = "SCALE_FROM_MANUAL_DISTANCE"
     case hitterGateDisabled = "HITTER_GATE_DISABLED"
+    /// Frames were dropped while this clip was being captured. Stamped at
+    /// capture time on purpose: the live counter is transient, and without
+    /// this the fact evaporates when the counter clears, leaving a swing in
+    /// history that looks clean but was measured on a broken frame interval.
+    case framesDropped = "FRAMES_DROPPED"
 
     var explanation: String {
         switch self {
@@ -38,6 +43,8 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
             return "Scale came from a typed distance rather than a measured object, so it inherits whatever error is in that number."
         case .hitterGateDisabled:
             return "The requirement for a person in frame was switched off for this session, so a loud noise alone could have started this clip."
+        case .framesDropped:
+            return "The camera dropped frames while this clip was recorded. Every measurement here assumes a constant frame interval, so timing — and therefore exit velocity — may be off. Close other apps and let the phone cool down."
         }
     }
 
@@ -50,6 +57,7 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
         case .distanceOutsideProtocol: return "distance"
         case .scaleFromManualDistance: return "typed distance"
         case .hitterGateDisabled: return "no hitter check"
+        case .framesDropped: return "dropped frames"
         }
     }
 }

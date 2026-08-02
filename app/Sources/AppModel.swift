@@ -19,6 +19,9 @@ final class AppModel: ObservableObject {
     @Published var currentSetting: SwingSetting = .tee
     @Published private(set) var analysisProgress: Double?
     @Published private(set) var lastSwing: SwingDTO?
+    /// Swings captured since the last arm. Shown on the HUD so a player can
+    /// see the session is progressing without walking back to the phone.
+    @Published private(set) var sessionSwingCount = 0
     @Published var banner: Banner?
     @Published var settings = AppSettings.load() {
         didSet {
@@ -107,6 +110,8 @@ final class AppModel: ObservableObject {
         }
         capture.isArmed = true
         armedAt = CACurrentMediaTime()
+        sessionSwingCount = 0
+        dropsAtClipStart = capture.droppedFrameCount
         // Off-level is allowed now, so say so once rather than silently
         // recording a compromised reading.
         if let warning = wizard.advisories.first(where: { $0.level == .warning }) {
@@ -146,6 +151,9 @@ final class AppModel: ObservableObject {
     }
 
     private var pendingManual = false
+    /// Dropped-frame count when the current clip began, so the flag reflects
+    /// drops during THIS clip rather than the whole session.
+    private var dropsAtClipStart = 0
 
     // MARK: - Clip handling
 
@@ -154,6 +162,8 @@ final class AppModel: ObservableObject {
         pendingManual = false
         let setting = currentSetting
         let placement = wizard.placement
+        let droppedDuringClip = capture.droppedFrameCount > dropsAtClipStart
+        dropsAtClipStart = capture.droppedFrameCount
         var options = settings.analyzerOptions
         options.rollDeg = placement.rollDeg
 
@@ -181,6 +191,7 @@ final class AppModel: ObservableObject {
                 self.finishClip(output: output,
                                 setting: setting,
                                 placement: placement,
+                                droppedFrames: droppedDuringClip,
                                 analysis: finalAnalysis,
                                 failure: finalFailure,
                                 autoTriggered: autoTriggered && !wasManual)
@@ -191,6 +202,7 @@ final class AppModel: ObservableObject {
     private func finishClip(output: ClipRecorder.Output,
                             setting: SwingSetting,
                             placement: PlacementWizard.Placement,
+                            droppedFrames: Bool,
                             analysis: ClipAnalysis?,
                             failure: String?,
                             autoTriggered: Bool) {
@@ -239,6 +251,8 @@ final class AppModel: ObservableObject {
         dto.cameraTiltDeg = placement.tiltDeg
         dto.captureFlags = placement.captureFlags
             + (hitterGateDisabledForSession ? [.hitterGateDisabled] : [])
+            + (droppedFrames ? [.framesDropped] : [])
+        sessionSwingCount += 1
 
         do {
             try store.save(dto)

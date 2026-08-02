@@ -275,13 +275,6 @@ struct SetupOverlay: View {
                       systemImage: "checkmark.circle.fill")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Theme.pass)
-                if case .some(.found(let m)) = lastResult, !m.subpixelRefined {
-                    // The coarse fallback reads the halo around the ball and
-                    // over-states its size, which lands straight in the scale.
-                    Text("Rough estimate — low contrast. Better light or the tee will sharpen it.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(Theme.warn)
-                }
                 Text("Tap the ball again any time to re-measure.")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.steel)
@@ -305,7 +298,15 @@ struct SetupOverlay: View {
         guard let result = lastResult else { return nil }
         switch result {
         case .noBallNearTap:
-            return "Nothing ball-shaped there. Tap right on the ball, or use the button below."
+            return "Nothing ball-shaped there. Tap right on the middle of the ball."
+        case .notAnEdge:
+            return "That is a patch of colour, not a ball — no clear edge to measure. If the ball is on something the same colour, put it on the grass or hold it up against the sky."
+        case .mergedWithBackground:
+            return "The ball is blending into what it is sitting on. Move it onto a different-coloured surface, or hold it up against the sky."
+        case .shadowed:
+            return "Half the ball is in shadow. Move it into the light, or turn the phone so the sun is behind you."
+        case .truncatedByFrame:
+            return "The ball is cut off by the edge of the picture. Move it further into frame."
         case .noFrameYet:
             return "Camera is still starting — try again in a second."
         case .conversionFailed:
