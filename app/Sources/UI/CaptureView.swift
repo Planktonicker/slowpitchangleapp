@@ -45,8 +45,11 @@ struct CaptureScreen: View {
     /// map by a simple scale, and the marker must sit under the finger.
     @State private var tapViewPoint: CGPoint?
     @State private var foundBall = false
+    /// Auto-opening setup is a launch behaviour, not a nag. Once it has fired,
+    /// closing setup sticks — otherwise switching tabs and coming back would
+    /// reopen a panel the user had just deliberately dismissed.
+    @State private var didAutoOpenSetup = false
 
-    @AppStorage("swinglab.hasCompletedFirstSetup") private var hasCompletedFirstSetup = false
 
     /// Strict precedence. A HUD that reports the wrong state is worse than a
     /// cluttered one, so this lives in exactly one place.
@@ -276,7 +279,10 @@ struct CaptureScreen: View {
         case .starting, .needsSetup, .interrupted:
             return nil   // exactly one control when there is exactly one thing to do
         case .ready:
-            return ("viewfinder", "FRAME", false, { openSetup() })
+            // No FRAME button here. Setup has a permanent home in the ribbon,
+            // and the same action offered in two places is how a user ends up
+            // unsure which one they are meant to press.
+            return nil
         case .analysing:
             return nil   // not armed, so there is nothing to trigger manually
         case .armed, .recording:
@@ -353,25 +359,39 @@ struct CaptureScreen: View {
 
     /// The controls that must exist in every state, at one fixed address.
     ///
-    /// Setup lives here rather than only in the bottom row. The bottom row's
-    /// secondary button is FRAME when ready and MANUAL once armed, so arming —
-    /// or an analysis that is still running — used to take away the only route
-    /// back to setup, and the screen became a dead end.
+    /// Setup lives here and only here. It used to be the bottom row's secondary
+    /// button, which is MANUAL once armed — so arming, or an analysis still
+    /// running, took away the only route back to setup and the screen became a
+    /// dead end. Moving it somewhere no state can reach fixes that; leaving a
+    /// copy in the bottom row as well would only make the user pick.
     private var persistentControls: some View {
         HStack(spacing: 8) {
             Button { openSetup() } label: {
-                Image(systemName: "viewfinder")
-                    .font(.system(size: 15, weight: .heavy))
-                    .frame(width: 32, height: 32)
-                    .background(.black.opacity(0.75), in: Circle())
-                    .foregroundStyle(Theme.yellow)
-                    .frame(height: 44)
+                HStack(spacing: 4) {
+                    // `camera.viewfinder`, not a bare `viewfinder`. This
+                    // reopens camera setup; the bare crosshair read as a
+                    // targeting reticle, which is what the tap-the-ball marker
+                    // already is. The word beside it removes the guessing
+                    // entirely, and the capsule matches the setting control
+                    // next to it so the two read as one row.
+                    Image(systemName: "camera.viewfinder")
+                        .font(.system(size: 12, weight: .black))
+                    Text("SET UP").font(Theme.label(11))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(.black.opacity(0.75), in: Capsule())
+                .foregroundStyle(Theme.yellow)
+                .frame(height: 44)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Set up the camera")
 
             settingMenu
         }
+        // The exception chips on the other side compress before these do: a
+        // control squeezed down to an ellipsis has stopped being one.
+        .layoutPriority(1)
     }
 
     /// A plain button and a confirmation dialog rather than a `Menu`.
@@ -509,7 +529,24 @@ struct CaptureScreen: View {
         model.startCapture()
         wizard.startSensors()
         syncLiveMeasurement()
-        if !hasCompletedFirstSetup { openSetup() }
+        // Open setup on every launch that needs it, not just the very first.
+        //
+        // The scale is not persisted, and it cannot be: it is metres per pixel
+        // at one distance, so it stops being true the moment the tripod moves,
+        // which is every session. Every launch therefore starts with no scale
+        // and can measure nothing until one is taken. Setup is not onboarding
+        // to be remembered past, it is step one of using the app. A
+        // `hasCompletedFirstSetup` flag used to suppress this, so the second
+        // launch onward dropped the user straight onto a HUD that could not
+        // measure anything.
+        //
+        // Self-limiting: once a ball has been measured `scaleSource` is no
+        // longer `.none`, so this stops firing and coming back to the tab does
+        // not reopen it.
+        if wizard.scaleSource == .none, !didAutoOpenSetup {
+            didAutoOpenSetup = true
+            openSetup()
+        }
     }
 
     private func openSetup() {
@@ -519,7 +556,6 @@ struct CaptureScreen: View {
 
     private func closeSetup() {
         showSetup = false
-        hasCompletedFirstSetup = true
         syncLiveMeasurement()
     }
 
