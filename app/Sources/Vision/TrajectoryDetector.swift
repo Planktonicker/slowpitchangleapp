@@ -5,6 +5,7 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import ImageIO
 import Vision
 
 /// Where in the frame the ball flew, according to Vision.
@@ -95,9 +96,18 @@ final class TrajectoryDetector {
 
     /// Feed one frame. Safe to ignore per-frame failures; a clip only needs
     /// enough good frames to establish the parabola.
-    func process(sampleBuffer: CMSampleBuffer) {
+    /// - Parameter orientation: which way is up in the recorded frames.
+    ///   Trajectory detection looks for a parabola, so a rotated frame has
+    ///   gravity pointing sideways and the request finds nothing.
+    ///
+    ///   This only costs speed, never accuracy: the hint is a locator, and
+    ///   `ClipAnalyzer` falls back to full-frame detection when it comes back
+    ///   empty. Every reported number is measured by `BallDetector` on raw
+    ///   buffer rows, which is orientation-independent.
+    func process(sampleBuffer: CMSampleBuffer,
+                 orientation: CGImagePropertyOrientation = .up) {
         let handler = VNImageRequestHandler(cmSampleBuffer: sampleBuffer,
-                                            orientation: .up,
+                                            orientation: orientation,
                                             options: [:])
         do {
             try handler.perform([request])

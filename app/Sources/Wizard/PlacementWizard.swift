@@ -124,28 +124,79 @@ final class PlacementWizard: ObservableObject {
         return ft >= 12 && ft <= 28
     }
 
-    var isArmingAllowed: Bool {
-        level.isLevel && isDistanceAcceptable
+    /// Distances where the optics genuinely cannot work, as opposed to merely
+    /// being outside the protocol's preferred window.
+    var isDistanceAbsurd: Bool {
+        guard let ft = derivedDistanceFt else { return false }
+        return ft < 5 || ft > 60
     }
 
-    var blockingReason: String? {
-        if !level.isRollOK {
-            return String(format: "Tilt the tripod head — the horizon is %.1f° off.", abs(level.rollDeg))
-        }
-        if !level.isTiltOK {
-            return String(format: "The camera points %@ by %.1f°. Aim it level.",
-                          level.tiltDeg > 0 ? "down" : "up", abs(level.tiltDeg))
-        }
+    /// The only hard precondition left: without a scale there is no way to turn
+    /// pixels into miles per hour, so there is nothing to record.
+    ///
+    /// Level used to gate this too. It no longer does. Roll is *corrected*
+    /// downstream in `SwingAnalyzer` — blocking on a quantity we already take
+    /// back out was self-defeating — and tilt, while genuinely uncorrectable,
+    /// degrades smoothly rather than falling off a cliff at 3°. Both are now
+    /// advisories that also flag the reading, so an off-level tripod produces
+    /// a measurement labelled for what it is instead of no measurement at all.
+    var isArmingAllowed: Bool {
+        scaleSource != .none && !isDistanceAbsurd
+    }
+
+    /// Severity of an advisory, so the UI can colour it.
+    enum AdviceLevel { case blocking, warning }
+
+    /// Everything worth telling the user about the current placement, worst
+    /// first. Replaces `blockingReason`: most of these no longer block.
+    var advisories: [(level: AdviceLevel, text: String)] {
+        var out: [(AdviceLevel, String)] = []
+
         if scaleSource == .none {
-            return "Set the distance: tap the ball, mark the plate, or type it."
+            out.append((.blocking, "Tap the ball in the picture to set the distance."))
         }
-        if !isDistanceAcceptable {
-            if let ft = derivedDistanceFt {
-                return String(format: "Camera reads %.0f ft away. Move to 15–20 ft and re-measure.", ft)
+        if isDistanceAbsurd, let ft = derivedDistanceFt {
+            out.append((.blocking, String(format: "Camera reads %.0f ft away — that can't be right. Re-measure.", ft)))
+        }
+
+        if !level.isAvailable || !level.hasReading {
+            out.append((.warning, "No motion sensor reading — tripod level unknown."))
+        } else {
+            if !level.isTiltOK {
+                out.append((.warning, String(format: "Camera points %@ by %.1f°. Readings will be less accurate.",
+                                             level.tiltDeg > 0 ? "down" : "up", abs(level.tiltDeg))))
             }
-            return "Distance could not be worked out — re-measure."
+            if !level.isRollOK {
+                out.append((.warning, String(format: "Horizon is %.1f° off — corrected in the maths, but level it if you can.",
+                                             abs(level.rollDeg))))
+            }
         }
-        return nil
+
+        if scaleSource != .none, !isDistanceAbsurd, !isDistanceAcceptable,
+           let ft = derivedDistanceFt {
+            out.append((.warning, String(format: "Camera reads %.0f ft away. 15–20 ft is ideal.", ft)))
+        }
+        return out
+    }
+
+    /// The one advisory worth putting under the primary button.
+    var topAdvisory: (level: AdviceLevel, text: String)? { advisories.first }
+
+    /// Capture-condition flags stamped onto swings taken with this placement.
+    /// App-only: these sit beside the measurement flags rather than inside
+    /// `SwingFlag`, which mirrors the Python reference and knows nothing of
+    /// tripods or motion sensors.
+    var captureFlags: [CaptureFlag] {
+        var out: [CaptureFlag] = []
+        if !level.isAvailable || !level.hasReading {
+            out.append(.levelUnknown)
+        } else {
+            if !level.isTiltOK { out.append(.cameraTilted) }
+            if !level.isRollOK { out.append(.notLevel) }
+        }
+        if !isDistanceAcceptable { out.append(.distanceOutsideProtocol) }
+        if scaleSource == .manual { out.append(.scaleFromManualDistance) }
+        return out
     }
 
     // MARK: - Stamp
@@ -155,7 +206,12 @@ final class PlacementWizard: ObservableObject {
         var distanceFt: Double?
         var heightFt: Double?
         var rollDeg: Double
+        /// Recorded, never corrected: a tilted camera projects the flight plane
+        /// and there is no undoing that after the fact. Kept so a suspicious
+        /// reading can be explained later.
+        var tiltDeg: Double
         var plateScaleDisagreement: Double?
+        var captureFlags: [CaptureFlag]
     }
 
     var placement: Placement {
@@ -164,7 +220,9 @@ final class PlacementWizard: ObservableObject {
                   // Handed to the analyzer so tripod roll is corrected, not
                   // just reported.
                   rollDeg: level.rollDeg,
-                  plateScaleDisagreement: nil)
+                  tiltDeg: level.tiltDeg,
+                  plateScaleDisagreement: nil,
+                  captureFlags: captureFlags)
     }
 
     // MARK: - Lifecycle

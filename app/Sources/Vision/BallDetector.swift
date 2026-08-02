@@ -11,6 +11,31 @@ struct DetectorSettings: Equatable, Codable, Sendable {
     var maxRadiusPx: Double = SLA.maxRadiusPxDefault
 }
 
+/// One ball measured at rest during setup.
+struct BallMeasurement: Equatable, Sendable {
+    var diameterPx: Double
+    var x: Double
+    var y: Double
+    var areaPx: Double
+    /// False when the sub-pixel refinement could not run — too little colour
+    /// contrast between ball and background, typically deep shade. The coarse
+    /// fallback reads the compression halo and so over-states the diameter,
+    /// which lands directly in the scale. Surfaced rather than swallowed.
+    var subpixelRefined: Bool
+}
+
+/// Why a live ball measurement did not produce a number.
+///
+/// Previously this whole path returned `Double?`, and a `?? nil` flattened
+/// "the frame was not in a format we can read" into "no ball found" — so the
+/// UI blamed the ball for what was actually a pixel-format bug.
+enum BallMeasureResult: Equatable, Sendable {
+    case found(BallMeasurement)
+    case noFrameYet
+    case conversionFailed
+    case noBallNearTap(searchRadiusPx: Double)
+}
+
 /// Rectangular search window in image pixels.
 struct ROI: Equatable, Sendable {
     var x0: Int, y0: Int, x1: Int, y1: Int
@@ -109,6 +134,130 @@ enum BallDetector {
                                        diameterPx: minor, areaPx: area))
         }
         return out
+    }
+
+    /// One stationary ball, near a point the user tapped.
+    ///
+    /// Deliberately a separate path from `detect`, which is a byte-for-byte
+    /// port of `sla_common.py` and pinned by ParityTests — it must not change.
+    /// This one may be smarter because the problem is easier and different:
+    /// a single ball at rest, whose location the user has just pointed at, and
+    /// whose only output is a scale the user can see and re-measure.
+    ///
+    /// Three things it does that `detect` cannot:
+    ///  * **No morphological close.** Closing is exactly what bridges the
+    ///    ball's mask into adjacent grass — the default hue window's upper end
+    ///    (48 in OpenCV terms) reaches into turf — producing one giant blob
+    ///    that then fails the area or elongation test. This is why a ball on
+    ///    the ground failed where a ball on a tee against sky succeeded.
+    ///  * **Tightens the hue ceiling and retries** when the blob under the tap
+    ///    is implausibly large or elongated, walking the yellow/green boundary
+    ///    down until the ball separates from the turf.
+    ///  * **Derives the size band from optics** rather than the fixed 8–120 px
+    ///    window, which silently rejected any ball closer than about 3.6 ft.
+    ///
+    /// Returns the candidate nearest the tap — not the largest. On grass the
+    /// largest blob is the grass.
+    static func measureAt(image: PixelImage,
+                          nearX: Double,
+                          nearY: Double,
+                          searchRadiusPx: Double,
+                          settings: DetectorSettings = DetectorSettings(),
+                          fovDeg: Double = 0) -> BallMeasurement? {
+        // Optics-derived plausible diameters, when the field of view is known.
+        // A ball 2 ft away and one 60 ft away bracket anything a user could
+        // reasonably be pointing at.
+        var minDiameter = 2 * settings.minRadiusPx
+        var maxDiameter = 2 * settings.maxRadiusPx
+        if fovDeg > 0 {
+            let halfFov = fovDeg * .pi / 360
+            let pxPerMAt = { (d: Double) in
+                Double(image.width) / (2 * d * tan(halfFov))
+            }
+            minDiameter = SLA.ballDiameterM * pxPerMAt(18.3)   // 60 ft
+            maxDiameter = SLA.ballDiameterM * pxPerMAt(0.61)   // 2 ft
+        }
+
+        var tuned = settings
+        for attempt in 0..<4 {
+            let roi = ROI.around(x: nearX, y: nearY, radius: searchRadiusPx)
+                .clamped(width: image.width, height: image.height)
+            if let found = measureOnce(image: image, roi: roi, settings: tuned,
+                                       nearX: nearX, nearY: nearY,
+                                       minDiameter: minDiameter,
+                                       maxDiameter: maxDiameter) {
+                return found
+            }
+            // Walk the hue ceiling down towards pure yellow and try again.
+            // Optic yellow sits around 22-35 in OpenCV hue; grass runs from
+            // roughly 35 up. Converges in one or two steps in practice.
+            guard attempt < 3 else { break }
+            tuned.hsvHi.h = max(tuned.hsvLo.h + 6, tuned.hsvHi.h - 6)
+        }
+        return nil
+    }
+
+    private static func measureOnce(image: PixelImage,
+                                    roi: ROI,
+                                    settings: DetectorSettings,
+                                    nearX: Double,
+                                    nearY: Double,
+                                    minDiameter: Double,
+                                    maxDiameter: Double) -> BallMeasurement? {
+        let w = roi.x1 - roi.x0, h = roi.y1 - roi.y0
+        guard w > 2, h > 2 else { return nil }
+
+        var mask = [UInt8](repeating: 0, count: w * h)
+        for yy in 0..<h {
+            let iy = roi.y0 + yy
+            let rowBase = yy * w
+            for xx in 0..<w {
+                let p = image.pixel(x: roi.x0 + xx, y: iy)
+                if HSVConvert.inRange(b: p.b, g: p.g, r: p.r,
+                                      lo: settings.hsvLo, hi: settings.hsvHi) {
+                    mask[rowBase + xx] = 255
+                }
+            }
+        }
+        // Open only — no close. See the note on `measureAt`.
+        Morphology.open(&mask, width: w, height: h)
+
+        let blobs = ConnectedComponents.label(mask: mask, width: w, height: h)
+        var best: BallMeasurement?
+        var bestDistance = Double.infinity
+
+        for blob in blobs {
+            let area = Double(blob.count)
+            guard area >= Double.pi * settings.minRadiusPx * settings.minRadiusPx
+            else { continue }
+
+            let cx = Double(roi.x0) + blob.meanX
+            let cy = Double(roi.y0) + blob.meanY
+
+            var minor = blob.minorAxis
+            let major = blob.majorAxis
+            // A ball at rest is round. Anything long is turf or a shadow.
+            if major > 0 && minor > 1e-6 && major / minor > 2.5 { continue }
+            if minor <= 1e-6 { continue }
+
+            var refined = false
+            if let sub = subpixelMinorDiameter(image: image, cx: cx, cy: cy,
+                                               minorAxisDeg: blob.minorAxisDeg,
+                                               r0: minor / 2.0) {
+                minor = sub
+                refined = true
+            }
+            guard minor >= minDiameter, minor <= maxDiameter else { continue }
+
+            let dx = cx - nearX, dy = cy - nearY
+            let distance = (dx * dx + dy * dy).squareRoot()
+            if distance < bestDistance {
+                bestDistance = distance
+                best = BallMeasurement(diameterPx: minor, x: cx, y: cy,
+                                       areaPx: area, subpixelRefined: refined)
+            }
+        }
+        return best
     }
 
     /// Sub-pixel ball diameter along the minor (blur-free) axis.

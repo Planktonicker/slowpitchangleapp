@@ -4,6 +4,7 @@
 
 import Combine
 import Foundation
+import QuartzCore
 import SwiftUI
 
 /// Ties capture, analysis and storage together.
@@ -23,6 +24,7 @@ final class AppModel: ObservableObject {
         didSet {
             settings.save()
             capture.requireHitterToTrigger = settings.requireHitter
+            capture.visionOrientationOverride = settings.visionOrientation.orientation
         }
     }
 
@@ -79,6 +81,7 @@ final class AppModel: ObservableObject {
             .store(in: &cancellables)
 
         capture.requireHitterToTrigger = settings.requireHitter
+        capture.visionOrientationOverride = settings.visionOrientation.orientation
         reload()
     }
 
@@ -98,11 +101,40 @@ final class AppModel: ObservableObject {
     func arm() {
         guard wizard.isArmingAllowed else {
             banner = Banner(kind: .warning,
-                            text: wizard.blockingReason ?? "Finish camera setup first.")
+                            text: wizard.topAdvisory?.text
+                                ?? "Tap the ball in the picture to set the distance.")
             return
         }
         capture.isArmed = true
+        armedAt = CACurrentMediaTime()
+        // Off-level is allowed now, so say so once rather than silently
+        // recording a compromised reading.
+        if let warning = wizard.advisories.first(where: { $0.level == .warning }) {
+            banner = Banner(kind: .warning, text: warning.text + " Recording anyway — the swing will be flagged.")
+        }
     }
+
+    /// When the current armed stretch began, for the hitter-gate watchdog.
+    private(set) var armedAt: CFTimeInterval = 0
+
+    /// True when we have been armed a while and the pose gate has never once
+    /// seen a person — almost certainly the gate failing rather than an empty
+    /// field, and it would otherwise suppress every trigger in silence.
+    var hitterGateLooksStuck: Bool {
+        capture.isArmed && settings.requireHitter && armedAt > 0
+            && capture.hitterGateNeverFired(since: armedAt)
+    }
+
+    /// Give up on the hitter requirement for this session. Swings captured
+    /// afterwards carry `.hitterGateDisabled` so the looser gate is on record.
+    func trustAudioTriggerForSession() {
+        settings.requireHitter = false
+        hitterGateDisabledForSession = true
+        banner = Banner(kind: .info,
+                        text: "Trigger will now fire on sound alone. Swings are flagged so you know.")
+    }
+
+    private(set) var hitterGateDisabledForSession = false
 
     func disarm() { capture.isArmed = false }
 
@@ -204,6 +236,9 @@ final class AppModel: ObservableObject {
         dto.cameraDistanceFt = placement.distanceFt
         dto.lensHeightFt = placement.heightFt
         dto.cameraRollDeg = placement.rollDeg
+        dto.cameraTiltDeg = placement.tiltDeg
+        dto.captureFlags = placement.captureFlags
+            + (hitterGateDisabledForSession ? [.hitterGateDisabled] : [])
 
         do {
             try store.save(dto)
@@ -272,6 +307,8 @@ final class AppModel: ObservableObject {
                     updated.cameraDistanceFt = swing.cameraDistanceFt
                     updated.lensHeightFt = swing.lensHeightFt
                     updated.cameraRollDeg = swing.cameraRollDeg
+                    updated.cameraTiltDeg = swing.cameraTiltDeg
+                    updated.captureFlags = swing.captureFlags
                     updated.notes = swing.notes
                     self.analysisProgress = nil
                     self.update(updated)

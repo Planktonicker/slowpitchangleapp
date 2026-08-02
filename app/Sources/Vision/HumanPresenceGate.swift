@@ -4,6 +4,7 @@
 
 import CoreVideo
 import Foundation
+import ImageIO
 import QuartzCore
 import Vision
 
@@ -42,6 +43,22 @@ final class HumanPresenceGate {
     /// Called on the main queue whenever detection flips.
     var onPresenceChange: ((Bool) -> Void)?
 
+    /// Seconds the gate may go without ever seeing anyone before the caller is
+    /// told to stop trusting it. Pose detection can fail for reasons we cannot
+    /// see from here — an unusual angle, heavy backlight, a hitter in dark
+    /// clothing against a dark fence — and a gate that silently suppresses
+    /// every trigger is worse than no gate at all.
+    var neverSeenTimeout: TimeInterval = 20
+
+    /// True when the gate has been running this long without a single
+    /// detection, i.e. it is probably broken rather than correctly empty.
+    func looksUnreliable(since start: CFTimeInterval) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard _lastSeenAt == nil else { return false }
+        return CACurrentMediaTime() - start > neverSeenTimeout
+    }
+
     private let queue = DispatchQueue(label: "swinglab.posegate", qos: .utility)
     private let lock = NSLock()
     private var _lastSeenAt: CFTimeInterval?
@@ -67,7 +84,12 @@ final class HumanPresenceGate {
     /// Feed a frame. Returns immediately; drops the frame if an inference is
     /// already running, which at the submission rate simply means "checked a
     /// tenth of a second later".
-    func submit(pixelBuffer: CVPixelBuffer) {
+    /// - Parameter orientation: which way is up in this buffer. The phone lives
+    ///   sideways on a tripod, so this is never safely assumed: handed a
+    ///   rotated or upside-down human, the pose model simply finds nobody —
+    ///   and with the hitter gate on, that silently suppresses every trigger.
+    func submit(pixelBuffer: CVPixelBuffer,
+                orientation: CGImagePropertyOrientation = .up) {
         lock.lock()
         if busy {
             lock.unlock()
@@ -84,13 +106,14 @@ final class HumanPresenceGate {
                 self.lock.unlock()
             }
 
-            let request = VNDetectHumanBodyPoseRequest()
             let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer,
-                                                orientation: .up,
+                                                orientation: orientation,
                                                 options: [:])
             var detected = false
-            if (try? handler.perform([request])) != nil,
-               let observations = request.results {
+
+            let pose = VNDetectHumanBodyPoseRequest()
+            if (try? handler.perform([pose])) != nil,
+               let observations = pose.results {
                 for obs in observations {
                     guard let points = try? obs.recognizedPoints(.all) else { continue }
                     let confident = points.values.filter { $0.confidence >= self.jointConfidence }
@@ -98,6 +121,17 @@ final class HumanPresenceGate {
                         detected = true
                         break
                     }
+                }
+            }
+
+            // Pose is the strict test; a plain person-shaped box is far more
+            // robust to rotation, partial bodies and awkward stances. Presence
+            // is all this gate claims, so the looser answer is good enough.
+            if !detected {
+                let rects = VNDetectHumanRectanglesRequest()
+                if (try? handler.perform([rects])) != nil,
+                   let found = rects.results {
+                    detected = found.contains { $0.confidence >= self.jointConfidence }
                 }
             }
 

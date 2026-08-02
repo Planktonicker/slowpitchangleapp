@@ -181,6 +181,18 @@ final class ParityTests: XCTestCase {
         // The bundled drag term is the one finding #1 hangs on.
         assertClose(SLA.kOverM, c["k_over_m"]!, rel: 1e-12, "k/m")
 
+        // Detector defaults are mirrored by hand from sla_common.py. Without
+        // these assertions that mirror is convention only, and a venue tuned
+        // on the Mac would stop transferring to the app.
+        assertClose(SLA.hsvLoDefault.h, c["HSV_LO_H"]!, "hsv lo H")
+        assertClose(SLA.hsvLoDefault.s, c["HSV_LO_S"]!, "hsv lo S")
+        assertClose(SLA.hsvLoDefault.v, c["HSV_LO_V"]!, "hsv lo V")
+        assertClose(SLA.hsvHiDefault.h, c["HSV_HI_H"]!, "hsv hi H")
+        assertClose(SLA.hsvHiDefault.s, c["HSV_HI_S"]!, "hsv hi S")
+        assertClose(SLA.hsvHiDefault.v, c["HSV_HI_V"]!, "hsv hi V")
+        assertClose(SLA.minRadiusPxDefault, c["MIN_RADIUS_PX_DEFAULT"]!, "min radius")
+        assertClose(SLA.maxRadiusPxDefault, c["MAX_RADIUS_PX_DEFAULT"]!, "max radius")
+
         assertClose(SLA.smashPoorBelow, c["SMASH_POOR_BELOW"]!, "smash poor")
         assertClose(SLA.smashGoodLo, c["SMASH_GOOD_LO"]!, "smash good lo")
         assertClose(SLA.smashGoodHi, c["SMASH_GOOD_HI"]!, "smash good hi")

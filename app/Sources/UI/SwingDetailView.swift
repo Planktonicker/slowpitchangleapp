@@ -110,7 +110,7 @@ struct SwingDetailView: View {
                 MetricTile(label: "Exit velo",
                            value: String(format: "%.1f", swing.exitVeloMph), unit: "mph")
             }
-            ConfidenceRow(flags: swing.flags)
+            ConfidenceRow(flags: swing.flags, captureFlags: swing.captureFlags)
             detail("Tracked frames", "\(swing.trackedFrames)")
             detail("Flight measured", String(format: "%.0f ms", swing.trackDurationS * 1000))
             detail("Fit residual", String(format: "%.2f px", swing.fitRmsPx))

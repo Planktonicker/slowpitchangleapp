@@ -23,28 +23,62 @@ final class LevelSensor: ObservableObject {
     @Published private(set) var rollDeg: Double = 0
     @Published private(set) var tiltDeg: Double = 0
     @Published private(set) var isAvailable = false
+    /// False until the first real reading lands. Without this, "no motion
+    /// sensor" and "perfectly level" were the same state (both zero), so the
+    /// UI cheerfully showed "Level ✓" for a device that had told us nothing.
+    @Published private(set) var hasReading = false
+    /// Latched, hysteretic level state. Never computed straight from the live
+    /// angles: at 30 Hz an unsmoothed comparison flips either side of the
+    /// tolerance many times a second, which is what made buttons that depend
+    /// on it strobe between enabled and disabled and read as dead.
+    @Published private(set) var isLevelLatched = true
 
     /// Tolerances. Roll is generous because it is corrected downstream; tilt
     /// is tight because it is not.
     let rollToleranceDeg = 2.0
     let tiltToleranceDeg = 3.0
+    /// Recovery band — must come back well inside tolerance before the latch
+    /// clears, so a reading sitting exactly on the line cannot oscillate.
+    private let recoveryFactor = 0.7
+    /// Exponential smoothing factor, ~0.2 s time constant at 30 Hz.
+    private let smoothing = 0.15
 
     private let motion = CMMotionManager()
+    private let queue: OperationQueue = {
+        let q = OperationQueue()
+        q.name = "swinglab.motion"
+        q.maxConcurrentOperationCount = 1
+        q.qualityOfService = .utility
+        return q
+    }()
     private var rollZero = 0.0
     private var tiltZero = 0.0
+    private var smoothedRoll: Double?
+    private var smoothedTilt: Double?
+    private var latched = true
+    private var lastPublished = CFAbsoluteTimeGetCurrent()
 
     var isRollOK: Bool { abs(rollDeg) <= rollToleranceDeg }
     var isTiltOK: Bool { abs(tiltDeg) <= tiltToleranceDeg }
-    var isLevel: Bool { isRollOK && isTiltOK }
+    var isLevel: Bool { isLevelLatched }
 
     func start() {
         guard motion.isDeviceMotionAvailable else {
-            isAvailable = false
+            DispatchQueue.main.async {
+                self.isAvailable = false
+                self.hasReading = false
+            }
             return
         }
-        isAvailable = true
+        // Called from more than one screen; starting twice runs two update
+        // streams and doubles the publishing load for nothing.
+        guard !motion.isDeviceMotionActive else { return }
+        DispatchQueue.main.async { self.isAvailable = true }
         motion.deviceMotionUpdateInterval = 1.0 / 30.0
-        motion.startDeviceMotionUpdates(to: .main) { [weak self] data, _ in
+        // Off the main queue: this used to publish 30 times a second onto the
+        // main thread, and every one of those invalidated the whole view tree
+        // while the camera was trying to run at 240fps.
+        motion.startDeviceMotionUpdates(to: queue) { [weak self] data, _ in
             guard let self, let data else { return }
             let g = data.gravity
 
@@ -68,13 +102,40 @@ final class LevelSensor: ObservableObject {
             // the lens is pointing up or down.
             let tilt = asin(max(-1, min(1, g.z))) * 180 / .pi - self.tiltZero
 
-            self.rollDeg = roll
-            self.tiltDeg = tilt
+            let sr = self.smoothedRoll.map { $0 + self.smoothing * (roll - $0) } ?? roll
+            let st = self.smoothedTilt.map { $0 + self.smoothing * (tilt - $0) } ?? tilt
+            self.smoothedRoll = sr
+            self.smoothedTilt = st
+
+            // Latch: trip out at tolerance, recover only well inside it.
+            let outOfBounds = abs(sr) > self.rollToleranceDeg
+                || abs(st) > self.tiltToleranceDeg
+            let backInside = abs(sr) <= self.rollToleranceDeg * self.recoveryFactor
+                && abs(st) <= self.tiltToleranceDeg * self.recoveryFactor
+            if outOfBounds { self.latched = false }
+            else if backInside { self.latched = true }
+            let level = self.latched
+
+            // Publish at ~10 Hz, and only when a displayed value moved.
+            let now = CFAbsoluteTimeGetCurrent()
+            let moved = abs(sr - self.rollDeg) >= 0.1 || abs(st - self.tiltDeg) >= 0.1
+            guard now - self.lastPublished >= 0.1,
+                  moved || level != self.isLevelLatched || !self.hasReading else { return }
+            self.lastPublished = now
+
+            DispatchQueue.main.async {
+                self.rollDeg = sr
+                self.tiltDeg = st
+                self.isLevelLatched = level
+                self.hasReading = true
+            }
         }
     }
 
     func stop() {
         motion.stopDeviceMotionUpdates()
+        smoothedRoll = nil
+        smoothedTilt = nil
     }
 
     /// Treat the current pose as level. For a tripod head that is trustworthy
@@ -84,11 +145,17 @@ final class LevelSensor: ObservableObject {
         tiltZero += tiltDeg
         rollDeg = 0
         tiltDeg = 0
+        smoothedRoll = 0
+        smoothedTilt = 0
+        latched = true
+        isLevelLatched = true
     }
 
     func clearZero() {
         rollZero = 0
         tiltZero = 0
+        smoothedRoll = nil
+        smoothedTilt = nil
     }
 
     private static func currentOrientation() -> UIInterfaceOrientation {

@@ -75,9 +75,14 @@ enum Theme {
 // MARK: - Button styles
 
 /// The big commitment button: yellow slab, black text.
+///
+/// Both styles read `isEnabled`. Without it a `.disabled()` button looked
+/// exactly like an enabled one — pressing it did nothing and gave no reason,
+/// which reads as a broken app rather than a blocked action.
 struct SlabButtonStyle: ButtonStyle {
     var fill: Color = Theme.yellow
     var textColor: Color = .black
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -86,8 +91,9 @@ struct SlabButtonStyle: ButtonStyle {
             .tracking(1.2)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
-            .background(fill, in: RoundedRectangle(cornerRadius: 14))
-            .foregroundStyle(textColor)
+            .background(isEnabled ? fill : Theme.surface,
+                        in: RoundedRectangle(cornerRadius: 14))
+            .foregroundStyle(isEnabled ? textColor : Theme.steel)
             .opacity(configuration.isPressed ? 0.75 : 1)
             .scaleEffect(configuration.isPressed ? 0.985 : 1)
     }
@@ -95,6 +101,8 @@ struct SlabButtonStyle: ButtonStyle {
 
 /// Secondary action: black slab, yellow outline.
 struct OutlineButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 14, weight: .bold, design: .rounded))
@@ -103,8 +111,9 @@ struct OutlineButtonStyle: ButtonStyle {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
             .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.yellow.opacity(0.85), lineWidth: 1.5))
-            .foregroundStyle(Theme.yellow)
+            .overlay(RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(Theme.yellow.opacity(isEnabled ? 0.85 : 0.3), lineWidth: 1.5))
+            .foregroundStyle(isEnabled ? Theme.yellow : Theme.steel)
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }

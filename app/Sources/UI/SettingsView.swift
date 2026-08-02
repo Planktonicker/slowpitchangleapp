@@ -24,7 +24,9 @@ struct SettingsView: View {
                     stepper("Minimum radius", value: $model.settings.detector.minRadiusPx,
                             range: 2...30, step: 0.5, unit: "px")
                     stepper("Maximum radius", value: $model.settings.detector.maxRadiusPx,
-                            range: 10...120, step: 1, unit: "px")
+                            range: 10...250, step: 1, unit: "px")
+                    Text("Raise the maximum if you film close in — a ball a few feet from the lens can be well over 120 px across, and anything bigger than this is thrown away.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section("Trigger") {
@@ -51,6 +53,16 @@ struct SettingsView: View {
                         }
                     }
                     Text("Direction only matters when an inbound pitch is also in frame. Auto takes the fastest track.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section("Camera orientation") {
+                    Picker("Vision orientation", selection: $model.settings.visionOrientation) {
+                        ForEach(VisionOrientationSetting.allCases, id: \.self) { o in
+                            Text(o.displayName).tag(o)
+                        }
+                    }
+                    Text("Which way is up in the frames the hitter-detector sees. Auto follows the phone and is almost always right — change it only if \"Hitter in frame\" never lights up with someone clearly in shot.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 

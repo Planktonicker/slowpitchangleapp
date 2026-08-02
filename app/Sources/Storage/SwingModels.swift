@@ -117,10 +117,22 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     var cameraDistanceFt: Double?
     var lensHeightFt: Double?
     var cameraRollDeg: Double?
+    /// Recorded but never corrected — unlike roll, camera tilt cannot be
+    /// undone after the fact.
+    var cameraTiltDeg: Double?
+    /// Conditions the camera was in, kept beside the measurement `flags`.
+    /// Level no longer blocks arming, so this is what keeps a reading taken on
+    /// an off-level tripod honest instead of merely absent.
+    var captureFlags: [CaptureFlag] = []
 
     var notes: String?
 
-    var highConfidence: Bool { flags.isEmpty }
+    /// High confidence means the measurement is clean *and* it was taken in
+    /// conditions worth trusting. `.notLevel` is excluded: roll is corrected
+    /// downstream, so it costs accuracy only in the third decimal.
+    var highConfidence: Bool {
+        flags.isEmpty && captureFlags.allSatisfy { $0 == .notLevel }
+    }
 
     /// G1 counts a clip as tracked at 12+ frames, matching `G1_MIN_FRAMES`.
     var meetsG1: Bool { trackedFrames >= 12 }

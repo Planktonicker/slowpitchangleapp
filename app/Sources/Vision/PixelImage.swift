@@ -7,10 +7,17 @@ import Foundation
 
 /// A borrowed view of a locked 32BGRA pixel buffer.
 ///
-/// Every frame that reaches the detector is BGRA: the capture output and the
-/// `AVAssetReader` are both configured to hand us `kCVPixelFormatType_32BGRA`
-/// so no YUV conversion code exists in this app. The instance is only valid
-/// while the underlying buffer stays locked — never store one.
+/// BGRA only — `withImage` returns nil for anything else, so callers must
+/// convert first. The `AVAssetReader` in `ClipAnalyzer` asks for BGRA
+/// directly; the **live capture output does not** (it runs at the device-native
+/// YUV format so the encoder can take frames untouched), so live frames go
+/// through `PixelBufferConvert.toBGRA` on their way here.
+///
+/// That distinction used to be documented the other way round, and the live
+/// measurement path quietly returned nil for every tap as a result.
+///
+/// The instance is only valid while the underlying buffer stays locked —
+/// never store one.
 struct PixelImage {
     let base: UnsafePointer<UInt8>
     let width: Int

@@ -100,7 +100,7 @@ struct HistoryView: View {
                         .foregroundStyle(.secondary)
                 }
                 .font(.subheadline.monospacedDigit())
-                ConfidenceRow(flags: swing.flags)
+                ConfidenceRow(flags: swing.flags, captureFlags: swing.captureFlags)
             }
         }
         .padding(.vertical, 2)

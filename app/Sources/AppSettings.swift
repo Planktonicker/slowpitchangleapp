@@ -3,6 +3,38 @@
 // Full terms in LICENSE at the repository root. No warranty.
 
 import Foundation
+import ImageIO
+
+/// Manual override for the orientation handed to Vision.
+///
+/// Auto derives it from the device's rotation coordinator and is right in
+/// almost every case. The escape hatch exists because the angle-to-EXIF
+/// mapping is the classic thing to get backwards, and discovering that on a
+/// tripod at a field — where every trigger is silently suppressed because the
+/// pose model sees a sideways human — should cost a tap, not a trip.
+enum VisionOrientationSetting: String, Codable, CaseIterable, Sendable {
+    case auto, up, right, down, left
+
+    var displayName: String {
+        switch self {
+        case .auto: return "Auto"
+        case .up: return "Up (0°)"
+        case .right: return "Right (90°)"
+        case .down: return "Down (180°)"
+        case .left: return "Left (270°)"
+        }
+    }
+
+    var orientation: CGImagePropertyOrientation? {
+        switch self {
+        case .auto: return nil
+        case .up: return .up
+        case .right: return .right
+        case .down: return .down
+        case .left: return .left
+        }
+    }
+}
 
 /// User-tunable settings, persisted in `UserDefaults`.
 ///
@@ -26,6 +58,7 @@ struct AppSettings: Codable, Equatable {
     /// wrong — so this defaults on and warns about space instead.
     var keepClips = true
     var fpsOverride: Double?
+    var visionOrientation: VisionOrientationSetting = .auto
 
     static let storageKey = "swinglab.settings.v1"
 

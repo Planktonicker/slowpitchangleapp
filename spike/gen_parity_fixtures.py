@@ -340,6 +340,17 @@ def main():
             "SMASH_GOOD_HI": sla.SMASH_GOOD_HI,
             "SLOWPITCH_LAUNCH_LO": sla.SLOWPITCH_LAUNCH_LO,
             "SLOWPITCH_LAUNCH_HI": sla.SLOWPITCH_LAUNCH_HI,
+            # Detector defaults. These are mirrored by hand into
+            # SLAConstants.swift; pinning them here is what turns that mirror
+            # from a convention into a test.
+            "HSV_LO_H": float(sla.HSV_LO_DEFAULT[0]),
+            "HSV_LO_S": float(sla.HSV_LO_DEFAULT[1]),
+            "HSV_LO_V": float(sla.HSV_LO_DEFAULT[2]),
+            "HSV_HI_H": float(sla.HSV_HI_DEFAULT[0]),
+            "HSV_HI_S": float(sla.HSV_HI_DEFAULT[1]),
+            "HSV_HI_V": float(sla.HSV_HI_DEFAULT[2]),
+            "MIN_RADIUS_PX_DEFAULT": sla.MIN_RADIUS_PX_DEFAULT,
+            "MAX_RADIUS_PX_DEFAULT": sla.MAX_RADIUS_PX_DEFAULT,
             "BAT_BARREL_DIAMETER_M": sla.BAT_BARREL_DIAMETER_M,
             "INCHES_PER_M": sla.INCHES_PER_M,
             "CONTACT_PLAUSIBLE_M": sla.CONTACT_PLAUSIBLE_M,

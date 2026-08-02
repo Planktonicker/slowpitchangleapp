@@ -94,12 +94,46 @@ struct FlagChip: View {
     }
 }
 
-/// Confidence summary for a swing: either "high" or the flags that spoiled it.
-struct ConfidenceRow: View {
-    var flags: [SwingFlag]
+/// One capture-condition flag — the camera's state rather than the
+/// measurement's. Same look as `FlagChip`, different source.
+struct CaptureFlagChip: View {
+    var flag: CaptureFlag
+    @State private var showExplanation = false
 
     var body: some View {
-        if flags.isEmpty {
+        Button {
+            showExplanation.toggle()
+        } label: {
+            Text(flag.shortLabel)
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Theme.steel.opacity(0.22), in: Capsule())
+                .foregroundStyle(Theme.steel)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showExplanation) {
+            Text(flag.explanation)
+                .font(.callout)
+                .padding()
+                .frame(maxWidth: 280)
+                .presentationCompactAdaptation(.popover)
+        }
+    }
+}
+
+/// Confidence summary for a swing: either "high" or the flags that spoiled it.
+///
+/// Two independent sources. `flags` come from the measurement itself and are
+/// pinned to the Python reference; `captureFlags` describe the conditions the
+/// camera was in. Levelling stopped blocking capture, so the second group is
+/// what keeps an off-level reading honest rather than merely absent.
+struct ConfidenceRow: View {
+    var flags: [SwingFlag]
+    var captureFlags: [CaptureFlag] = []
+
+    var body: some View {
+        if flags.isEmpty && captureFlags.isEmpty {
             Label("High confidence", systemImage: "checkmark.seal.fill")
                 .font(.system(size: 12, weight: .bold, design: .rounded))
                 .foregroundStyle(Theme.pass)
@@ -113,6 +147,7 @@ struct ConfidenceRow: View {
 
     @ViewBuilder private var chips: some View {
         ForEach(flags, id: \.self) { FlagChip(flag: $0) }
+        ForEach(captureFlags, id: \.self) { CaptureFlagChip(flag: $0) }
     }
 }
 

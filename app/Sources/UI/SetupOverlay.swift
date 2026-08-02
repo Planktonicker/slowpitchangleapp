@@ -4,44 +4,46 @@
 
 import SwiftUI
 
-/// One-screen camera setup, on the live preview the whole time.
+/// Camera setup, drawn **over** the capture screen's live preview.
 ///
-/// The old flow was a four-step wizard with an ARKit surveying step in the
-/// middle — accurate, but it fought the capture session for the camera and
-/// asked the user to think like an operator. This screen asks for exactly
-/// three things a layman can do while looking at the picture:
+/// It deliberately owns no camera of its own. It used to be a sheet with its
+/// own `CameraPreview`, and two preview layers cannot share one session: the
+/// second took the preview connection, and when the sheet closed that
+/// connection died with it and left the capture screen permanently black.
+/// Drawing over the existing preview removes the whole class of problem, and
+/// it is what lets the user tap the ball *in the picture* — the overlay is not
+/// modal, so touches reach the preview underneath.
 ///
+/// What it asks for, in order:
 ///  1. Stand the tripod where the diagram shows (side-on, hitter in the box).
-///  2. Level it until the bar goes green.
-///  3. Tap the ball once so the app can measure the distance itself.
+///  2. Tap the ball in the picture, once.
+///  3. Arm.
 ///
-/// Everything is derived — the ball is 3.82 in, the lens angle is known, so
-/// one tap yields scale AND distance with no tape measure and no AR.
-struct SetupView: View {
+/// Levelling is shown but never demanded: roll is corrected in the maths and
+/// tilt is flagged, so a tripod on uneven grass still measures.
+struct SetupOverlay: View {
     @EnvironmentObject private var model: AppModel
-    @Environment(\.dismiss) private var dismiss
 
-    private var wizard: PlacementWizard { model.wizard }
+    /// Live measurement state, owned by `CaptureView` because the tap arrives
+    /// on the preview it owns.
+    @Binding var measuring: Bool
+    @Binding var lastResult: BallMeasureResult?
 
-    @State private var measuring = false
-    @State private var measureFailed = false
+    var onClose: () -> Void
+    var onArm: () -> Void
+
     @State private var showDistanceEntry = false
     @State private var showTips = false
+
+    private var wizard: PlacementWizard { model.wizard }
 
     var body: some View {
         GeometryReader { geo in
             let isLandscape = geo.size.width > geo.size.height
             ZStack {
-                Color.black.ignoresSafeArea()
-                CameraPreview(session: model.capture.session)
-                    .ignoresSafeArea()
-
                 framingGuide
 
                 if isLandscape {
-                    // Landscape is how the phone sits on the tripod: keep the
-                    // middle of the frame clear and park the work on the
-                    // right, level strip along the top.
                     VStack(spacing: 10) {
                         topBar
                         levelBar
@@ -80,24 +82,14 @@ struct SetupView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
-        .onAppear { wizard.startSensors() }
         .sheet(isPresented: $showTips) { PlacementTipsView() }
-        .alert("Couldn't find the ball", isPresented: $measureFailed) {
-            Button("Try again") {}
-            Button("Mark the plate instead") { wizard.showPlateMarkers = true }
-        } message: {
-            Text("Make sure the yellow ball is sitting still in frame — on the tee works best — and that nothing else bright yellow is visible.")
-        }
     }
 
     // MARK: - Pieces
 
     private var topBar: some View {
         HStack {
-            Button {
-                dismiss()
-            } label: {
+            Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .heavy))
                     .padding(10)
@@ -105,12 +97,19 @@ struct SetupView: View {
                     .foregroundStyle(.white)
             }
             Spacer()
-            Text("Set up the camera")
-                .font(Theme.label(15))
-                .textCase(.uppercase)
-                .tracking(1.2)
-                .foregroundStyle(.white)
-                .shadow(radius: 3)
+            VStack(spacing: 3) {
+                Text("Set up the camera")
+                    .font(Theme.label(15))
+                    .textCase(.uppercase)
+                    .tracking(1.2)
+                    .foregroundStyle(.white)
+                // Proof the hitter detector is alive. Without this the user
+                // has no way to know the pose gate works until a swing goes
+                // silently unrecorded in the field.
+                StatChip(text: model.capture.hitterPresent ? "Hitter detected ✓" : "Looking for hitter…",
+                         color: model.capture.hitterPresent ? Theme.pass : Theme.steel)
+            }
+            .shadow(radius: 3)
             Spacer()
             Button {
                 showTips = true
@@ -124,9 +123,8 @@ struct SetupView: View {
         }
     }
 
-    /// Where things should be in frame: hitter fills the tall box on one
-    /// side, ball/plate sits at the marker. Static template, no tracking —
-    /// its job is to make "film it the same way every time" visual.
+    /// Where things should be in frame. Static template, no tracking — its job
+    /// is to make "film it the same way every time" visual.
     private var framingGuide: some View {
         GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height
@@ -152,11 +150,13 @@ struct SetupView: View {
                     .position(x: w * 0.34, y: h * 0.735)
             }
         }
+        // Critical: the whole point of the overlay is that taps reach the
+        // preview underneath so the user can tap the ball.
         .allowsHitTesting(false)
     }
 
-    /// Roll shown as a sliding bar — like balancing a ball on a beam — with
-    /// tilt as a hint underneath. Green means stop fiddling.
+    /// Roll as a ball on a beam, tilt as a hint underneath. Advisory only —
+    /// nothing here can stop you arming.
     private var levelBar: some View {
         VStack(spacing: 5) {
             ZStack {
@@ -179,16 +179,19 @@ struct SetupView: View {
             .frame(maxWidth: 280)
 
             Group {
-                if wizard.level.isLevel {
+                if !wizard.level.isAvailable || !wizard.level.hasReading {
+                    StatChip(text: "Level unknown", color: Theme.steel)
+                } else if wizard.level.isLevel {
                     StatChip(text: "Level ✓", color: Theme.pass)
                 } else if !wizard.level.isTiltOK {
-                    StatChip(text: wizard.level.tiltDeg > 0 ? "Aim higher" : "Aim lower",
+                    StatChip(text: wizard.level.tiltDeg > 0 ? "Aiming down — still fine" : "Aiming up — still fine",
                              color: Theme.warn)
                 } else {
-                    StatChip(text: "Level the tripod", color: Theme.warn)
+                    StatChip(text: "Slightly off level — corrected", color: Theme.warn)
                 }
             }
         }
+        .allowsHitTesting(false)
     }
 
     private var plateHint: some View {
@@ -227,16 +230,9 @@ struct SetupView: View {
                 }
             }
 
-            HStack(spacing: 8) {
-                Button {
-                    measureBall()
-                } label: {
-                    Label(measuring ? "Measuring…" : "Tap the ball",
-                          systemImage: "circle.dotted.circle")
-                }
-                .buttonStyle(SlabButtonStyle())
-                .disabled(measuring)
+            instruction
 
+            HStack(spacing: 8) {
                 Menu {
                     Button("Mark home plate") {
                         wizard.showPlateMarkers = true
@@ -247,24 +243,16 @@ struct SetupView: View {
                         Button("Clear measurement", role: .destructive) { wizard.clearScale() }
                     }
                 } label: {
-                    Text("Other")
-                        .frame(width: 74)
+                    Text("Can't find the ball?")
                 }
                 .buttonStyle(OutlineButtonStyle())
-            }
-
-            if wizard.scaleSource == .ball, let d = wizard.lastBallDiameterPx {
-                Text(String(format: "Found the ball — %.0f px across. Distance is worked out from its real 3.82 in size.", d))
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.steel)
-            } else if wizard.scaleSource == .none {
-                Text("Put the ball on the tee (or anywhere still in frame) and tap the ball. The app measures it and works the distance out itself.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.steel)
             }
         }
         .padding(12)
         .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 14))
+        // Swallow taps: without this, tapping the card would fall through to
+        // the preview and be read as "the ball is here".
+        .contentShape(Rectangle())
         .alert("Distance from camera to hitter", isPresented: $showDistanceEntry) {
             TextField("feet", value: distanceEntryBinding, format: .number)
                 .keyboardType(.decimalPad)
@@ -275,40 +263,77 @@ struct SetupView: View {
         }
     }
 
+    /// The one instruction that matters, and honest feedback on the last try.
+    @ViewBuilder private var instruction: some View {
+        if measuring {
+            Label("Measuring…", systemImage: "circle.dotted.circle")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(Theme.yellow)
+        } else if wizard.scaleSource == .ball, let d = wizard.lastBallDiameterPx {
+            VStack(alignment: .leading, spacing: 3) {
+                Label(String(format: "Ball found — %.0f px across", d),
+                      systemImage: "checkmark.circle.fill")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(Theme.pass)
+                if case .some(.found(let m)) = lastResult, !m.subpixelRefined {
+                    // The coarse fallback reads the halo around the ball and
+                    // over-states its size, which lands straight in the scale.
+                    Text("Rough estimate — low contrast. Better light or the tee will sharpen it.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.warn)
+                }
+                Text("Tap the ball again any time to re-measure.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Theme.steel)
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 3) {
+                Label("Tap the ball in the picture", systemImage: "hand.tap.fill")
+                    .font(.system(size: 14, weight: .heavy))
+                    .foregroundStyle(Theme.yellow)
+                Text(failureText ?? "Put the ball down anywhere in frame, then touch it on screen. The app measures it and works out the distance itself.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(failureText == nil ? Theme.steel : Theme.warn)
+            }
+        }
+    }
+
+    /// Says what actually went wrong. The old code flattened every failure
+    /// into "couldn't find the ball", including the pixel-format bug that made
+    /// every measurement impossible.
+    private var failureText: String? {
+        guard let result = lastResult else { return nil }
+        switch result {
+        case .noBallNearTap:
+            return "Nothing ball-shaped there. Tap right on the ball, or use the button below."
+        case .noFrameYet:
+            return "Camera is still starting — try again in a second."
+        case .conversionFailed:
+            return "Could not read that frame. Try again; if it keeps happening, restart the app."
+        case .found:
+            return nil
+        }
+    }
+
     private var armButton: some View {
         VStack(spacing: 6) {
-            if let reason = wizard.blockingReason {
-                Text(reason)
+            if let advice = wizard.topAdvisory {
+                Text(advice.text)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.warn)
+                    .foregroundStyle(advice.level == .blocking ? Theme.warn : Theme.steel)
                     .multilineTextAlignment(.center)
             }
-            Button {
-                model.capture.lockExposureAndFocus()
-                model.arm()
-                dismiss()
-            } label: {
+            Button(action: onArm) {
                 Text(wizard.isArmingAllowed ? "Arm — let's hit" : "Arm")
             }
             .buttonStyle(SlabButtonStyle(fill: wizard.isArmingAllowed ? Theme.yellow : Theme.surface,
                                          textColor: wizard.isArmingAllowed ? .black : Theme.steel))
             .disabled(!wizard.isArmingAllowed)
         }
+        .contentShape(Rectangle())
     }
 
     // MARK: - Helpers
-
-    private func measureBall() {
-        measuring = true
-        model.capture.measureBall(detector: model.settings.detector) { diameter in
-            measuring = false
-            if let diameter {
-                wizard.applyBallMeasurement(diameterPx: diameter)
-            } else {
-                measureFailed = true
-            }
-        }
-    }
 
     private var distanceEntryBinding: Binding<Double> {
         Binding(get: { wizard.manualDistanceFt },
@@ -383,8 +408,8 @@ struct PlacementTipsView: View {
                         "That's 15–20 ft. Closer and the ball leaves the frame too fast; further and it gets too small to measure.")
                     tip("3", "Lens at belt height",
                         "About 3½ ft up — the height where bat meets ball. Most tripods reach it near full extension.")
-                    tip("4", "Hitter in the box, ball on the mark",
-                        "Match the dashed guides on the camera screen. The hitter fills the tall box; leave the rest of the frame empty for the ball to fly through.")
+                    tip("4", "Tap the ball on screen",
+                        "Put a ball down in frame and touch it on the picture. That one tap gives the app both the scale and how far away you are — no tape measure.")
                 }
                 .padding()
             }
@@ -407,27 +432,22 @@ struct PlacementTipsView: View {
             let hitter = CGPoint(x: w * 0.22, y: h * 0.5)
             let phone = CGPoint(x: w * 0.22, y: h * 0.88)
 
-            // Ball flight
             var flight = Path()
             flight.move(to: hitter)
             flight.addLine(to: CGPoint(x: w * 0.95, y: h * 0.42))
             context.stroke(flight, with: .color(Theme.yellow),
                            style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
 
-            // Sight line, perpendicular to the flight
             var sight = Path()
             sight.move(to: phone)
             sight.addLine(to: hitter)
             context.stroke(sight, with: .color(.white.opacity(0.45)),
                            style: StrokeStyle(lineWidth: 1.5, dash: [3, 4]))
 
-            // Hitter
             context.fill(Path(ellipseIn: CGRect(x: hitter.x - 9, y: hitter.y - 9, width: 18, height: 18)),
                          with: .color(.white))
-            // Ball
             context.fill(Path(ellipseIn: CGRect(x: hitter.x + 16, y: hitter.y - 5, width: 10, height: 10)),
                          with: .color(Theme.yellow))
-            // Phone
             context.fill(Path(roundedRect: CGRect(x: phone.x - 7, y: phone.y - 12, width: 14, height: 24), cornerRadius: 3),
                          with: .color(Theme.yellow))
 

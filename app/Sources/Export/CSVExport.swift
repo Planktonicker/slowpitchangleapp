@@ -53,7 +53,7 @@ enum CSVExport {
         "bat_frames", "bat_speed_mph", "smash_factor", "undercut_in",
         "hang_s", "carry_ft", "model_hang_s", "model_carry_ft",
         "hang_err_pct", "carry_err_pct", "camera_distance_ft", "lens_height_ft",
-        "camera_roll_deg", "track_csv", "notes",
+        "camera_roll_deg", "camera_tilt_deg", "capture_flags", "track_csv", "notes",
     ]
 
     static func fullCSV(_ swings: [SwingDTO]) -> String {
@@ -96,6 +96,8 @@ enum CSVExport {
                 s.cameraDistanceFt.map(round1) ?? "",
                 s.lensHeightFt.map(round2) ?? "",
                 s.cameraRollDeg.map(round2) ?? "",
+                s.cameraTiltDeg.map(round2) ?? "",
+                s.captureFlags.map(\.rawValue).joined(separator: "|"),
                 s.trackCSVFilename ?? "",
                 s.notes ?? "",
             ]

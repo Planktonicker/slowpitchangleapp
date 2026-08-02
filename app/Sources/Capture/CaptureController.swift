@@ -7,6 +7,8 @@ import Combine
 import CoreMedia
 import CoreVideo
 import Foundation
+import ImageIO
+import QuartzCore
 
 /// Owns the camera: 240fps capture, the rolling pre-roll ring, the audio
 /// contact trigger, and committing swings to disk.
@@ -38,8 +40,31 @@ final class CaptureController: NSObject, ObservableObject {
     @Published private(set) var suppressedTriggerCount = 0
     /// Non-nil while the system holds the camera (phone call, another app).
     @Published private(set) var interruptionMessage: String?
+    /// Which way is up in the frames Vision receives. Derived from the
+    /// device's rotation coordinator, never hardcoded: the phone lives sideways
+    /// on a tripod, and a body-pose model handed a rotated human simply fails.
+    @Published private(set) var visionOrientation: CGImagePropertyOrientation = .up
     @Published var isArmed = false {
         didSet { pipelineQueue.async { [weak self] in self?.syncArmed() } }
+    }
+
+    /// Set while the setup overlay is on screen. Only then does the controller
+    /// keep a BGRA snapshot for tap-to-measure; the armed hot path stays clean.
+    var wantsLiveMeasurement = false {
+        didSet {
+            if !wantsLiveMeasurement {
+                snapshotLock.lock()
+                latestBGRASnapshot = nil
+                snapshotLock.unlock()
+            }
+        }
+    }
+
+    /// Overrides `visionOrientation` when the user pins it in Settings. The
+    /// 0/90/180/270 mapping is the classic thing to get backwards, and a wrong
+    /// guess otherwise costs a whole trip to the field to discover.
+    var visionOrientationOverride: CGImagePropertyOrientation? {
+        didSet { if let o = visionOrientationOverride { setVisionOrientation(o) } }
     }
 
     /// When true, an audio trigger only records if a person was seen in the
@@ -68,10 +93,50 @@ final class CaptureController: NSObject, ObservableObject {
     private let presenceGate = HumanPresenceGate()
     private var clipCounter = 0
     private var videoFrameCounter = 0
-    /// Newest camera frame, for on-demand measurements (ball-size setup).
-    /// Touched only on `videoQueue`.
-    private var latestFrame: CVPixelBuffer?
+    /// Newest frame converted to BGRA, for tap-to-measure during setup.
+    ///
+    /// Deliberately a copy from our own pool rather than the camera's buffer:
+    /// holding one of the capture output's pooled buffers at 240fps with
+    /// `alwaysDiscardsLateVideoFrames = false` starves the pool and shows up
+    /// as dropped frames.
+    private var latestBGRASnapshot: CVPixelBuffer?
+    private let snapshotLock = NSLock()
+    private var snapshotStride = 24
     private var notificationTokens: [NSObjectProtocol] = []
+
+    /// Frames between pose-gate submissions, computed once per configure so
+    /// the video delegate never reads the main-actor-published `fps`.
+    private var presenceStride = 24
+
+    // Preview attachment. The layer's connection is created and owned
+    // explicitly rather than falling out of a `.session` property assignment,
+    // because that assignment blocks the main thread against a running
+    // 240fps session and cannot be undone or repaired once the layer dies.
+    private weak var attachedPreviewLayer: AVCaptureVideoPreviewLayer?
+    private var previewConnection: AVCaptureConnection?
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var rotationObservations: [NSKeyValueObservation] = []
+
+    /// Queue-safe mirror of `visionOrientation`. The video delegate cannot read
+    /// the `@Published` copy, which belongs to the main queue.
+    private let orientationLock = NSLock()
+    private var _visionOrientationForFrames: CGImagePropertyOrientation = .up
+    var visionOrientationForFrames: CGImagePropertyOrientation {
+        orientationLock.lock()
+        defer { orientationLock.unlock() }
+        return _visionOrientationForFrames
+    }
+
+    // Coalesced UI publishing. The audio path produced one main-queue hop per
+    // buffer (~50-100/s) and drops produced one per frame; each hop invalidated
+    // the whole environment-object tree. Values are accumulated on their own
+    // queues and flushed at 10 Hz, only when something visibly changed.
+    private var uiTimer: DispatchSourceTimer?
+    private let uiLock = NSLock()
+    private var pendingDb: Double = 0
+    private var publishedDb: Double = 0
+    private var pendingDrops = 0
+    private var publishedDrops = 0
 
     override init() {
         super.init()
@@ -82,12 +147,40 @@ final class CaptureController: NSObject, ObservableObject {
             self?.hitterPresent = present
         }
         installInterruptionObservers()
+        startUITimer()
     }
 
     deinit {
+        uiTimer?.cancel()
+        for observation in rotationObservations { observation.invalidate() }
         for token in notificationTokens {
             NotificationCenter.default.removeObserver(token)
         }
+    }
+
+    /// Publishes the two high-rate readouts at 10 Hz instead of per buffer.
+    private func startUITimer() {
+        let timer = DispatchSource.makeTimerSource(queue: pipelineQueue)
+        timer.schedule(deadline: .now() + 0.1, repeating: 0.1)
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.uiLock.lock()
+            let db = self.pendingDb
+            let drops = self.pendingDrops
+            let dbChanged = abs(db - self.publishedDb) >= 0.5
+            let dropsChanged = drops != self.publishedDrops
+            if dbChanged { self.publishedDb = db }
+            if dropsChanged { self.publishedDrops = drops }
+            self.uiLock.unlock()
+
+            guard dbChanged || dropsChanged else { return }
+            DispatchQueue.main.async {
+                if dbChanged { self.triggerLevelDb = db }
+                if dropsChanged { self.droppedFrameCount = drops }
+            }
+        }
+        timer.resume()
+        uiTimer = timer
     }
 
     /// The camera can be taken away at any time — a phone call, another app,
@@ -132,6 +225,123 @@ final class CaptureController: NSObject, ObservableObject {
                 }
             }
         })
+    }
+
+    // MARK: - Preview attachment
+
+    /// Bind a preview layer to the session.
+    ///
+    /// Assigning `layer.session` on the main thread blocks against a running
+    /// 240fps session — that was the multi-second hang when the setup screen
+    /// opened. Instead the layer is attached with no connection and we build
+    /// the `AVCaptureConnection` ourselves on `sessionQueue`, inside a
+    /// begin/commit pair. Owning the connection is also what makes re-attach
+    /// possible after a reconfigure destroys the graph.
+    func attachPreview(_ layer: AVCaptureVideoPreviewLayer) {
+        attachedPreviewLayer = layer
+        sessionQueue.async { [weak self] in
+            self?.bindPreviewLayer(layer, reconfiguring: true)
+        }
+    }
+
+    func detachPreview() {
+        sessionQueue.async { [weak self] in
+            guard let self, let connection = self.previewConnection else { return }
+            self.session.beginConfiguration()
+            self.session.removeConnection(connection)
+            self.session.commitConfiguration()
+            self.previewConnection = nil
+        }
+    }
+
+    /// Must run on `sessionQueue`. When `reconfiguring` is false the caller
+    /// already holds a begin/commit pair (i.e. `configure()`).
+    private func bindPreviewLayer(_ layer: AVCaptureVideoPreviewLayer,
+                                  reconfiguring: Bool) {
+        guard let input = session.inputs.first as? AVCaptureDeviceInput,
+              let port = input.ports(for: .video,
+                                     sourceDeviceType: input.device.deviceType,
+                                     sourceDevicePosition: input.device.position).first
+        else { return }
+
+        if reconfiguring { session.beginConfiguration() }
+        defer { if reconfiguring { session.commitConfiguration() } }
+
+        if let existing = previewConnection {
+            session.removeConnection(existing)
+            previewConnection = nil
+        }
+        // Layer mutations are implicitly animated; that animation on a preview
+        // layer reads as a flash of black.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.setSessionWithNoConnection(session)
+        CATransaction.commit()
+
+        let connection = AVCaptureConnection(inputPort: port, videoPreviewLayer: layer)
+        guard session.canAddConnection(connection) else { return }
+        session.addConnection(connection)
+        previewConnection = connection
+
+        installRotationCoordinator(device: input.device, layer: layer)
+    }
+
+    /// One source of truth for "which way is up" — feeding both the preview
+    /// connection and Vision. Replaces two hardcoded orientation tables.
+    private func installRotationCoordinator(device: AVCaptureDevice,
+                                            layer: AVCaptureVideoPreviewLayer) {
+        for observation in rotationObservations { observation.invalidate() }
+        rotationObservations.removeAll()
+
+        let coordinator = AVCaptureDevice.RotationCoordinator(device: device,
+                                                              previewLayer: layer)
+        rotationCoordinator = coordinator
+
+        applyPreviewRotation(coordinator.videoRotationAngleForHorizonLevelPreview)
+        setVisionOrientation(Self.orientation(
+            forCaptureAngle: coordinator.videoRotationAngleForHorizonLevelCapture))
+
+        rotationObservations.append(coordinator.observe(
+            \.videoRotationAngleForHorizonLevelPreview, options: [.new]
+        ) { [weak self] _, change in
+            guard let angle = change.newValue else { return }
+            self?.sessionQueue.async { self?.applyPreviewRotation(angle) }
+        })
+        rotationObservations.append(coordinator.observe(
+            \.videoRotationAngleForHorizonLevelCapture, options: [.new]
+        ) { [weak self] _, change in
+            guard let angle = change.newValue else { return }
+            self?.setVisionOrientation(Self.orientation(forCaptureAngle: angle))
+        })
+    }
+
+    private func applyPreviewRotation(_ angle: CGFloat) {
+        guard let connection = previewConnection,
+              connection.isVideoRotationAngleSupported(angle) else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        connection.videoRotationAngle = angle
+        CATransaction.commit()
+    }
+
+    private func setVisionOrientation(_ orientation: CGImagePropertyOrientation) {
+        let resolved = visionOrientationOverride ?? orientation
+        orientationLock.lock()
+        _visionOrientationForFrames = resolved
+        orientationLock.unlock()
+        DispatchQueue.main.async {
+            if self.visionOrientation != resolved { self.visionOrientation = resolved }
+        }
+    }
+
+    /// The rotation the buffer needs to appear upright, as an EXIF orientation.
+    static func orientation(forCaptureAngle angle: CGFloat) -> CGImagePropertyOrientation {
+        switch Int(angle.rounded()) % 360 {
+        case 90:  return .right
+        case 180: return .down
+        case 270: return .left
+        default:  return .up
+        }
     }
 
     // MARK: - Permissions
@@ -191,10 +401,19 @@ final class CaptureController: NSObject, ObservableObject {
         session.beginConfiguration()
         defer { session.commitConfiguration() }
 
-        // Strip any previous graph. Reconfiguration is routine — every tab
-        // switch and every return from the wizard's AR step lands here — and
-        // canAddInput answers false while the old inputs are still attached,
-        // which would otherwise kill the camera permanently.
+        // Strip any previous graph. `canAddInput` answers false while the old
+        // inputs are still attached, which would otherwise kill the camera
+        // permanently.
+        //
+        // Only our own preview connection is removed explicitly — the
+        // input/output connections the session formed implicitly are torn down
+        // by removing their inputs and outputs, and asking to remove one
+        // directly is not allowed. The preview layer is re-bound at the end of
+        // this method.
+        if let existing = previewConnection {
+            session.removeConnection(existing)
+            previewConnection = nil
+        }
         for input in session.inputs { session.removeInput(input) }
         for output in session.outputs { session.removeOutput(output) }
         encoder?.invalidate()
@@ -243,6 +462,17 @@ final class CaptureController: NSObject, ObservableObject {
             self?.pipelineQueue.async { self?.handleEncoded(sb) }
         }
         encoder = enc
+
+        // Read once here rather than off the @Published `fps` in the video
+        // delegate, which was a genuine data race across two queues.
+        presenceStride = max(1, Int(choice.fps / 10))
+        snapshotStride = max(1, Int(choice.fps / 10))
+
+        // The graph was rebuilt above, so any live preview layer lost its
+        // connection with it. Re-bind inside this begin/commit pair.
+        if let layer = attachedPreviewLayer {
+            bindPreviewLayer(layer, reconfiguring: false)
+        }
 
         DispatchQueue.main.async {
             self.activeFormatDescription = choice.describes
@@ -318,23 +548,55 @@ final class CaptureController: NSObject, ObservableObject {
         }
     }
 
-    /// Measure the ball in the newest camera frame — the one-tap setup path.
-    /// Finds the largest ball-coloured blob at rest and hands back its
-    /// sub-pixel diameter. Completion on the main queue.
-    func measureBall(detector: DetectorSettings,
-                     completion: @escaping (Double?) -> Void) {
-        videoQueue.async { [weak self] in
-            guard let self, let frame = self.latestFrame else {
-                DispatchQueue.main.async { completion(nil) }
+    /// Measure the ball the user just tapped.
+    ///
+    /// - Parameter devicePoint: normalised camera coordinates from
+    ///   `AVCaptureVideoPreviewLayer.captureDevicePointConverted`. Its origin
+    ///   convention matches the capture buffer's row layout, so scaling by the
+    ///   buffer dimensions lands on the right pixel without any rotation math.
+    ///
+    /// Runs off the capture queues — a full-frame scan on `videoQueue` would
+    /// stall frame delivery at 240fps. Completion on the main queue.
+    func measure(atDevicePoint devicePoint: CGPoint,
+                 detector: DetectorSettings,
+                 completion: @escaping (BallMeasureResult) -> Void) {
+        snapshotLock.lock()
+        let snapshot = latestBGRASnapshot
+        snapshotLock.unlock()
+
+        let fov = fieldOfViewDeg
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let snapshot else {
+                DispatchQueue.main.async { completion(.noFrameYet) }
                 return
             }
-            let diameter = PixelImage.withImage(frame) { img -> Double? in
-                let candidates = BallDetector.detect(image: img, frame: 0, t: 0,
-                                                     settings: detector)
-                return candidates.map(\.diameterPx).max()
-            } ?? nil
-            DispatchQueue.main.async { completion(diameter) }
+            let radius = 160.0
+            let result: BallMeasureResult = PixelImage.withImage(snapshot) { img in
+                let px = Double(devicePoint.x) * Double(img.width)
+                let py = Double(devicePoint.y) * Double(img.height)
+                // Widen once before giving up: a tap can land a little off the
+                // ball, and a second pass is far cheaper than a failed trip.
+                for r in [radius, radius * 2] {
+                    if let found = BallDetector.measureAt(image: img,
+                                                          nearX: px, nearY: py,
+                                                          searchRadiusPx: r,
+                                                          settings: detector,
+                                                          fovDeg: fov) {
+                        return .found(found)
+                    }
+                }
+                return .noBallNearTap(searchRadiusPx: radius * 2)
+            } ?? .conversionFailed
+            DispatchQueue.main.async { completion(result) }
         }
+    }
+
+    /// True when the pose gate has been running since `start` without ever
+    /// detecting anyone — the signature of a gate that is broken rather than
+    /// an empty field. Used to offer an escape hatch instead of silently
+    /// suppressing every trigger, which is how the field test lost its hits.
+    func hitterGateNeverFired(since start: CFTimeInterval) -> Bool {
+        presenceGate.looksUnreliable(since: start)
     }
 
     private func syncArmed() {
@@ -419,12 +681,20 @@ extension CaptureController: AVCaptureVideoDataOutputSampleBufferDelegate,
                        from connection: AVCaptureConnection) {
         if output === videoOutput {
             guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-            latestFrame = pb
+            videoFrameCounter += 1
             // Feed the pose gate roughly every 100 ms — every 240fps frame
             // would be waste; presence does not change at 240 Hz.
-            videoFrameCounter += 1
-            if videoFrameCounter % max(1, Int(fps / 10)) == 0 {
-                presenceGate.submit(pixelBuffer: pb)
+            if videoFrameCounter % presenceStride == 0 {
+                presenceGate.submit(pixelBuffer: pb, orientation: visionOrientationForFrames)
+            }
+            // Only while the setup overlay is up: keep one BGRA copy so a tap
+            // has something to measure. The camera's own buffer is never held.
+            if wantsLiveMeasurement, videoFrameCounter % snapshotStride == 0 {
+                if let bgra = PixelBufferConvert.toBGRA(pb) {
+                    snapshotLock.lock()
+                    latestBGRASnapshot = bgra
+                    snapshotLock.unlock()
+                }
             }
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             let duration = CMSampleBufferGetDuration(sampleBuffer)
@@ -432,7 +702,9 @@ extension CaptureController: AVCaptureVideoDataOutputSampleBufferDelegate,
         } else {
             trigger.process(sampleBuffer: sampleBuffer)
             let db = trigger.lastDb
-            DispatchQueue.main.async { self.triggerLevelDb = db }
+            uiLock.lock()
+            pendingDb = db
+            uiLock.unlock()
             pipelineQueue.async { [weak self] in
                 guard let self else { return }
                 self.audioRing.append(sampleBuffer)
@@ -445,6 +717,8 @@ extension CaptureController: AVCaptureVideoDataOutputSampleBufferDelegate,
                        didDrop sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         guard output === videoOutput else { return }
-        DispatchQueue.main.async { self.droppedFrameCount += 1 }
+        uiLock.lock()
+        pendingDrops += 1
+        uiLock.unlock()
     }
 }
