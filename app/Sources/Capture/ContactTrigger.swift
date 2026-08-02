@@ -18,14 +18,40 @@ final class ContactTrigger {
     /// Fired with the presentation time of the impulse.
     var onContact: ((CMTime) -> Void)?
 
-    /// Live level for the UI, in dB over the rolling floor.
-    private(set) var lastDb: Double = 0
+    /// Everything below is touched from two queues: audio buffers arrive on
+    /// the capture queue and run `process`, while arming and disarming happen
+    /// on the pipeline queue and call `reset`. Without this lock, arming while
+    /// the microphone was mid-buffer emptied `carry` underneath `process` and
+    /// trapped on "Can't remove more items from a collection than it has" —
+    /// which is what made pressing ARM kill the app.
+    private let lock = NSLock()
 
-    var thresholdDb: Double
+    private var _lastDb: Double = 0
+    /// Live level for the UI, in dB over the rolling floor.
+    var lastDb: Double {
+        lock.lock(); defer { lock.unlock() }
+        return _lastDb
+    }
+
+    private var _thresholdDb: Double
+    var thresholdDb: Double {
+        get { lock.lock(); defer { lock.unlock() }; return _thresholdDb }
+        set { lock.lock(); _thresholdDb = newValue; lock.unlock() }
+    }
+
+    private var _refractoryS: Double = 2.0
     /// Ignore further impulses for this long after one fires — the ball
     /// hitting a net or the ground would otherwise re-trigger immediately.
-    var refractoryS: Double = 2.0
-    var isArmed = true
+    var refractoryS: Double {
+        get { lock.lock(); defer { lock.unlock() }; return _refractoryS }
+        set { lock.lock(); _refractoryS = newValue; lock.unlock() }
+    }
+
+    private var _isArmed = true
+    var isArmed: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _isArmed }
+        set { lock.lock(); _isArmed = newValue; lock.unlock() }
+    }
 
     private let rmsWindowS = 0.005      // 5 ms
     private let floorWindowS = 0.5      // rolling median span
@@ -35,13 +61,15 @@ final class ContactTrigger {
     private var carry: [Double] = []    // leftover samples between callbacks
 
     init(thresholdDb: Double = SLA.triggerDb) {
-        self.thresholdDb = thresholdDb
+        self._thresholdDb = thresholdDb
     }
 
     func reset() {
+        lock.lock()
         floorHistory.removeAll()
         carry.removeAll()
         lastFireTime = -.infinity
+        lock.unlock()
     }
 
     func process(sampleBuffer: CMSampleBuffer) {
@@ -54,6 +82,12 @@ final class ContactTrigger {
         let startSeconds = startPTS.isNumeric ? startPTS.seconds : 0
         let windowLength = max(1, Int(rmsWindowS * sampleRate))
 
+        // Impulses are collected and fired after the lock is released: the
+        // callback hops to the pipeline queue, and calling out from inside a
+        // lock that the pipeline queue also takes is how deadlocks are made.
+        var fires: [Double] = []
+
+        lock.lock()
         carry.append(contentsOf: mono)
         var offset = 0
         while carry.count - offset >= windowLength {
@@ -66,28 +100,37 @@ final class ContactTrigger {
 
             let floor = medianFloor() + 1e-9
             let db = 20 * log10(rms / floor)
-            lastDb = db
+            _lastDb = db
 
             let windowTime = startSeconds
                 + Double(offset) / sampleRate
                 + rmsWindowS / 2
 
-            if isArmed,
-               db >= thresholdDb,
+            if _isArmed,
+               db >= _thresholdDb,
                floorHistory.count >= maxFloorSamples / 2,
-               windowTime - lastFireTime >= refractoryS {
+               windowTime - lastFireTime >= _refractoryS {
                 lastFireTime = windowTime
-                let pts = CMTime(seconds: windowTime, preferredTimescale: 44_100)
-                onContact?(pts)
+                fires.append(windowTime)
             }
 
             floorHistory.append(rms)
             if floorHistory.count > maxFloorSamples { floorHistory.removeFirst() }
             offset += windowLength
         }
-        if offset > 0 { carry.removeFirst(offset) }
+        // Clamped rather than trusted. The loop bound already implies
+        // offset <= carry.count, but this line is the one that crashed, so it
+        // does not get to depend on an invariant holding across a refactor.
+        if offset > 0 { carry.removeFirst(min(offset, carry.count)) }
         // Guard against unbounded growth if the format ever changes mid-run.
-        if carry.count > Int(sampleRate) { carry.removeFirst(carry.count - Int(sampleRate)) }
+        if carry.count > Int(sampleRate) {
+            carry.removeFirst(min(carry.count - Int(sampleRate), carry.count))
+        }
+        lock.unlock()
+
+        for windowTime in fires {
+            onContact?(CMTime(seconds: windowTime, preferredTimescale: 44_100))
+        }
     }
 
     private func medianFloor() -> Double {

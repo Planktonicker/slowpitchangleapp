@@ -286,9 +286,17 @@ struct SetupOverlay: View {
                       systemImage: "checkmark.circle.fill")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundStyle(Theme.pass)
+                if case .some(.found(let m)) = lastResult, !m.subpixelRefined {
+                    // Measured from the mask rather than the image edge, which
+                    // reads the compression halo and over-states the size.
+                    Text("Rough — too little contrast to find the exact edge. Better light will sharpen it.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.warn)
+                }
                 Text("Tap the ball again any time to re-measure.")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.steel)
+                detectorReport
             }
         } else {
             VStack(alignment: .leading, spacing: 4) {
@@ -299,7 +307,20 @@ struct SetupOverlay: View {
                     .font(.system(size: 11))
                     .foregroundStyle(failureText == nil ? Theme.steel : Theme.warn)
                     .fixedSize(horizontal: false, vertical: true)
+                detectorReport
             }
+        }
+    }
+
+    /// Exactly what the shape gates measured. Deliberately terse and technical:
+    /// its job is to make a rejection diagnosable from a photo of the screen,
+    /// instead of another round of guessing at which threshold was too tight.
+    @ViewBuilder private var detectorReport: some View {
+        if let report = model.capture.lastMeasureReport {
+            Text(report)
+                .font(.system(size: 9, weight: .regular, design: .monospaced))
+                .foregroundStyle(Theme.steel.opacity(0.8))
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 

@@ -40,6 +40,9 @@ final class CaptureController: NSObject, ObservableObject {
     @Published private(set) var suppressedTriggerCount = 0
     /// Non-nil while the system holds the camera (phone call, another app).
     @Published private(set) var interruptionMessage: String?
+    /// What the ball-measurement gates saw on the last tap. Shown in setup so a
+    /// rejection can be understood rather than guessed at.
+    @Published private(set) var lastMeasureReport: String?
     /// Which way is up in the frames Vision receives. Derived from the
     /// device's rotation coordinator, never hardcoded: the phone lives sideways
     /// on a tripod, and a body-pose model handed a rotated human simply fails.
@@ -70,6 +73,15 @@ final class CaptureController: NSObject, ObservableObject {
     /// When true, an audio trigger only records if a person was seen in the
     /// last ~1.5 s. Synced from Settings; manual capture always bypasses it.
     var requireHitterToTrigger = true
+
+    /// How far a contact impulse must stand above the rolling noise floor.
+    /// Synced from Settings — the slider previously moved a stored number that
+    /// never reached the trigger, so lowering it to catch a quiet venue did
+    /// nothing at all.
+    var triggerThresholdDb: Double {
+        get { trigger.thresholdDb }
+        set { trigger.thresholdDb = newValue }
+    }
 
     /// Fired on the main queue once a swing has been written to disk.
     var onClip: ((ClipRecorder.Output) -> Void)?
@@ -575,7 +587,7 @@ final class CaptureController: NSObject, ObservableObject {
                 DispatchQueue.main.async { completion(.noFrameYet) }
                 return
             }
-            let result: BallMeasureResult = PixelImage.withImage(snapshot) { img in
+            let outcome: (BallMeasureResult, String) = PixelImage.withImage(snapshot) { img in
                 let px = Double(devicePoint.x) * Double(img.width)
                 let py = Double(devicePoint.y) * Double(img.height)
                 // Search windows scale with the frame, not a fixed 160 px. A
@@ -585,15 +597,18 @@ final class CaptureController: NSObject, ObservableObject {
                 let w = Double(img.width)
                 let radii = [w * 0.12, w * 0.25, w * 0.45]
                 var last: SetupBallMeasure.Outcome = .nothingThere
+                var report = ""
                 for r in radii {
-                    last = SetupBallMeasure.measure(image: img,
-                                                    tapX: px, tapY: py,
-                                                    searchRadiusPx: r,
-                                                    settings: detector,
-                                                    fovDeg: fov)
+                    let attempt = SetupBallMeasure.measure(image: img,
+                                                           tapX: px, tapY: py,
+                                                           searchRadiusPx: r,
+                                                           settings: detector,
+                                                           fovDeg: fov)
+                    last = attempt.outcome
+                    report = attempt.report
                     switch last {
                     case .found(let m):
-                        return .found(m)
+                        return (.found(m), report)
                     case .needsWiderSearch:
                         continue          // only this one is worth retrying
                     default:
@@ -602,16 +617,19 @@ final class CaptureController: NSObject, ObservableObject {
                     break
                 }
                 switch last {
-                case .found(let m):          return .found(m)
-                case .notAnEdge:             return .notAnEdge
-                case .mergedWithBackground:  return .mergedWithBackground
-                case .shadowed:              return .shadowed
-                case .truncatedByFrame:      return .truncatedByFrame
+                case .found(let m):          return (.found(m), report)
+                case .notAnEdge:             return (.notAnEdge, report)
+                case .mergedWithBackground:  return (.mergedWithBackground, report)
+                case .shadowed:              return (.shadowed, report)
+                case .truncatedByFrame:      return (.truncatedByFrame, report)
                 case .needsWiderSearch, .nothingThere:
-                    return .noBallNearTap(searchRadiusPx: radii.last ?? 0)
+                    return (.noBallNearTap(searchRadiusPx: radii.last ?? 0), report)
                 }
-            } ?? .conversionFailed
-            DispatchQueue.main.async { completion(result) }
+            } ?? (.conversionFailed, "frame could not be read as BGRA")
+            DispatchQueue.main.async {
+                self.lastMeasureReport = outcome.1.isEmpty ? nil : outcome.1
+                completion(outcome.0)
+            }
         }
     }
 

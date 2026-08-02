@@ -28,6 +28,7 @@ final class AppModel: ObservableObject {
             settings.save()
             capture.requireHitterToTrigger = settings.requireHitter
             capture.visionOrientationOverride = settings.visionOrientation.orientation
+            capture.triggerThresholdDb = settings.triggerDb
         }
     }
 
@@ -85,6 +86,7 @@ final class AppModel: ObservableObject {
 
         capture.requireHitterToTrigger = settings.requireHitter
         capture.visionOrientationOverride = settings.visionOrientation.orientation
+        capture.triggerThresholdDb = settings.triggerDb
         reload()
     }
 

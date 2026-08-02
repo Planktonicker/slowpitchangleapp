@@ -109,18 +109,25 @@ enum SetupBallMeasure {
 
     // MARK: - Entry point
 
+    /// A short, human-readable trace of what the gates saw. This exists
+    /// because the failure messages alone are not enough to tell a real
+    /// rejection from an over-tight threshold, and every guess made from a
+    /// screenshot so far has been wrong. It costs nothing and turns "it still
+    /// cannot find the ball" into an answer.
     static func measure(image: PixelImage,
                         tapX: Double,
                         tapY: Double,
                         searchRadiusPx: Double,
                         settings: DetectorSettings,
-                        fovDeg: Double) -> Outcome {
+                        fovDeg: Double) -> (outcome: Outcome, report: String) {
 
         _ = fovDeg   // distance sanity is the wizard's job, not the detector's
         let (minDiameter, maxDiameter) = diameterBand(imageWidth: image.width,
                                                       fovDeg: fovDeg,
                                                       searchRadiusPx: searchRadiusPx)
-        guard maxDiameter > minDiameter else { return .needsWiderSearch }
+        guard maxDiameter > minDiameter else {
+            return (.needsWiderSearch, "window too small for any ball")
+        }
 
         // Seed the colour window from the pixels the user actually pointed at,
         // rather than walking the global window blindly and hoping. The blind
@@ -137,27 +144,44 @@ enum SetupBallMeasure {
                               searchRadiusPx: searchRadiusPx, settings: seeded,
                               minDiameter: minDiameter, maxDiameter: maxDiameter)
 
-        guard case .found(let primary, let primaryShape) = a else { return a.outcomeOnly }
+        guard case .found(let primary, let shape) = a else {
+            return (a.outcomeOnly, "r\(Int(searchRadiusPx)) · \(a.trace)")
+        }
 
+        let base = String(format: "d %.0fpx · fill %.2f · rays %d/16 · edge %@",
+                          primary.diameterPx, shape.extent, shape.goodRays,
+                          primary.subpixelRefined ? "yes" : "no")
+
+        // A ball has a step edge, so its measured size barely moves when the
+        // colour window is tightened; a broad colour region collapses. This is
+        // the only test that looks at the image rather than the mask, and it is
+        // what keeps a tabletop out.
         let b = bestCandidate(image: image, tapX: tapX, tapY: tapY,
                               searchRadiusPx: searchRadiusPx, settings: tight,
                               minDiameter: minDiameter, maxDiameter: maxDiameter)
+
+        // Very disc-like candidates are allowed to skip the cross-check. A
+        // scuffed or backlit ball can vanish under a deliberately harsh window
+        // while still being unmistakably round and isolated, and refusing those
+        // left real balls unmeasurable — the failure actually seen in the field.
+        let unmistakable = shape.goodRays >= rayCount - 1
+            && shape.extent >= 0.70 && shape.extent <= 0.86
+
         guard case .found(let check, _) = b else {
-            // Survived the nominal window but vanished under a tighter one:
-            // there was never an edge there.
-            return .notAnEdge
+            return unmistakable
+                ? (.found(primary), base + " · tight:none, allowed (round)")
+                : (.notAnEdge, base + " · vanished under tighter colour")
         }
 
         let dDiff = abs(primary.diameterPx - check.diameterPx) / max(1e-6, primary.diameterPx)
         let drift = ((primary.x - check.x) * (primary.x - check.x)
                      + (primary.y - check.y) * (primary.y - check.y)).squareRoot()
-        guard dDiff <= stabilityDiameterTol,
-              drift <= stabilityCentroidTol * primary.diameterPx else {
-            return .notAnEdge
+        let stable = dDiff <= stabilityDiameterTol
+            && drift <= stabilityCentroidTol * primary.diameterPx
+        guard stable || unmistakable else {
+            return (.notAnEdge, base + String(format: " · size moved %.0f%% under tighter colour", dDiff * 100))
         }
-
-        _ = primaryShape
-        return .found(primary)
+        return (.found(primary), base + String(format: " · stable %.0f%%", dDiff * 100))
     }
 
     // MARK: - Size band
@@ -214,14 +238,28 @@ enum SetupBallMeasure {
 
     // MARK: - Candidate search
 
+    /// What the winning candidate's shape statistics were, for the report.
+    struct Shape {
+        var extent: Double
+        var goodRays: Int
+        var score: Double
+    }
+
     private enum Attempt {
-        case found(BallMeasurement, shapeScore: Double)
-        case failed(Outcome)
+        case found(BallMeasurement, Shape)
+        case failed(Outcome, trace: String)
 
         var outcomeOnly: Outcome {
             switch self {
             case .found: return .nothingThere
-            case .failed(let o): return o
+            case .failed(let o, _): return o
+            }
+        }
+
+        var trace: String {
+            switch self {
+            case .found: return "found"
+            case .failed(_, let t): return t
             }
         }
     }
@@ -235,7 +273,7 @@ enum SetupBallMeasure {
         let roi = ROI.around(x: tapX, y: tapY, radius: searchRadiusPx)
             .clamped(width: image.width, height: image.height)
         let w = roi.x1 - roi.x0, h = roi.y1 - roi.y0
-        guard w > 8, h > 8 else { return .failed(.nothingThere) }
+        guard w > 8, h > 8 else { return .failed(.nothingThere, trace: "window clipped away") }
 
         var mask = [UInt8](repeating: 0, count: w * h)
         for yy in 0..<h {
@@ -267,8 +305,14 @@ enum SetupBallMeasure {
         }
 
         var best: BallMeasurement?
+        var bestShape = Shape(extent: 0, goodRays: 0, score: .infinity)
         var bestScore = Double.infinity
         var diagnosis: Outcome = .nothingThere
+        // Why candidates were dropped, so a failure can be explained rather
+        // than merely reported.
+        var considered = 0
+        var rejects: [String: Int] = [:]
+        func reject(_ why: String) { rejects[why, default: 0] += 1 }
 
         for blob in blobs {
             // Prefer the blob under the tap; allow a near miss on its centroid.
@@ -278,13 +322,14 @@ enum SetupBallMeasure {
             let dy = (Double(roi.y0) + blob.meanY) - tapY
             let centroidNear = (dx * dx + dy * dy).squareRoot() <= 0.6 * max(dEq / 2, 8)
             guard isTapped || centroidNear else { continue }
+            considered += 1
 
             // Runs off the edge of the picture: its diameter is under-read,
             // which biases the scale — and therefore exit velocity — high.
             let touchesImageEdge =
                 (roi.x0 + blob.minX) <= 0 || (roi.x0 + blob.maxX) >= image.width - 1 ||
                 (roi.y0 + blob.minY) <= 0 || (roi.y0 + blob.maxY) >= image.height - 1
-            if touchesImageEdge { diagnosis = .truncatedByFrame; continue }
+            if touchesImageEdge { diagnosis = .truncatedByFrame; reject("frame edge"); continue }
 
             // Runs off the edge of the *search window*: retry wider rather
             // than declaring failure.
@@ -292,6 +337,7 @@ enum SetupBallMeasure {
                 || blob.minY <= 0 || blob.maxY >= h - 1
             if touchesROIEdge {
                 diagnosis = isTapped ? .mergedWithBackground : .needsWiderSearch
+                reject("runs off window")
                 continue
             }
 
@@ -300,6 +346,7 @@ enum SetupBallMeasure {
             let major = blob.majorAxis, minor = blob.minorAxis
             if minor > 1e-6, major / minor > maxElongation {
                 diagnosis = .mergedWithBackground
+                reject(String(format: "elongated %.1f", major / minor))
                 continue
             }
 
@@ -308,50 +355,79 @@ enum SetupBallMeasure {
             // raw extent down to the rejection threshold.
             let filledCount = filledArea(labels: labels, width: w, height: h, blob: blob)
             let extent = filledCount / max(1, blob.boxWidth * blob.boxHeight)
-            guard extent >= extentLo, extent <= extentHi else { continue }
+            guard extent >= extentLo, extent <= extentHi else {
+                reject(String(format: "fill %.2f", extent))
+                continue
+            }
 
             // The ray gate: roundness, isolation and window-safety in one pass.
             let rays = rayProfile(labels: labels, width: w, height: h, blob: blob)
             guard rays.good >= raysRequired else {
                 // One contiguous arc missing is a shadow, not an impostor.
                 if rays.good >= 8, rays.failuresContiguous { diagnosis = .shadowed }
+                reject("rays \(rays.good)/16")
                 continue
             }
 
             let cx = Double(roi.x0) + blob.meanX
             let cy = Double(roi.y0) + blob.meanY
 
-            // Sub-pixel refinement is mandatory here. Without an edge there is
-            // no refinement, and the fallback is the halo-inflated mask
-            // diameter — a known ~+6% bias landing straight in the scale.
-            guard let refined = BallDetector.subpixelMinorDiameter(
+            // Sub-pixel refinement is strongly preferred: without a real edge
+            // the fallback is the halo-inflated mask diameter, a known ~+6%
+            // bias landing straight in the scale.
+            //
+            // It is no longer an outright veto, though. A scuffed ball, or one
+            // backlit against a bright window, can genuinely have too little
+            // colour contrast to refine while still being unmistakably round
+            // and isolated — and refusing those meant the user could not
+            // measure a real ball at all, which is worse than a flagged
+            // reading. Only near-perfect discs get the exemption, and they are
+            // marked so the UI can say the number is rough.
+            var diameter: Double
+            var refinedOK = true
+            if let refined = BallDetector.subpixelMinorDiameter(
                     image: image, cx: cx, cy: cy,
-                    minorAxisDeg: blob.minorAxisDeg, r0: max(2, rays.median)) else {
+                    minorAxisDeg: blob.minorAxisDeg, r0: max(2, rays.median)) {
+                // The image-derived diameter must broadly agree with the mask.
+                guard abs(refined - dEq) / max(1e-6, refined) <= subpixelVsMaskTol else {
+                    diagnosis = .notAnEdge
+                    reject("edge/mask disagree")
+                    continue
+                }
+                diameter = refined
+            } else if rays.good >= rayCount - 1, extent >= 0.70, extent <= 0.86 {
+                diameter = 2 * rays.median
+                refinedOK = false
+            } else {
                 diagnosis = .notAnEdge
+                reject("no edge to measure")
                 continue
             }
-            // The image-derived diameter must broadly agree with the mask.
-            guard abs(refined - dEq) / max(1e-6, refined) <= subpixelVsMaskTol else {
-                diagnosis = .notAnEdge
-                continue
-            }
-            guard refined >= minDiameter, refined <= maxDiameter else {
-                diagnosis = refined > maxDiameter ? .needsWiderSearch : .nothingThere
+
+            guard diameter >= minDiameter, diameter <= maxDiameter else {
+                diagnosis = diameter > maxDiameter ? .needsWiderSearch : .nothingThere
+                reject(String(format: "size %.0fpx outside %.0f-%.0f",
+                              diameter, minDiameter, maxDiameter))
                 continue
             }
 
             let score = abs(extent - 0.785)
                 + 0.5 * (1 - Double(rays.good) / Double(rayCount))
+                + (refinedOK ? 0 : 0.25)
             if score < bestScore {
                 bestScore = score
-                best = BallMeasurement(diameterPx: refined, x: cx, y: cy,
+                bestShape = Shape(extent: extent, goodRays: rays.good, score: score)
+                best = BallMeasurement(diameterPx: diameter, x: cx, y: cy,
                                        areaPx: Double(blob.count),
-                                       subpixelRefined: true)
+                                       subpixelRefined: refinedOK)
             }
         }
 
-        if let best { return .found(best, shapeScore: bestScore) }
-        return .failed(diagnosis)
+        if let best { return .found(best, bestShape) }
+        let why = rejects.isEmpty
+            ? (considered == 0 ? "no coloured blob under the tap" : "no candidate")
+            : rejects.map { "\($0.value)x \($0.key)" }.sorted().joined(separator: ", ")
+        return .failed(diagnosis, trace: "\(considered) near tap · \(why)")
     }
 
     // MARK: - Shape statistics
