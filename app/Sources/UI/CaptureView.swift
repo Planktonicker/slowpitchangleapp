@@ -48,7 +48,6 @@ struct CaptureView: View {
                 CameraPreview(controller: model.capture, onTap: handleTap)
                     .ignoresSafeArea()
 
-                StateFrame(state: hudState).ignoresSafeArea()
                 tapMarker
 
                 if showSetup {
@@ -131,36 +130,45 @@ struct CaptureView: View {
                     SeamMeter(db: model.capture.triggerLevelDb,
                               thresholdDb: model.settings.triggerDb)
                         .padding(.horizontal, 16)
-                        .padding(.bottom, 6)
+                        .padding(.bottom, 8)
                 }
 
                 bottomRow(isLandscape: isLandscape)
                     .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
+                    // The tab bar floats over the content on modern iOS, so
+                    // the safe area alone does not clear it.
+                    .padding(.bottom, 64)
             }
         }
     }
 
     private func bottomRow(isLandscape: Bool) -> some View {
-        HStack(alignment: .bottom, spacing: 12) {
-            ScoreBug(state: hudState,
-                     label: bugLabel,
-                     value: bugValue,
-                     qualifier: bugQualifier,
-                     subline: "\(model.sessionSwingCount) swings",
-                     onTap: { showStatus = true })
-            Spacer(minLength: 0)
-            if isLandscape || hudState == .starting || hudState == .needsSetup {
-                actionCluster.frame(width: isLandscape ? 288 : nil)
+        // Landscape has room for bug and action side by side. Portrait does
+        // not — squeezing them together is what turned the primary button into
+        // "1 · SE…" — so there the action gets its own full-width row.
+        Group {
+            if isLandscape {
+                HStack(alignment: .bottom, spacing: 12) {
+                    bug
+                    Spacer(minLength: 0)
+                    actionCluster.frame(width: 300)
+                }
+            } else {
+                VStack(spacing: 10) {
+                    bug.frame(maxWidth: .infinity, alignment: .leading)
+                    actionCluster
+                }
             }
         }
-        .overlay(alignment: .bottom) {
-            if !isLandscape && hudState != .starting && hudState != .needsSetup {
-                // Portrait has no room beside the bug, so the action sits under
-                // it rather than shrinking to nothing.
-                Color.clear.frame(height: 0)
-            }
-        }
+    }
+
+    private var bug: some View {
+        ScoreBug(state: hudState,
+                 label: bugLabel,
+                 value: bugValue,
+                 qualifier: bugQualifier,
+                 subline: "\(model.sessionSwingCount) swings",
+                 onTap: { showStatus = true })
     }
 
     private var actionCluster: some View {
@@ -235,7 +243,9 @@ struct CaptureView: View {
     private var bugValue: String {
         switch hudState {
         case .needsSetup:
-            return model.wizard.topAdvisory?.text ?? "Tap the ball"
+            // Short and imperative. The full advisory is long and turned the
+            // bug into a paragraph, which is not what a glanceable readout is.
+            return "Tap the ball"
         case .ready:
             if let ft = model.wizard.derivedDistanceFt { return "\(Int(ft.rounded()))" }
             return "SET"
@@ -344,9 +354,17 @@ struct CaptureView: View {
     // MARK: - Tap
 
     private func handleTap(_ devicePoint: CGPoint) {
-        guard showSetup else {
+        // Measuring is allowed whenever there is no scale yet — not only while
+        // the setup panel is open. The HUD says "tap the ball in the picture",
+        // and it has to be true wherever that text is on screen.
+        guard showSetup || model.wizard.scaleSource == .none else {
             model.capture.lockExposureAndFocus(at: devicePoint)
             return
+        }
+        if !model.capture.wantsLiveMeasurement {
+            // Frames are only converted for measurement on demand; the first
+            // tap after landing on the screen arms that and asks again.
+            model.capture.wantsLiveMeasurement = true
         }
         tapPoint = devicePoint
         foundBall = false

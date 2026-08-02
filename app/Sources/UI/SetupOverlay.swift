@@ -232,20 +232,31 @@ struct SetupOverlay: View {
 
             instruction
 
+            // The fallback is a first-class option, not a hidden one. There
+            // may be no ball to hand, it may be too dark, or the ball may be
+            // sitting on something its own colour — in every one of those cases
+            // the user still needs a way to finish setup.
             HStack(spacing: 8) {
+                Button { showDistanceEntry = true } label: {
+                    Text("No ball? Type distance")
+                }
+                .buttonStyle(OutlineButtonStyle())
+
                 Menu {
-                    Button("Mark home plate") {
+                    Button("Mark home plate instead") {
                         wizard.showPlateMarkers = true
                         wizard.applyPlateMeasurement()
                     }
-                    Button("Type the distance") { showDistanceEntry = true }
                     if wizard.scaleSource != .none {
                         Button("Clear measurement", role: .destructive) { wizard.clearScale() }
                     }
                 } label: {
-                    Text("Can't find the ball?")
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(width: 44)
                 }
                 .buttonStyle(OutlineButtonStyle())
+                .frame(width: 56)
             }
         }
         .padding(12)
@@ -280,13 +291,14 @@ struct SetupOverlay: View {
                     .foregroundStyle(Theme.steel)
             }
         } else {
-            VStack(alignment: .leading, spacing: 3) {
-                Label("Tap the ball in the picture", systemImage: "hand.tap.fill")
-                    .font(.system(size: 14, weight: .heavy))
+            VStack(alignment: .leading, spacing: 4) {
+                Label("Touch the ball on the screen", systemImage: "hand.tap.fill")
+                    .font(.system(size: 15, weight: .heavy))
                     .foregroundStyle(Theme.yellow)
-                Text(failureText ?? "Put the ball down anywhere in frame, then touch it on screen. The app measures it and works out the distance itself.")
+                Text(failureText ?? "SwingLab needs one thing before it can measure a swing: how big the ball looks. A softball is 3.82 inches across, so one tap tells it both the scale and how far away you are — no tape measure.")
                     .font(.system(size: 11))
                     .foregroundStyle(failureText == nil ? Theme.steel : Theme.warn)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }

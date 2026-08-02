@@ -15,8 +15,10 @@ import SwiftUI
 ///  * **Stop rendering the normal case.** No "240fps" chip when it is 240, no
 ///    "hitter in frame" when there is one. The ribbon is empty when all is
 ///    well — which is what makes something appearing there mean anything.
-///  * **State is carried three ways.** Frame colour *and* pattern *and* a word,
-///    so it survives glare, distance and colour blindness.
+///  * **State is carried by the bug alone.** An earlier version also drew a
+///    dashed perimeter around the whole screen; it clipped at the edges, fought
+///    the tab bar and read as noise rather than signal. One bold, solid, legible
+///    tile beats a border that has to dodge every rounded corner and notch.
 ///  * **The middle stays clear.** That band is where the hitter and the ball
 ///    are, and it is what the user is actually judging.
 
@@ -78,94 +80,6 @@ enum HUDState: Equatable {
     /// True where the state word needs to be readable from the batter's box
     /// rather than from arm's length.
     var isLoud: Bool { self == .armed || self == .recording }
-}
-
-// MARK: - Perimeter frame
-
-/// The loudest state signal in the app, and it costs no interior space.
-///
-/// Colour alone is never the carrier: each state also has its own line weight
-/// and pattern. Armed is a yellow/black hazard stripe rather than green —
-/// pattern reads at a distance where hue has washed out, and it keeps the pass
-/// green reserved for things that actually passed.
-struct StateFrame: View {
-    var state: HUDState
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pulse = false
-
-    var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                RoundedRectangle(cornerRadius: 26)
-                    .strokeBorder(style: strokeStyle)
-                    .foregroundStyle(state.tint.opacity(state == .starting ? 0.4 : 0.9))
-                    .opacity(state == .recording && !reduceMotion ? (pulse ? 1.0 : 0.55) : 1.0)
-                brackets(in: geo.size)
-            }
-            .padding(10)
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        .onAppear {
-            guard state == .recording, !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
-        }
-        .onChange(of: state) { _, new in
-            pulse = false
-            guard new == .recording, !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                pulse = true
-            }
-        }
-    }
-
-    private var lineWidth: CGFloat {
-        switch state {
-        case .starting: return 3
-        case .needsSetup, .ready: return 5
-        case .armed: return 7
-        case .analysing, .interrupted: return 6
-        case .recording: return 10
-        }
-    }
-
-    private var strokeStyle: StrokeStyle {
-        switch state {
-        case .needsSetup:
-            return StrokeStyle(lineWidth: lineWidth, dash: [16, 10])
-        case .interrupted:
-            return StrokeStyle(lineWidth: lineWidth, dash: [10, 8])
-        case .armed:
-            // Reads as a hazard stripe at distance without needing an image
-            // paint: short dashes on a heavy line.
-            return StrokeStyle(lineWidth: lineWidth, dash: [14, 8])
-        default:
-            return StrokeStyle(lineWidth: lineWidth)
-        }
-    }
-
-    /// Chunky corner mass is the part that reads from twenty feet.
-    private func brackets(in size: CGSize) -> some View {
-        let leg: CGFloat = 64
-        let w = lineWidth + 1
-        return ZStack {
-            ForEach(0..<4, id: \.self) { corner in
-                Path { p in
-                    let isRight = corner == 1 || corner == 2
-                    let isBottom = corner >= 2
-                    let x = isRight ? size.width - 10 : 10
-                    let y = isBottom ? size.height - 10 : 10
-                    p.move(to: CGPoint(x: x + (isRight ? -leg : leg), y: y))
-                    p.addLine(to: CGPoint(x: x, y: y))
-                    p.addLine(to: CGPoint(x: x, y: y + (isBottom ? -leg : leg)))
-                }
-                .stroke(state.tint.opacity(state == .starting ? 0.4 : 1.0),
-                        style: StrokeStyle(lineWidth: w, lineCap: .round))
-            }
-        }
-    }
 }
 
 // MARK: - Score bug

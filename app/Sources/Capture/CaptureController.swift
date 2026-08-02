@@ -102,6 +102,8 @@ final class CaptureController: NSObject, ObservableObject {
     private var latestBGRASnapshot: CVPixelBuffer?
     private let snapshotLock = NSLock()
     private var snapshotStride = 24
+    private var converting = false
+    private let convertQueue = DispatchQueue(label: "swinglab.convert", qos: .userInitiated)
     private var notificationTokens: [NSObjectProtocol] = []
 
     /// Frames between pose-gate submissions, computed once per configure so
@@ -447,9 +449,12 @@ final class CaptureController: NSObject, ObservableObject {
         // Native pixel format: the encoder takes it directly, and nothing in
         // the live path needs RGB. Analysis re-reads the file as BGRA.
         videoOutput.videoSettings = nil
-        // Never discard: a measurement built on a frame interval cannot
-        // tolerate silent gaps. Drops are counted and surfaced instead.
-        videoOutput.alwaysDiscardsLateVideoFrames = false
+        // Never discard *while armed*: a measurement built on a frame interval
+        // cannot tolerate silent gaps, so drops are counted and surfaced.
+        // Before arming there is nothing to measure — the frames only feed the
+        // preview, the pose gate and setup — and refusing to discard there just
+        // backs the queue up and reports hundreds of drops that mean nothing.
+        videoOutput.alwaysDiscardsLateVideoFrames = !isArmed
         videoOutput.setSampleBufferDelegate(self, queue: videoQueue)
         guard session.canAddOutput(videoOutput) else { throw CaptureError.cannotAddOutput }
         session.addOutput(videoOutput)
@@ -570,14 +575,17 @@ final class CaptureController: NSObject, ObservableObject {
                 DispatchQueue.main.async { completion(.noFrameYet) }
                 return
             }
-            let radius = 160.0
             let result: BallMeasureResult = PixelImage.withImage(snapshot) { img in
                 let px = Double(devicePoint.x) * Double(img.width)
                 let py = Double(devicePoint.y) * Double(img.height)
-                // Widen before giving up: a tap can land a little off the ball,
-                // and a ball close to the lens needs room for the shape tests.
+                // Search windows scale with the frame, not a fixed 160 px. A
+                // ball two feet from the lens is several hundred pixels across
+                // and needs room around it for the shape tests to run at all;
+                // a fixed window silently capped the working distance.
+                let w = Double(img.width)
+                let radii = [w * 0.12, w * 0.25, w * 0.45]
                 var last: SetupBallMeasure.Outcome = .nothingThere
-                for r in [radius, radius * 2, radius * 3] {
+                for r in radii {
                     last = SetupBallMeasure.measure(image: img,
                                                     tapX: px, tapY: py,
                                                     searchRadiusPx: r,
@@ -600,7 +608,7 @@ final class CaptureController: NSObject, ObservableObject {
                 case .shadowed:              return .shadowed
                 case .truncatedByFrame:      return .truncatedByFrame
                 case .needsWiderSearch, .nothingThere:
-                    return .noBallNearTap(searchRadiusPx: radius * 3)
+                    return .noBallNearTap(searchRadiusPx: radii.last ?? 0)
                 }
             } ?? .conversionFailed
             DispatchQueue.main.async { completion(result) }
@@ -618,6 +626,20 @@ final class CaptureController: NSObject, ObservableObject {
     private func syncArmed() {
         trigger.isArmed = isArmed && !recorder.isRecording
         if isArmed { trigger.reset() }
+        let armed = isArmed
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.videoOutput.alwaysDiscardsLateVideoFrames = !armed
+            if armed {
+                // The count that matters starts here; drops accumulated while
+                // idle say nothing about a measurement.
+                self.uiLock.lock()
+                self.pendingDrops = 0
+                self.publishedDrops = 0
+                self.uiLock.unlock()
+                DispatchQueue.main.async { self.droppedFrameCount = 0 }
+            }
+        }
     }
 
     private func startClip(contactPTS: CMTime, gated: Bool) {
@@ -703,13 +725,24 @@ extension CaptureController: AVCaptureVideoDataOutputSampleBufferDelegate,
             if videoFrameCounter % presenceStride == 0 {
                 presenceGate.submit(pixelBuffer: pb, orientation: visionOrientationForFrames)
             }
-            // Only while the setup overlay is up: keep one BGRA copy so a tap
-            // has something to measure. The camera's own buffer is never held.
+            // Only while setup is on screen: keep one BGRA copy so a tap has
+            // something to measure. Converted on its own queue — a CoreImage
+            // render is far too slow to sit on the 240fps delivery path, and
+            // doing it there was throttling frame delivery outright.
             if wantsLiveMeasurement, videoFrameCounter % snapshotStride == 0 {
-                if let bgra = PixelBufferConvert.toBGRA(pb) {
-                    snapshotLock.lock()
-                    latestBGRASnapshot = bgra
-                    snapshotLock.unlock()
+                snapshotLock.lock()
+                let busy = converting
+                if !busy { converting = true }
+                snapshotLock.unlock()
+                if !busy {
+                    convertQueue.async { [weak self] in
+                        guard let self else { return }
+                        let bgra = PixelBufferConvert.toBGRA(pb)
+                        self.snapshotLock.lock()
+                        if let bgra { self.latestBGRASnapshot = bgra }
+                        self.converting = false
+                        self.snapshotLock.unlock()
+                    }
                 }
             }
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)

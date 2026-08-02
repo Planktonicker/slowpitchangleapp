@@ -46,18 +46,23 @@ import Foundation
 ///    repeatable, and a known-biased scale is not worth keeping.
 enum SetupBallMeasure {
 
-    /// Distance window the measurement is willing to believe, in metres.
-    /// `PlacementWizard` already treats 12–28 ft as usable and refuses to arm
-    /// outside 5–60 ft, so accepting diameters implying 2 ft only gave a
-    /// tabletop room to hide. Narrowing this is worth more than any shape test.
-    static let nearestMeasurableM = 2.44   // 8 ft
-    static let farthestMeasurableM = 12.2  // 40 ft
-
     /// Below about 14 px across, every shape statistic here degenerates into
     /// quantisation noise — a geometrically perfect 5 px disc scores worse on
     /// the ray gate than a square does. 14 px is ~38 ft at a 60° lens, well
-    /// outside the protocol's window, so this costs nothing real.
+    /// beyond any usable filming distance, so this costs nothing real.
     static let minMeasurableDiameterPx = 14.0
+
+    /// Largest ball we will measure, as a fraction of frame width.
+    ///
+    /// Deliberately generous. An earlier version derived this from an 8–40 ft
+    /// filming window, which is right for a tripod at a field but rejected a
+    /// ball sitting on a desk two feet away — the first thing anyone tries
+    /// indoors — before a single shape test could run. The shape gates below
+    /// are what reject a tabletop; the size band should not be doing that job,
+    /// and `PlacementWizard` already tells the user when the derived distance
+    /// is implausible. Better to measure the ball and say "that reads 2 ft,
+    /// move back" than to report that there is no ball.
+    static let maxDiameterFractionOfWidth = 0.45
 
     /// Extent band, measured on the hole-filled blob. A disc is 0.785.
     static let extentLo = 0.62
@@ -111,6 +116,7 @@ enum SetupBallMeasure {
                         settings: DetectorSettings,
                         fovDeg: Double) -> Outcome {
 
+        _ = fovDeg   // distance sanity is the wizard's job, not the detector's
         let (minDiameter, maxDiameter) = diameterBand(imageWidth: image.width,
                                                       fovDeg: fovDeg,
                                                       searchRadiusPx: searchRadiusPx)
@@ -160,23 +166,11 @@ enum SetupBallMeasure {
                                      fovDeg: Double,
                                      searchRadiusPx: Double) -> (Double, Double) {
         // The ray gate needs a moat around the ball inside the search window,
-        // so the window itself caps how big a ball can be measured.
+        // so the window itself caps how big a ball can be measured. The caller
+        // grows the window when a candidate is rejected only for lack of room.
         let roomCap = 2 * searchRadiusPx / rayReachFactor
-
-        guard fovDeg > 0 else {
-            // No lens geometry reported: fall back to the floor and the room
-            // cap only. Deliberately not the old 8–120 px window, which spans
-            // 30:1 and is most of the reason a tabletop had anywhere to hide.
-            return (minMeasurableDiameterPx, min(120, roomCap))
-        }
-        let halfFov = fovDeg * .pi / 360
-        func pxPerM(_ d: Double) -> Double {
-            Double(imageWidth) / (2 * d * tan(halfFov))
-        }
-        let lo = max(minMeasurableDiameterPx,
-                     SLA.ballDiameterM * pxPerM(farthestMeasurableM))
-        let hi = min(SLA.ballDiameterM * pxPerM(nearestMeasurableM), roomCap)
-        return (lo, hi)
+        let hi = min(maxDiameterFractionOfWidth * Double(imageWidth), roomCap)
+        return (minMeasurableDiameterPx, hi)
     }
 
     // MARK: - Colour window
