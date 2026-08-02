@@ -303,7 +303,7 @@ struct SetupOverlay: View {
                 Label("Touch the ball on the screen", systemImage: "hand.tap.fill")
                     .font(.system(size: 15, weight: .heavy))
                     .foregroundStyle(Theme.yellow)
-                Text(failureText ?? "SwingLab needs one thing before it can measure a swing: how big the ball looks. A softball is 9.7 cm across, so one tap tells it both the scale and how far away you are — no tape measure.")
+                Text(failureText ?? "Put a ball where you are going to hit it — on the tee — and touch it on screen. A softball is 9.7 cm across, so that one tap gives both the scale and how far away the camera is. It can sit anywhere in frame as long as it is still and not against something its own colour.")
                     .font(.system(size: 11))
                     .foregroundStyle(failureText == nil ? Theme.steel : Theme.warn)
                     .fixedSize(horizontal: false, vertical: true)
@@ -443,7 +443,7 @@ struct PlacementTipsView: View {
                     tip("3", "Lens at belt height",
                         "About 1.1 m up — the height where bat meets ball. Most tripods reach it near full extension.")
                     tip("4", "Tap the ball on screen",
-                        "Put a ball down in frame and touch it on the picture. That one tap gives the app both the scale and how far away you are — no tape measure.")
+                        "Put a ball on the tee — where contact will actually happen — and touch it on the picture. That one tap gives both the scale and the distance. Measure it at the hitting spot: the scale is only right at that distance, so a ball held near the lens would set the wrong one.")
                 }
                 .padding()
             }

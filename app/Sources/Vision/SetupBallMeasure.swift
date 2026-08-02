@@ -129,27 +129,53 @@ enum SetupBallMeasure {
             return (.needsWiderSearch, "window too small for any ball")
         }
 
-        // Seed the colour window from the pixels the user actually pointed at,
-        // rather than walking the global window blindly and hoping. The blind
-        // walk was a false-accept amplifier: tightening the hue ceiling carves
-        // a large tan region into ever smaller islands until one happens to be
-        // round and ball-sized.
-        let seeded = seedFromTap(image: image, x: tapX, y: tapY, base: settings)
+        // A ball is textured — seams, stitching, print, a specular highlight —
+        // and no single colour window catches all of it reliably. So several
+        // are tried, with and without a morphological close, and the most
+        // disc-like candidate wins. Betting on one seeded window is what made
+        // a real ball come back as a blob filling a third of its box.
+        //
+        // Close is offered because it repairs the gaps that lettering and
+        // seams punch in the mask; it is not trusted blindly, because it can
+        // also bridge a ball into whatever it is resting on. A bridged blob
+        // fails the elongation and ray gates, so it cannot win.
+        let c = tapColour(image: image, x: tapX, y: tapY)
+        let variants: [(name: String, settings: DetectorSettings, close: Bool)] = [
+            ("seed24c", seededWindow(c, hueSpan: 24, base: settings), true),
+            ("seed24",  seededWindow(c, hueSpan: 24, base: settings), false),
+            ("seed12c", seededWindow(c, hueSpan: 12, base: settings), true),
+            ("dflt-c",  settings, true),
+            ("dflt",    settings, false),
+        ]
 
-        // Two operating points. The second is deliberately tighter; a real
-        // ball measures almost the same under both, a colour region does not.
-        let tight = tightened(seeded)
+        var bestFound: (BallMeasurement, Shape, DetectorSettings, String)?
+        var lastFail: Attempt?
 
-        let a = bestCandidate(image: image, tapX: tapX, tapY: tapY,
-                              searchRadiusPx: searchRadiusPx, settings: seeded,
-                              minDiameter: minDiameter, maxDiameter: maxDiameter)
-
-        guard case .found(let primary, let shape) = a else {
-            return (a.outcomeOnly, "r\(Int(searchRadiusPx)) · \(a.trace)")
+        for v in variants {
+            let attempt = bestCandidate(image: image, tapX: tapX, tapY: tapY,
+                                        searchRadiusPx: searchRadiusPx,
+                                        settings: v.settings, close: v.close,
+                                        minDiameter: minDiameter, maxDiameter: maxDiameter)
+            switch attempt {
+            case .found(let m, let shape):
+                if bestFound == nil || shape.score < bestFound!.1.score {
+                    bestFound = (m, shape, v.settings, v.name)
+                }
+            case .failed:
+                lastFail = attempt
+            }
         }
 
-        let base = String(format: "d %.0fpx · fill %.2f · rays %d/16 · edge %@",
-                          primary.diameterPx, shape.extent, shape.goodRays,
+        let tapDesc = String(format: "tap hsv %.0f/%.0f/%.0f", c.h, c.s, c.v)
+
+        guard let (primary, shape, winning, winName) = bestFound else {
+            let trace = lastFail?.trace ?? "no candidate"
+            return (lastFail?.outcomeOnly ?? .nothingThere,
+                    "r\(Int(searchRadiusPx)) · \(tapDesc) · \(trace)")
+        }
+
+        let base = String(format: "%@ · d %.0fpx · fill %.2f · rays %d/16 · edge %@",
+                          winName, primary.diameterPx, shape.extent, shape.goodRays,
                           primary.subpixelRefined ? "yes" : "no")
 
         // A ball has a step edge, so its measured size barely moves when the
@@ -157,7 +183,8 @@ enum SetupBallMeasure {
         // the only test that looks at the image rather than the mask, and it is
         // what keeps a tabletop out.
         let b = bestCandidate(image: image, tapX: tapX, tapY: tapY,
-                              searchRadiusPx: searchRadiusPx, settings: tight,
+                              searchRadiusPx: searchRadiusPx,
+                              settings: tightened(winning), close: true,
                               minDiameter: minDiameter, maxDiameter: maxDiameter)
 
         // Very disc-like candidates are allowed to skip the cross-check. A
@@ -199,39 +226,58 @@ enum SetupBallMeasure {
 
     // MARK: - Colour window
 
-    /// Median HSV of a 5×5 patch at the tap, intersected with the configured
-    /// window. Uses the information the user gave us instead of guessing.
-    private static func seedFromTap(image: PixelImage,
-                                    x: Double, y: Double,
-                                    base: DetectorSettings) -> DetectorSettings {
+    /// The colour under the tap, as a median over a patch.
+    ///
+    /// A real ball is not one colour: it carries seams, stitching, printed
+    /// lettering and a specular highlight, and a narrow window seeded from a
+    /// few pixels catches scattered fragments of it rather than a disc — the
+    /// observed failure was a blob filling only a third of its bounding box.
+    /// So the patch is large enough to average across that texture, and the
+    /// window it produces is deliberately generous.
+    static func tapColour(image: PixelImage, x: Double, y: Double,
+                          radius: Int = 6) -> (h: Double, s: Double, v: Double) {
         var hs: [Double] = [], ss: [Double] = [], vs: [Double] = []
         let cx = Int(x.rounded()), cy = Int(y.rounded())
-        for dy in -2...2 {
-            for dx in -2...2 {
+        for dy in -radius...radius {
+            for dx in -radius...radius {
                 let p = image.pixel(x: cx + dx, y: cy + dy)
                 let hsv = HSVConvert.fromBGR(b: p.b, g: p.g, r: p.r)
                 hs.append(hsv.h); ss.append(hsv.s); vs.append(hsv.v)
             }
         }
         func median(_ a: [Double]) -> Double {
-            let s = a.sorted()
-            return s.isEmpty ? 0 : s[s.count / 2]
+            let sorted = a.sorted()
+            return sorted.isEmpty ? 0 : sorted[sorted.count / 2]
         }
-        let hm = median(hs), sm = median(ss), vm = median(vs)
+        return (median(hs), median(ss), median(vs))
+    }
 
+    /// A colour window centred on what the user pointed at, `hueSpan` wide.
+    ///
+    /// Not intersected with the configured window: a ball photographed against
+    /// a bright window reads far outside the default optic-yellow band, and
+    /// intersecting simply threw its pixels away.
+    private static func seededWindow(_ c: (h: Double, s: Double, v: Double),
+                                     hueSpan: Double,
+                                     base: DetectorSettings) -> DetectorSettings {
         var out = base
-        out.hsvLo.h = max(base.hsvLo.h, hm - 9)
-        out.hsvHi.h = min(base.hsvHi.h, hm + 9)
-        out.hsvLo.s = max(60, min(base.hsvLo.s, 0.6 * sm))
-        out.hsvLo.v = max(90, min(base.hsvLo.v, 0.5 * vm))
-        // A degenerate window helps nobody; fall back to the configured one.
-        if out.hsvHi.h - out.hsvLo.h < 6 { out.hsvLo.h = base.hsvLo.h; out.hsvHi.h = base.hsvHi.h }
+        out.hsvLo.h = max(0, c.h - hueSpan)
+        out.hsvHi.h = min(179, c.h + hueSpan)
+        // Floors well under the sampled value so seams and shaded flanks stay
+        // inside the mask; the shape gates are what reject non-balls.
+        out.hsvLo.s = max(30, c.s * 0.45)
+        out.hsvHi.s = 255
+        out.hsvLo.v = max(45, c.v * 0.40)
+        out.hsvHi.v = 255
         return out
     }
 
     private static func tightened(_ s: DetectorSettings) -> DetectorSettings {
         var t = s
-        t.hsvHi.h = max(s.hsvLo.h + 4, s.hsvHi.h - 8)
+        let span = max(4.0, (s.hsvHi.h - s.hsvLo.h) * 0.35)
+        let mid = (s.hsvHi.h + s.hsvLo.h) / 2
+        t.hsvLo.h = mid - span / 2
+        t.hsvHi.h = mid + span / 2
         t.hsvLo.s = min(255, s.hsvLo.s + 25)
         return t
     }
@@ -268,6 +314,7 @@ enum SetupBallMeasure {
                                       tapX: Double, tapY: Double,
                                       searchRadiusPx: Double,
                                       settings: DetectorSettings,
+                                      close: Bool,
                                       minDiameter: Double,
                                       maxDiameter: Double) -> Attempt {
         let roi = ROI.around(x: tapX, y: tapY, radius: searchRadiusPx)
@@ -287,9 +334,12 @@ enum SetupBallMeasure {
                 }
             }
         }
-        // Open only, never close: closing is exactly what bridges the ball's
-        // mask into adjacent grass or tabletop and makes one giant blob.
         Morphology.open(&mask, width: w, height: h)
+        // Closing repairs the holes that seams, stitching and printed lettering
+        // punch in a real ball's mask. It can also bridge the ball into what it
+        // rests on, so it is one variant among several rather than the default,
+        // and a bridged blob is caught by the elongation and ray gates anyway.
+        if close { Morphology.close(&mask, width: w, height: h) }
 
         let (blobs, labels) = ConnectedComponents.labelDetailed(mask: mask, width: w, height: h)
 
