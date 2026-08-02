@@ -17,7 +17,7 @@ enum SLA {
 
     static let g = 9.80665                                  // m/s^2
     static let ballCircumferenceM = 12.0 * 0.0254           // 12 in slow-pitch softball
-    static let ballDiameterM = ballCircumferenceM / Double.pi   // 0.09702 m (3.82 in)
+    static let ballDiameterM = ballCircumferenceM / Double.pi   // 0.09702 m — 9.7 cm across
     static let ballMassKg = 0.190                           // 6.25-7.0 oz ball -> ~190 g
     static let airDensity = 1.225                           // kg/m^3, sea level
     static let dragCd = 0.47                                // smooth-ish sphere
@@ -109,16 +109,15 @@ enum SLA {
     // MARK: - Contact offset ("undercut")
 
     /// Max legal slow-pitch barrel (2.25 in). Matches `sla_common.py`.
-    static let batBarrelDiameterM = 2.25 * 0.0254
-    static let inchesPerM = 39.3701
+    static let batBarrelDiameterM = 2.25 * 0.0254   // 57 mm
 
     /// Centres farther apart than the two radii cannot have touched: the tape
     /// was not at the contact point, or a fit went wrong. Reading discarded.
     static let contactPlausibleM = (ballDiameterM + batBarrelDiameterM) / 2
 
     /// Undercut bands (metres), positive = barrel centre BELOW ball centre.
-    /// Nathan's collision model puts max-carry undercut ~0.5-1.2 in; coaching
-    /// guidance for labels, not validated slow-pitch norms.
+    /// Nathan's collision model puts max-carry undercut around 13-30 mm;
+    /// coaching guidance for labels, not validated slow-pitch norms.
     static let undercutToppedBelowM = -0.006
     static let undercutCenteredMaxM = 0.010
     static let undercutCarryMaxM = 0.030

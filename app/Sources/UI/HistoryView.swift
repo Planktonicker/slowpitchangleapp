@@ -95,7 +95,7 @@ struct HistoryView: View {
             } else {
                 HStack(spacing: 16) {
                     Text(String(format: "%.1f°", swing.launchAngleDeg))
-                    Text(String(format: "%.1f mph", swing.exitVeloMph))
+                    Text("\(model.settings.speedUnit.format(mph: swing.exitVeloMph)) \(model.settings.speedUnit.suffix)")
                     Text("\(swing.trackedFrames)f")
                         .foregroundStyle(.secondary)
                 }

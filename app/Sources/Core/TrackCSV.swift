@@ -9,7 +9,7 @@ import Foundation
 /// This is the bridge back to the Python spike: a track exported from the
 /// phone can be dropped straight into `spike/out/` and re-analyzed with
 ///
-///     python analyze_swing.py out/<clip>.csv --flyball --hang 4.1 --carry-ft 185
+///     python analyze_swing.py out/<clip>.csv --flyball --hang 4.1 --carry-m 56
 ///
 /// so the Mac pipeline stays the referee whenever an on-device number looks
 /// wrong. Keep the format byte-compatible.

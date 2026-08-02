@@ -50,9 +50,9 @@ enum CSVExport {
     static let fullColumns = summaryColumns + [
         "captured_at", "fps", "contact_time_s", "track_duration_s",
         "auto_triggered", "used_vision_hint", "bat_attack_angle_deg",
-        "bat_frames", "bat_speed_mph", "smash_factor", "undercut_in",
-        "hang_s", "carry_ft", "model_hang_s", "model_carry_ft",
-        "hang_err_pct", "carry_err_pct", "camera_distance_ft", "lens_height_ft",
+        "bat_frames", "bat_speed_mph", "smash_factor", "undercut_mm",
+        "hang_s", "carry_m", "model_hang_s", "model_carry_m",
+        "hang_err_pct", "carry_err_pct", "camera_distance_m", "lens_height_m",
         "camera_roll_deg", "camera_tilt_deg", "capture_flags", "track_csv", "notes",
     ]
 
@@ -62,7 +62,7 @@ enum CSVExport {
         for s in swings.sorted(by: { $0.capturedAt < $1.capturedAt }) {
             let flight = FlightModel.simulate(evMps: s.exitVeloMps, laDeg: s.launchAngleDeg)
             let hangErr = s.hangS.map { ($0 > 0) ? (flight.hangS - $0) / $0 * 100 : 0 }
-            let carryErr = s.carryFt.map { ($0 > 0) ? (flight.carryFt - $0) / $0 * 100 : 0 }
+            let carryErr = s.carryM.map { ($0 > 0) ? (flight.carryM - $0) / $0 * 100 : 0 }
             let fields: [String] = [
                 s.clipFilename ?? "",
                 s.setting.rawValue,
@@ -86,15 +86,15 @@ enum CSVExport {
                 s.batFrames.map(String.init) ?? "",
                 s.batSpeedMph.map(round1) ?? "",
                 s.smashFactor.map(round2) ?? "",
-                s.undercutIn.map(round2) ?? "",
+                s.undercutMm.map(round1) ?? "",
                 s.hangS.map(round2) ?? "",
-                s.carryFt.map(round1) ?? "",
+                s.carryM.map(round1) ?? "",
                 round2(flight.hangS),
-                round1(flight.carryFt),
+                round1(flight.carryM),
                 hangErr.map(round1) ?? "",
                 carryErr.map(round1) ?? "",
-                s.cameraDistanceFt.map(round1) ?? "",
-                s.lensHeightFt.map(round2) ?? "",
+                s.cameraDistanceM.map(round2) ?? "",
+                s.lensHeightM.map(round2) ?? "",
                 s.cameraRollDeg.map(round2) ?? "",
                 s.cameraTiltDeg.map(round2) ?? "",
                 s.captureFlags.map(\.rawValue).joined(separator: "|"),

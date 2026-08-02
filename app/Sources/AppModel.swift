@@ -245,8 +245,8 @@ final class AppModel: ObservableObject {
             dto.notes = failure
         }
 
-        dto.cameraDistanceFt = placement.distanceFt
-        dto.lensHeightFt = placement.heightFt
+        dto.cameraDistanceM = placement.distanceM
+        dto.lensHeightM = placement.heightM
         dto.cameraRollDeg = placement.rollDeg
         dto.cameraTiltDeg = placement.tiltDeg
         dto.captureFlags = placement.captureFlags
@@ -317,9 +317,9 @@ final class AppModel: ObservableObject {
                     updated.capturedAt = swing.capturedAt
                     updated.trackCSVFilename = swing.trackCSVFilename
                     updated.hangS = swing.hangS
-                    updated.carryFt = swing.carryFt
-                    updated.cameraDistanceFt = swing.cameraDistanceFt
-                    updated.lensHeightFt = swing.lensHeightFt
+                    updated.carryM = swing.carryM
+                    updated.cameraDistanceM = swing.cameraDistanceM
+                    updated.lensHeightM = swing.lensHeightM
                     updated.cameraRollDeg = swing.cameraRollDeg
                     updated.cameraTiltDeg = swing.cameraTiltDeg
                     updated.captureFlags = swing.captureFlags

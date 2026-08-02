@@ -34,7 +34,7 @@ import numpy as np
 
 G = 9.80665                                  # m/s^2
 BALL_CIRCUMFERENCE_M = 12.0 * 0.0254         # 12 in slow-pitch softball
-BALL_DIAMETER_M = BALL_CIRCUMFERENCE_M / math.pi   # 0.09702 m (3.82 in)
+BALL_DIAMETER_M = BALL_CIRCUMFERENCE_M / math.pi   # 0.09702 m — 9.7 cm across
 BALL_MASS_KG = 0.190                         # 6.25–7.0 oz ball -> ~190 g
 AIR_DENSITY = 1.225                          # kg/m^3, sea level
 DRAG_CD = 0.47                               # smooth-ish sphere
@@ -44,7 +44,7 @@ MPH_PER_MPS = 2.23694
 HSV_LO_DEFAULT = (18, 70, 120)
 HSV_HI_DEFAULT = (48, 255, 255)
 
-# Detection geometry defaults (pixels), sane for 1080p at 15-20 ft.
+# Detection geometry defaults (pixels), sane for 1080p at 4.5-6 m.
 MIN_RADIUS_PX_DEFAULT = 4.0
 MAX_RADIUS_PX_DEFAULT = 60.0
 
@@ -669,15 +669,14 @@ def in_slowpitch_launch_window(launch_angle_deg: float) -> bool:
 # and true contact point adds bias when contact is far from the tape; the
 # plausibility gate below catches the gross cases.
 
-BAT_BARREL_DIAMETER_M = 2.25 * 0.0254   # max legal slow-pitch barrel (2.25 in)
-INCHES_PER_M = 39.3701
+BAT_BARREL_DIAMETER_M = 2.25 * 0.0254   # max legal slow-pitch barrel (57 mm)
 
 # Centres farther apart than the two radii cannot have touched: the tape was
 # not at the contact point (or a fit went wrong). Reading is discarded.
 CONTACT_PLAUSIBLE_M = (BALL_DIAMETER_M + BAT_BARREL_DIAMETER_M) / 2
 
 # Undercut bands (metres). Nathan's collision model puts max-carry undercut
-# around 0.5-1.2 in for typical bat/ball speeds; near-centred contact makes
+# around 13-30 mm for typical bat/ball speeds; near-centred contact makes
 # line drives; hitting the top half tops the ball into the ground. Coaching
 # guidance for labels, NOT validated slow-pitch norms.
 UNDERCUT_TOPPED_BELOW_M = -0.006    # barrel > 6 mm above centre -> topped

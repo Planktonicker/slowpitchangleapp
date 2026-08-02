@@ -82,13 +82,13 @@ points nearly along the camera's optical axis, so the knob-to-tip position b4
 reports is foreshortened from a side view and **not** honestly measurable here.
 What the side view measures *well* is the **vertical offset between barrel
 centre and ball centre** — Alan Nathan's "undercut distance", the quantity that
-decides topped vs flush vs popup and sets backspin (~½–1 in under the centre is
+decides topped vs flush vs popup and sets backspin (~10–25 mm under the centre is
 the carry zone).
 
 Computed from two numbers the pipeline already fits: the tape path evaluated at
 contact and the ball's position at contact (both extrapolated through the
 occlusion around impact). Sign: positive = barrel under the ball. Readings
-where the two centres are farther apart than the two radii (~3 in) cannot have
+where the two centres are farther apart than the two radii (~77 mm) cannot have
 been a contact — they're discarded by a plausibility gate, not displayed.
 Stated caveat: the tape centroid stands in for the barrel at the contact point,
 so the reading is accurate when contact happens near the tape — which is why
@@ -103,7 +103,7 @@ so the reading is accurate when contact happens near the tape — which is why
    contact-spot report can proceed from undercut alone (EV vs vertical miss).
 2. **Slow-pitch launch-window guidance** — colour launch angle against the
    slow-pitch line-drive band (~10–25°, distinct from MLB's 25–35°, which
-   misleads slow-pitch hitters) and add a "will it clear a 300 ft fence?" carry
+   misleads slow-pitch hitters) and add a "will it clear a 90 m fence?" carry
    readout from the existing drag model. Descriptive, not prescriptive.
    (`in_slowpitch_launch_window` / `SLA.inSlowpitchLaunchWindow` already exist.)
 3. **On-device 2D pose, offline on the ring-buffer clip** — the body-metrics
@@ -111,7 +111,7 @@ so the reading is accurate when contact happens near the tape — which is why
    presence gate) over the saved clip *after* the trigger: subsample to ~30–60 Hz
    for load/stride, every frame in a ±100 ms window around the audio-detected
    contact. Never live at 240 fps — nobody does; analyze the buffer. Report only
-   sagittal-honest metrics: **stride length** (real feet via the ball scale),
+   sagittal-honest metrics: **stride length** (in metres via the ball scale),
    **head drift**, **posture/spine angle**, **lead-knee flexion**, **launch
    quickness** (first forward hand move → contact) and **peak hand speed**.
    Smooth each joint track (One-Euro / Kalman) before differentiating, and gate

@@ -27,7 +27,7 @@ outdoor clips with ≥0.25 s of tracked flight.*
 
 ## G3 — Fly-ball physics ground truth
 
-*Per clip: `analyze_swing.py out/fly_NN.csv --flyball --hang T --carry-ft D`.*
+*Per clip: `analyze_swing.py out/fly_NN.csv --flyball --hang T --carry-m D`.*
 
 | Clip | Model hang vs stopwatch | Model carry vs paced | Pass (±15% / ±20%)? |
 |------|-------------------------|----------------------|---------------------|

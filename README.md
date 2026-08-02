@@ -28,7 +28,7 @@ readings are consistent session to session.
   exit velocity come from a trajectory fit over the first ~120 ms after contact.
 - Real-world scale is estimated **two independent ways** and cross-checked on
   every swing:
-  1. the ball's known size (12 in circumference → 3.82 in diameter) vs its
+  1. the ball's known size (30.5 cm circumference → 9.7 cm diameter) vs its
      apparent size in pixels, measured sub-pixel on the motion-blur-free axis;
   2. the fitted vertical acceleration vs gravity — **drag-aware**: a softball
      flies at roughly its terminal velocity (~30 m/s), so air drag is comparable
@@ -80,7 +80,7 @@ Set your signing team, Run to your iPhone, then follow
 4. **Run the pipeline**:
    ```
    python batch_run.py --fps 240             # scoreboard for G1/G2/G4
-   python analyze_swing.py out/fly_01.csv --flyball --hang 4.1 --carry-ft 185
+   python analyze_swing.py out/fly_01.csv --flyball --hang 4.1 --carry-m 56
    python check_audio_trigger.py clips/tee_01.mov          # G5 (needs ffmpeg)
    python track_ball.py clips/cage_02.mov --debug-video    # eyeball a track
    ```

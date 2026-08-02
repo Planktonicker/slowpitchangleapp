@@ -98,24 +98,24 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     /// Exit velocity ÷ bat speed (collision efficiency / b4-app's "flush"),
     /// exact off a tee and approximate off live pitching. `nil` without bat.
     var smashFactor: Double?
-    /// Vertical contact offset in inches: how far the barrel centre passed
-    /// BELOW the ball centre at contact (Nathan's "undercut"). Positive =
-    /// backspin/loft, negative = over the ball. `nil` when the bat was not
+    /// Vertical contact offset in millimetres: how far the barrel centre
+    /// passed BELOW the ball centre at contact (Nathan's "undercut"). Positive
+    /// = backspin/loft, negative = over the ball. `nil` when the bat was not
     /// tracked or the reading failed the geometric plausibility gate.
-    var undercutIn: Double?
+    var undercutMm: Double?
 
     var smashQuality: SmashQuality { SmashQuality(smash: smashFactor) }
     var contactQuality: ContactQuality {
-        ContactQuality(undercutM: undercutIn.map { $0 / SLA.inchesPerM })
+        ContactQuality(undercutM: undercutMm.map { $0 / 1000 })
     }
 
     // G3 ground truth, entered by hand after a fly ball
     var hangS: Double?
-    var carryFt: Double?
+    var carryM: Double?
 
     // Placement, carried over from the wizard
-    var cameraDistanceFt: Double?
-    var lensHeightFt: Double?
+    var cameraDistanceM: Double?
+    var lensHeightM: Double?
     var cameraRollDeg: Double?
     /// Recorded but never corrected — unlike roll, camera tilt cannot be
     /// undone after the fact.
@@ -178,7 +178,7 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
             let u = SLA.undercutM(ballY0Px: m.y0Px, batY0Px: bat.contactYPx,
                                   scaleMPerPx: m.scaleBallMPerPx)
             if abs(u) <= SLA.contactPlausibleM {
-                self.undercutIn = u * SLA.inchesPerM
+                self.undercutMm = u * 1000
             }
         }
     }

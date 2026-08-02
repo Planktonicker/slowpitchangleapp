@@ -108,7 +108,8 @@ struct SwingDetailView: View {
                 MetricTile(label: "Launch angle",
                            value: String(format: "%.1f", swing.launchAngleDeg), unit: "°")
                 MetricTile(label: "Exit velo",
-                           value: String(format: "%.1f", swing.exitVeloMph), unit: "mph")
+                           value: model.settings.speedUnit.format(mph: swing.exitVeloMph),
+                           unit: model.settings.speedUnit.suffix)
             }
             ConfidenceRow(flags: swing.flags, captureFlags: swing.captureFlags)
             detail("Tracked frames", "\(swing.trackedFrames)")
@@ -125,9 +126,9 @@ struct SwingDetailView: View {
 
     private var scaleSection: some View {
         VStack(spacing: 8) {
-            detail("From ball size", String(format: "%.3f mm/px", swing.scaleBallMPerPx * 1000))
+            detail("From ball size", Fmt.mmPerPx(swing.scaleBallMPerPx))
             detail("From gravity (drag-aware)",
-                   swing.scaleGravityMPerPx.map { String(format: "%.3f mm/px", $0 * 1000) } ?? "not available")
+                   swing.scaleGravityMPerPx.map { Fmt.mmPerPx($0) } ?? "not available")
             if let d = swing.scaleDisagreement {
                 HStack {
                     Text("Disagreement").foregroundStyle(.secondary)
@@ -147,7 +148,9 @@ struct SwingDetailView: View {
             HStack {
                 MetricTile(label: "Attack angle", value: String(format: "%.1f", attack), unit: "°")
                 if let bs = swing.batSpeedMph {
-                    MetricTile(label: "Bat speed", value: String(format: "%.1f", bs), unit: "mph")
+                    MetricTile(label: "Bat speed",
+                               value: model.settings.speedUnit.format(mph: bs),
+                               unit: model.settings.speedUnit.suffix)
                 }
             }
             if let smash = swing.smashFactor {
@@ -161,17 +164,17 @@ struct SwingDetailView: View {
                 }
                 .font(.callout)
             }
-            if let u = swing.undercutIn {
+            if let u = swing.undercutMm {
                 HStack {
                     Text("Contact").foregroundStyle(.secondary)
                     Spacer()
-                    Text(String(format: "%+.2f in", u)).monospacedDigit()
+                    Text(String(format: "%+.0f mm", u)).monospacedDigit()
                     Text(swing.contactQuality.label)
                         .font(.system(size: 11, weight: .black, design: .rounded))
                         .foregroundStyle(contactColour)
                 }
                 .font(.callout)
-                Text("How far the barrel centre passed under (+) or over (−) the ball centre — measured tape-to-ball, so it reads true when contact happens near the tape. Slightly under (~½–1 in) puts backspin and carry on the ball; over it drives it into the ground.")
+                Text("How far the barrel centre passed under (+) or over (−) the ball centre — measured tape-to-ball, so it reads true when contact happens near the tape. Slightly under (~10–25 mm) puts backspin and carry on the ball; over it drives it into the ground.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             detail("Frames on the barrel", swing.batFrames.map(String.init) ?? "—")
@@ -212,7 +215,7 @@ struct SwingDetailView: View {
             HStack {
                 Text("Carry, paced off")
                 Spacer()
-                TextField("ft", text: $carryText)
+                TextField("m", text: $carryText)
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 80)
@@ -220,12 +223,12 @@ struct SwingDetailView: View {
             Button("Save ground truth") { saveGroundTruth() }
                 .buttonStyle(.bordered)
 
-            if swing.hangS != nil || swing.carryFt != nil {
+            if swing.hangS != nil || swing.carryM != nil {
                 let check = FlightModel.check(
-                    metrics: metricsForFlight, hangS: swing.hangS, carryFt: swing.carryFt)
+                    metrics: metricsForFlight, hangS: swing.hangS, carryM: swing.carryM)
                 Divider()
                 detail("Model hang", String(format: "%.2f s", check.model.hangS))
-                detail("Model carry", String(format: "%.0f ft", check.model.carryFt))
+                detail("Model carry", Fmt.m(check.model.carryM))
                 if let err = check.hangErrorPct {
                     HStack {
                         Text("Hang error").foregroundStyle(.secondary)
@@ -243,7 +246,7 @@ struct SwingDetailView: View {
                     }.font(.callout)
                 }
             }
-            Text("Stopwatch the hang and pace off where it lands. The drag model turns the measured launch angle and exit velocity into a predicted carry — if they match, the numbers are real.")
+            Text("Stopwatch the hang and pace off where it lands (about 0.9 m per big step). The drag model turns the measured launch angle and exit velocity into a predicted carry — if they match, the numbers are real.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -267,8 +270,8 @@ struct SwingDetailView: View {
     private var placement: some View {
         VStack(spacing: 8) {
             detail("Setting", swing.setting.displayName)
-            detail("Camera distance", swing.cameraDistanceFt.map { String(format: "%.1f ft", $0) } ?? "—")
-            detail("Lens height", swing.lensHeightFt.map { String(format: "%.1f ft", $0) } ?? "—")
+            detail("Camera distance", swing.cameraDistanceM.map { Fmt.m($0) } ?? "—")
+            detail("Lens height", swing.lensHeightM.map { Fmt.m($0, decimals: 2) } ?? "—")
             detail("Roll correction", swing.cameraRollDeg.map { String(format: "%+.2f°", $0) } ?? "—")
             detail("Diameter drift", String(format: "%+.1f%%", swing.diameterDrift * 100))
         }
@@ -313,7 +316,7 @@ struct SwingDetailView: View {
 
     private func load() async {
         hangText = swing.hangS.map { String(format: "%.2f", $0) } ?? ""
-        carryText = swing.carryFt.map { String(format: "%.0f", $0) } ?? ""
+        carryText = swing.carryM.map { String(format: "%.1f", $0) } ?? ""
 
         if let name = swing.trackCSVFilename,
            let text = try? String(contentsOf: ClipStore.trackURL(named: name), encoding: .utf8) {
@@ -334,7 +337,7 @@ struct SwingDetailView: View {
     private func saveGroundTruth() {
         var updated = swing
         updated.hangS = Double(hangText.trimmingCharacters(in: .whitespaces))
-        updated.carryFt = Double(carryText.trimmingCharacters(in: .whitespaces))
+        updated.carryM = Double(carryText.trimmingCharacters(in: .whitespaces))
         swing = updated
         model.update(updated)
     }

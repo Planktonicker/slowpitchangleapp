@@ -8,7 +8,7 @@ launch angle + exit velocity, with confidence flags and diagnostic plots.
 
 Usage:
   python analyze_swing.py out/tee_01.csv
-  python analyze_swing.py out/fly_02.csv --flyball --hang 4.2 --carry-ft 210
+  python analyze_swing.py out/fly_02.csv --flyball --hang 4.2 --carry-m 210
 
 Fly-ball mode cross-checks the video-derived numbers against physics you can
 measure with no instruments: stopwatch hang time and a paced-off landing
@@ -28,7 +28,6 @@ import numpy as np
 
 import sla_common as sla
 
-FT_PER_M = 3.28084
 
 
 def make_plots(track, metrics, stem):
@@ -81,7 +80,7 @@ def main():
     ap.add_argument("--json", help="also write metrics as JSON to this path")
     ap.add_argument("--flyball", action="store_true", help="enable physics cross-check")
     ap.add_argument("--hang", type=float, help="stopwatch hang time [s] (flyball mode)")
-    ap.add_argument("--carry-ft", type=float, help="paced-off carry distance [ft] (flyball mode)")
+    ap.add_argument("--carry-m", type=float, help="paced-off carry distance [ft] (flyball mode)")
     args = ap.parse_args()
 
     track, meta = sla.read_track_csv(args.csv)
@@ -119,9 +118,9 @@ def main():
             diff = (hang_s - args.hang) / args.hang * 100
             print(f"  hang: model {hang_s:.2f} s vs stopwatch {args.hang:.2f} s ({diff:+.1f}%)"
                   f"  {'PASS' if abs(diff) <= 15 else 'FAIL'} (tol 15%)")
-        if args.carry_ft:
-            diff = (carry_m * FT_PER_M - args.carry_ft) / args.carry_ft * 100
-            print(f"  carry: model {carry_m*FT_PER_M:.0f} ft vs paced {args.carry_ft:.0f} ft ({diff:+.1f}%)"
+        if args.carry_m:
+            diff = (carry_m - args.carry_m) / args.carry_m * 100
+            print(f"  carry: model {carry_m:.1f} m vs paced {args.carry_m:.1f} m ({diff:+.1f}%)"
                   f"  {'PASS' if abs(diff) <= 20 else 'FAIL'} (tol 20%)")
 
     if not args.no_plots:

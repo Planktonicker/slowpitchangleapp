@@ -6,11 +6,11 @@ disprove) the measurement approach before any app code exists.
 
 ## Equipment
 
-- iPhone + tripod with phone mount, able to stand ~lens-at-waist height (~3.5 ft)
-- Tape measure (or practiced 3-ft paces) for camera distance and carry distances
-- The actual game balls — standard **12 in optic-yellow** slow-pitch softballs
+- iPhone + tripod with phone mount, able to stand ~lens-at-waist height (~1.1 m)
+- Tape measure (or practiced 0.9 m paces) for camera distance and carry distances
+- The actual game balls — standard **30.5 cm circumference optic-yellow** slow-pitch softballs
 - A strip of **fluorescent pink/orange tape** wrapped once around the bat barrel
-  **at the sweet spot** (~4–6 in from the barrel end). Placement matters twice:
+  **at the sweet spot** (~10–15 cm from the barrel end). Placement matters twice:
   attack angle is measured at the tape, and the contact-offset ("undercut")
   reading assumes contact happens near the tape — put it where you actually
   hit the ball.
@@ -29,10 +29,10 @@ disprove) the measurement approach before any app code exists.
 
 ## Geometry (this becomes the app's placement wizard — film it the same way)
 
-- Tripod **perpendicular to the line of play**, level, **15–20 ft** from the
-  plate/tee. Measure the distance, write it in the log. Prefer 20 ft if space
+- Tripod **perpendicular to the line of play**, level, **4.5–6 m** from the
+  plate/tee. Measure the distance, write it in the log. Prefer 6 m if space
   allows (more flight stays in frame).
-- Lens height ≈ contact height (**~3.5 ft**).
+- Lens height ≈ contact height (**~1.1 m**).
 - Stand the tripod on the **hitter's open side** — 3B side for a righty,
   1B side for a lefty — so the body doesn't block the camera's view of contact.
 - Frame it so the plate/tee sits about **one-third from the edge** of the frame
@@ -76,6 +76,6 @@ paper log as the real metadata (setting, distance, notes).
 
 ## Paper log template
 
-| # | Setting | Camera dist (ft) | Lens height | Light | Carry (ft, flies) | Hang (s) | Notes |
+| # | Setting | Camera dist (m) | Lens height | Light | Carry (m, flies) | Hang (s) | Notes |
 |---|---------|------------------|-------------|-------|-------------------|----------|-------|
-| 1 | tee     | 20               | 3.5         | sun   |                   |          |       |
+| 1 | tee     | 6.0              | 1.1         | sun   |                   |          |       |

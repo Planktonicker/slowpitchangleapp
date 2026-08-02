@@ -122,7 +122,7 @@ struct ValidationScoreboard {
         }
 
         // G3 — fly balls with hand-measured hang time and carry.
-        for swing in swings where swing.hangS != nil || swing.carryFt != nil {
+        for swing in swings where swing.hangS != nil || swing.carryM != nil {
             let check = FlightModel.check(
                 metrics: SwingMetrics(launchAngleDeg: swing.launchAngleDeg,
                                       exitVeloMph: swing.exitVeloMph,
@@ -138,7 +138,7 @@ struct ValidationScoreboard {
                                       vxPxS: 0, vyPxS: 0,
                                       flags: swing.flags),
                 hangS: swing.hangS,
-                carryFt: swing.carryFt)
+                carryM: swing.carryM)
             board.g3.append(G3Row(id: swing.id,
                                   label: swing.clipFilename ?? "swing",
                                   hangErrorPct: check.hangErrorPct,

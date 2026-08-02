@@ -12,7 +12,7 @@ import Foundation
 /// a suggestion. What changed from v0.1: ARKit is gone. It fought the 240fps
 /// capture session for the camera (the field-test black screen) and made
 /// setup feel like surveying. Distance now falls out of optics instead:
-/// something of known size in frame (the ball, 3.82 in; or the plate, 17 in)
+/// something of known size in frame (the ball, 9.7 cm; or the plate, 43 cm)
 /// plus the lens field of view gives both the scale AND the distance in one
 /// measurement, with the live preview running the whole time.
 @MainActor
@@ -22,11 +22,11 @@ final class PlacementWizard: ObservableObject {
     enum ScaleSource: String, Codable {
         case none
         case ball       // tap-the-ball auto measure — the layman path
-        case plate      // dragged markers on home plate's 17 in front edge
+        case plate      // dragged markers on home plate's 43 cm front edge
         case manual     // typed distance, scale predicted from FOV
     }
 
-    /// Home plate's front edge is 17 in — the one hard dimension available
+    /// Home plate's front edge is 43 cm (17 in) — the one hard dimension available
     /// at every field, independent of the ball.
     static let plateWidthM = 17.0 * 0.0254
 
@@ -43,7 +43,7 @@ final class PlacementWizard: ObservableObject {
     @Published var plateEnd = CGPoint(x: 0.46, y: 0.72)
     @Published var showPlateMarkers = false
 
-    @Published var manualDistanceFt: Double = 20
+    @Published var manualDistanceM: Double = 6
 
     @Published private(set) var scaleSource: ScaleSource = .none
     @Published private(set) var measuredPxPerM: Double?
@@ -61,7 +61,7 @@ final class PlacementWizard: ObservableObject {
     // MARK: - Scale sources
 
     /// The one-tap path: the detector measured the resting ball at
-    /// `diameterPx`; the ball is 3.82 in, so the scale is immediate.
+    /// `diameterPx`; the ball is 9.7 cm across, so the scale is immediate.
     func applyBallMeasurement(diameterPx: Double) {
         lastBallDiameterPx = diameterPx
         measuredPxPerM = diameterPx / SLA.ballDiameterM
@@ -82,8 +82,8 @@ final class PlacementWizard: ObservableObject {
     /// Fallback: trust a tape-measured distance and predict the scale from
     /// the lens geometry instead of measuring it.
     func applyManualDistance() {
-        guard fieldOfViewDeg > 0, manualDistanceFt > 0 else { return }
-        let d = manualDistanceFt / 3.28084
+        guard fieldOfViewDeg > 0, manualDistanceM > 0 else { return }
+        let d = manualDistanceM
         let halfFov = fieldOfViewDeg / 2 * .pi / 180
         let widthAtDistanceM = 2 * d * tan(halfFov)
         guard widthAtDistanceM > 0 else { return }
@@ -103,32 +103,31 @@ final class PlacementWizard: ObservableObject {
     /// Distance from the camera, inverted from the measured scale and the
     /// field of view. For the manual source this just round-trips the typed
     /// value.
-    var derivedDistanceFt: Double? {
-        if scaleSource == .manual { return manualDistanceFt }
+    var derivedDistanceM: Double? {
+        if scaleSource == .manual { return manualDistanceM }
         guard let pxPerM = measuredPxPerM, pxPerM > 0, fieldOfViewDeg > 0 else { return nil }
         let halfFov = fieldOfViewDeg / 2 * .pi / 180
         let widthAtDistanceM = imageWidthPx / pxPerM
-        let d = widthAtDistanceM / (2 * tan(halfFov))
-        return d * 3.28084
+        return widthAtDistanceM / (2 * tan(halfFov))
     }
 
-    /// The protocol's window is 15-20 ft; 12-28 is accepted with a nudge, so
-    /// a cramped backyard still works — flagged, not forbidden.
+    /// The protocol's window is 4.5-6 m; 3.5-8.5 m is accepted with a nudge,
+    /// so a cramped backyard still works — flagged, not forbidden.
     var isDistanceIdeal: Bool {
-        guard let ft = derivedDistanceFt else { return false }
-        return ft >= 15 && ft <= 20
+        guard let m = derivedDistanceM else { return false }
+        return m >= 4.5 && m <= 6.0
     }
 
     var isDistanceAcceptable: Bool {
-        guard let ft = derivedDistanceFt else { return false }
-        return ft >= 12 && ft <= 28
+        guard let m = derivedDistanceM else { return false }
+        return m >= 3.5 && m <= 8.5
     }
 
     /// Distances where the optics genuinely cannot work, as opposed to merely
     /// being outside the protocol's preferred window.
     var isDistanceAbsurd: Bool {
-        guard let ft = derivedDistanceFt else { return false }
-        return ft < 5 || ft > 60
+        guard let m = derivedDistanceM else { return false }
+        return m < 1.5 || m > 18
     }
 
     /// The only hard precondition left: without a scale there is no way to turn
@@ -155,8 +154,8 @@ final class PlacementWizard: ObservableObject {
         if scaleSource == .none {
             out.append((.blocking, "Tap the ball in the picture to set the distance."))
         }
-        if isDistanceAbsurd, let ft = derivedDistanceFt {
-            out.append((.blocking, String(format: "Camera reads %.0f ft away — that can't be right. Re-measure.", ft)))
+        if isDistanceAbsurd, let m = derivedDistanceM {
+            out.append((.blocking, String(format: "Camera reads %.1f m away — that can't be right. Re-measure.", m)))
         }
 
         if !level.isAvailable || !level.hasReading {
@@ -173,8 +172,8 @@ final class PlacementWizard: ObservableObject {
         }
 
         if scaleSource != .none, !isDistanceAbsurd, !isDistanceAcceptable,
-           let ft = derivedDistanceFt {
-            out.append((.warning, String(format: "Camera reads %.0f ft away. 15–20 ft is ideal.", ft)))
+           let m = derivedDistanceM {
+            out.append((.warning, String(format: "Camera reads %.1f m away. 4.5–6 m is ideal.", m)))
         }
         return out
     }
@@ -203,8 +202,8 @@ final class PlacementWizard: ObservableObject {
 
     /// What gets stamped onto every swing captured in this session.
     struct Placement: Equatable, Sendable {
-        var distanceFt: Double?
-        var heightFt: Double?
+        var distanceM: Double?
+        var heightM: Double?
         var rollDeg: Double
         /// Recorded, never corrected: a tilted camera projects the flight plane
         /// and there is no undoing that after the fact. Kept so a suspicious
@@ -215,8 +214,8 @@ final class PlacementWizard: ObservableObject {
     }
 
     var placement: Placement {
-        Placement(distanceFt: derivedDistanceFt,
-                  heightFt: nil,
+        Placement(distanceM: derivedDistanceM,
+                  heightM: nil,
                   // Handed to the analyzer so tripod roll is corrected, not
                   // just reported.
                   rollDeg: level.rollDeg,

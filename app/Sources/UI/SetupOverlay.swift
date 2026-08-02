@@ -195,7 +195,7 @@ struct SetupOverlay: View {
     }
 
     private var plateHint: some View {
-        Text("Drag both handles onto the ends of the plate's front edge — the 17-inch side facing the pitcher.")
+        Text("Drag both handles onto the ends of the plate's front edge — the 43 cm side facing the pitcher.")
             .font(.system(size: 12, weight: .semibold))
             .foregroundStyle(.white)
             .padding(10)
@@ -211,8 +211,8 @@ struct SetupOverlay: View {
                     .font(Theme.label(12)).tracking(1)
                     .foregroundStyle(Theme.steel)
                 Spacer()
-                if let ft = wizard.derivedDistanceFt {
-                    Text(String(format: "≈ %.0f ft", ft))
+                if let m = wizard.derivedDistanceM {
+                    Text(String(format: "≈ %.1f m", m))
                         .font(Theme.numeral(24))
                         .foregroundStyle(wizard.isDistanceIdeal ? Theme.pass
                                          : (wizard.isDistanceAcceptable ? Theme.warn : Theme.fail))
@@ -265,12 +265,12 @@ struct SetupOverlay: View {
         // the preview and be read as "the ball is here".
         .contentShape(Rectangle())
         .alert("Distance from camera to hitter", isPresented: $showDistanceEntry) {
-            TextField("feet", value: distanceEntryBinding, format: .number)
+            TextField("metres", value: distanceEntryBinding, format: .number)
                 .keyboardType(.decimalPad)
             Button("Use it") { wizard.applyManualDistance() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Measure with a tape or pace it off — about 3 ft per big step. 15–20 ft is the sweet spot.")
+            Text("Measure with a tape or pace it off — about 0.9 m per big step. 4.5–6 m is the sweet spot.")
         }
     }
 
@@ -295,7 +295,7 @@ struct SetupOverlay: View {
                 Label("Touch the ball on the screen", systemImage: "hand.tap.fill")
                     .font(.system(size: 15, weight: .heavy))
                     .foregroundStyle(Theme.yellow)
-                Text(failureText ?? "SwingLab needs one thing before it can measure a swing: how big the ball looks. A softball is 3.82 inches across, so one tap tells it both the scale and how far away you are — no tape measure.")
+                Text(failureText ?? "SwingLab needs one thing before it can measure a swing: how big the ball looks. A softball is 9.7 cm across, so one tap tells it both the scale and how far away you are — no tape measure.")
                     .font(.system(size: 11))
                     .foregroundStyle(failureText == nil ? Theme.steel : Theme.warn)
                     .fixedSize(horizontal: false, vertical: true)
@@ -349,8 +349,8 @@ struct SetupOverlay: View {
     // MARK: - Helpers
 
     private var distanceEntryBinding: Binding<Double> {
-        Binding(get: { wizard.manualDistanceFt },
-                set: { wizard.manualDistanceFt = $0 })
+        Binding(get: { wizard.manualDistanceM },
+                set: { wizard.manualDistanceM = $0 })
     }
 
     private func plateBinding(_ keyPath: ReferenceWritableKeyPath<PlacementWizard, CGPoint>) -> Binding<CGPoint> {
@@ -417,10 +417,10 @@ struct PlacementTipsView: View {
 
                     tip("1", "Side-on, never behind",
                         "Stand the tripod square to the hitter, on their chest side — 3B side for a righty, 1B side for a lefty — so their body never blocks the ball.")
-                    tip("2", "Six to seven big steps",
-                        "That's 15–20 ft. Closer and the ball leaves the frame too fast; further and it gets too small to measure.")
+                    tip("2", "Five to seven big steps",
+                        "That's 4.5–6 m. Closer and the ball leaves the frame too fast; further and it gets too small to measure.")
                     tip("3", "Lens at belt height",
-                        "About 3½ ft up — the height where bat meets ball. Most tripods reach it near full extension.")
+                        "About 1.1 m up — the height where bat meets ball. Most tripods reach it near full extension.")
                     tip("4", "Tap the ball on screen",
                         "Put a ball down in frame and touch it on the picture. That one tap gives the app both the scale and how far away you are — no tape measure.")
                 }
@@ -470,7 +470,7 @@ struct PlacementTipsView: View {
                          at: CGPoint(x: w * 0.7, y: h * 0.32))
             context.draw(Text("PHONE").font(Theme.label(10)).foregroundStyle(Theme.yellow),
                          at: CGPoint(x: phone.x + 52, y: phone.y))
-            context.draw(Text("6–7 BIG STEPS").font(Theme.label(9)).foregroundStyle(.white.opacity(0.7)),
+            context.draw(Text("ABOUT 5 M").font(Theme.label(9)).foregroundStyle(.white.opacity(0.7)),
                          at: CGPoint(x: phone.x + 74, y: (phone.y + hitter.y) / 2))
         }
         .padding(10)

@@ -233,7 +233,7 @@ struct CaptureView: View {
 
     private var bugLabel: String {
         switch hudState {
-        case .ready: return "Feet"
+        case .ready: return "Metres"
         case .needsSetup: return ""
         case .analysing: return "Percent"
         default: return "Status"
@@ -247,7 +247,7 @@ struct CaptureView: View {
             // bug into a paragraph, which is not what a glanceable readout is.
             return "Tap the ball"
         case .ready:
-            if let ft = model.wizard.derivedDistanceFt { return "\(Int(ft.rounded()))" }
+            if let m = model.wizard.derivedDistanceM { return String(format: "%.1f", m) }
             return "SET"
         case .analysing:
             return "\(Int((model.analysisProgress ?? 0) * 100))"
@@ -259,7 +259,7 @@ struct CaptureView: View {
     }
 
     private var bugQualifier: (text: String, color: Color)? {
-        guard hudState == .ready, model.wizard.derivedDistanceFt != nil else { return nil }
+        guard hudState == .ready, model.wizard.derivedDistanceM != nil else { return nil }
         if model.wizard.isDistanceIdeal { return ("good", Theme.pass) }
         if model.wizard.isDistanceAcceptable { return ("ok", Theme.yellow) }
         return ("move", Theme.warn)
@@ -316,10 +316,12 @@ struct CaptureView: View {
                 MetricTile(label: "Launch",
                            value: String(format: "%.1f", swing.launchAngleDeg), unit: "°")
                 MetricTile(label: "Exit velo",
-                           value: String(format: "%.1f", swing.exitVeloMph), unit: "mph")
+                           value: model.settings.speedUnit.format(mph: swing.exitVeloMph),
+                           unit: model.settings.speedUnit.suffix)
                 if let bs = swing.batSpeedMph {
-                    MetricTile(label: "Bat", value: String(format: "%.0f", bs),
-                               unit: "mph", tint: .white)
+                    MetricTile(label: "Bat",
+                               value: model.settings.speedUnit.format(mph: bs, decimals: 0),
+                               unit: model.settings.speedUnit.suffix, tint: .white)
                 }
             }
             if swing.trackedFrames == 0 {
@@ -454,7 +456,7 @@ struct StatusSheet: View {
                 } header: { Text("Trigger") }
 
                 Section("Placement") {
-                    row("Distance", model.wizard.derivedDistanceFt.map { String(format: "%.0f ft", $0) } ?? "—")
+                    row("Distance", model.wizard.derivedDistanceM.map { Fmt.m($0) } ?? "—")
                     row("Scale source", model.wizard.scaleSource.rawValue)
                     row("Roll", model.wizard.level.hasReading
                         ? String(format: "%+.1f°", model.wizard.level.rollDeg) : "unknown")

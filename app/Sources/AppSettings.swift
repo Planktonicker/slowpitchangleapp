@@ -59,6 +59,9 @@ struct AppSettings: Codable, Equatable {
     var keepClips = true
     var fpsOverride: Double?
     var visionOrientation: VisionOrientationSetting = .auto
+    /// Everything else in the app is metric; ball and bat speed are the one
+    /// exception, because the sport's published reference numbers are in mph.
+    var speedUnit: SpeedUnit = .mph
 
     static let storageKey = "swinglab.settings.v1"
 

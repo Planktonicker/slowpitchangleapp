@@ -60,11 +60,12 @@ struct TrendsView: View {
             Section("Exit velocity") {
                 Chart(swings) { swing in
                     PointMark(x: .value("Swing", swing.capturedAt),
-                              y: .value("mph", swing.exitVeloMph))
+                              y: .value(model.settings.speedUnit.suffix, model.settings.speedUnit.fromMph(swing.exitVeloMph)))
                     .foregroundStyle(.blue)
                 }
                 .frame(height: 180)
-                stats(swings.map(\.exitVeloMph), unit: "mph")
+                stats(swings.map { model.settings.speedUnit.fromMph($0.exitVeloMph) },
+                      unit: model.settings.speedUnit.suffix)
             }
 
             Section("Launch angle") {
@@ -80,7 +81,7 @@ struct TrendsView: View {
             Section("Launch angle vs exit velocity") {
                 Chart(swings) { swing in
                     PointMark(x: .value("Launch angle", swing.launchAngleDeg),
-                              y: .value("Exit velo", swing.exitVeloMph))
+                              y: .value("Exit velo", model.settings.speedUnit.fromMph(swing.exitVeloMph)))
                     .foregroundStyle(by: .value("Setting", swing.setting.rawValue))
                 }
                 .frame(height: 220)

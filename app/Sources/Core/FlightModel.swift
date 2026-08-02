@@ -15,8 +15,6 @@ enum FlightModel {
         var hangS: Double
         var apexM: Double
 
-        var carryFt: Double { carryM * 3.28084 }
-        var apexFt: Double { apexM * 3.28084 }
     }
 
     /// Integrate a batted ball from contact to landing. No spin/Magnus — the
@@ -65,15 +63,15 @@ enum FlightModel {
     struct GroundTruthCheck: Equatable, Sendable {
         var model: Flight
         var measuredHangS: Double?
-        var measuredCarryFt: Double?
+        var measuredCarryM: Double?
 
         var hangErrorPct: Double? {
             guard let h = measuredHangS, h > 0 else { return nil }
             return (model.hangS - h) / h * 100
         }
         var carryErrorPct: Double? {
-            guard let c = measuredCarryFt, c > 0 else { return nil }
-            return (model.carryFt - c) / c * 100
+            guard let c = measuredCarryM, c > 0 else { return nil }
+            return (model.carryM - c) / c * 100
         }
         var hangPasses: Bool? { hangErrorPct.map { abs($0) <= 15 } }
         var carryPasses: Bool? { carryErrorPct.map { abs($0) <= 20 } }
@@ -81,14 +79,14 @@ enum FlightModel {
 
     static func check(metrics: SwingMetrics,
                       hangS: Double?,
-                      carryFt: Double?,
+                      carryM: Double?,
                       contactHeightM: Double = 0.9) -> GroundTruthCheck {
         GroundTruthCheck(
             model: simulate(evMps: metrics.exitVeloMps,
                             laDeg: metrics.launchAngleDeg,
                             contactHeightM: contactHeightM),
             measuredHangS: hangS,
-            measuredCarryFt: carryFt
+            measuredCarryM: carryM
         )
     }
 }

@@ -352,7 +352,6 @@ def main():
             "MIN_RADIUS_PX_DEFAULT": sla.MIN_RADIUS_PX_DEFAULT,
             "MAX_RADIUS_PX_DEFAULT": sla.MAX_RADIUS_PX_DEFAULT,
             "BAT_BARREL_DIAMETER_M": sla.BAT_BARREL_DIAMETER_M,
-            "INCHES_PER_M": sla.INCHES_PER_M,
             "CONTACT_PLAUSIBLE_M": sla.CONTACT_PLAUSIBLE_M,
             "UNDERCUT_TOPPED_BELOW_M": sla.UNDERCUT_TOPPED_BELOW_M,
             "UNDERCUT_CENTERED_MAX_M": sla.UNDERCUT_CENTERED_MAX_M,
@@ -418,7 +417,7 @@ def main():
         out["contact_offset"].append({
             **c,
             "undercut_m": u,
-            "undercut_in": u * sla.INCHES_PER_M,
+            "undercut_mm": u * 1000,
             "quality": sla.contact_quality(u),
         })
 

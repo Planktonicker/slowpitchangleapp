@@ -59,20 +59,20 @@ Same geometry as [CAPTURE_PROTOCOL.md](CAPTURE_PROTOCOL.md), but it is now one
 screen and needs no tape measure and no AR:
 
 1. Tripod side-on, on the hitter's **open** side, lens at belt height,
-   6-7 big steps back. Tap the **?** on the setup screen for the diagram.
+   5-7 big steps back. Tap the **?** on the setup screen for the diagram.
 2. Match the dashed guides: hitter fills the tall box, ball on the circle.
 3. Level the tripod until the bar goes green. Roll is fed into the maths as a
    correction; tilt cannot be corrected, so the bar is strict about it.
 4. Put the ball on the tee and press **Tap the ball**. The app measures the
-   ball (known 3.82 in) against the lens field of view and derives the
+   ball (known 9.7 cm) against the lens field of view and derives the
    distance itself. No plate? No problem — the ball is always there.
-   Alternatives under **Other**: mark home plate's 17 in front edge, or type
+   Alternatives under **Other**: mark home plate's 43 cm front edge, or type
    a paced-off distance.
 5. **Arm.** Focus and exposure lock automatically at that moment.
 
 Arming stays blocked until level and distance pass — every number is scaled
 from pixels, so a camera that moved between sessions silently changes the
-readings. 15-20 ft reads "Good"; 12-28 ft is accepted as "Workable".
+readings. 4.5-6 m reads "Good"; 3.5-8.5 m is accepted as "Workable".
 
 The app also refuses to auto-trigger unless a person has been seen in frame
 within the last ~1.5 s (on-device body-pose detection, ~10 checks a second).
@@ -144,7 +144,7 @@ the phone (Finder → iPhone → Files → SwingLab, or the share sheet), then:
 
 ```
 cd spike
-python analyze_swing.py out/tee_01.csv --flyball --hang 4.1 --carry-ft 185
+python analyze_swing.py out/tee_01.csv --flyball --hang 4.1 --carry-m 56
 python track_ball.py clips/tee_01.mov --debug-video --fps 240
 ```
 

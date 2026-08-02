@@ -15,7 +15,11 @@ struct SwingLabApp: App {
         let store: SwingStoring
         var failure: String?
         do {
-            store = try SwiftDataSwingStore()
+            let opened = try SwiftDataSwingStore.openRecreatingIfNeeded()
+            store = opened.store
+            if opened.wasReset {
+                failure = "Stored swings were cleared: the database predates the switch to metric units and could not be migrated. Saving works normally from here."
+            }
         } catch {
             store = InMemorySwingStore()
             failure = "Saved-swing database could not be opened, so this session is memory-only: \(error.localizedDescription)"

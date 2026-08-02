@@ -40,13 +40,13 @@ final class SwingEntity {
     var batFrames: Int?
     var batSpeedMph: Double?
     var smashFactor: Double?
-    var undercutIn: Double?
+    var undercutMm: Double?
 
     var hangS: Double?
-    var carryFt: Double?
+    var carryM: Double?
 
-    var cameraDistanceFt: Double?
-    var lensHeightFt: Double?
+    var cameraDistanceM: Double?
+    var lensHeightM: Double?
     var cameraRollDeg: Double?
     var cameraTiltDeg: Double?
     /// Pipe-separated `CaptureFlag` raw values, same encoding as `flagsRaw`.
@@ -79,11 +79,11 @@ final class SwingEntity {
         batFrames = dto.batFrames
         batSpeedMph = dto.batSpeedMph
         smashFactor = dto.smashFactor
-        undercutIn = dto.undercutIn
+        undercutMm = dto.undercutMm
         hangS = dto.hangS
-        carryFt = dto.carryFt
-        cameraDistanceFt = dto.cameraDistanceFt
-        lensHeightFt = dto.lensHeightFt
+        carryM = dto.carryM
+        cameraDistanceM = dto.cameraDistanceM
+        lensHeightM = dto.lensHeightM
         cameraRollDeg = dto.cameraRollDeg
         cameraTiltDeg = dto.cameraTiltDeg
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
@@ -114,11 +114,11 @@ final class SwingEntity {
         batFrames = dto.batFrames
         batSpeedMph = dto.batSpeedMph
         smashFactor = dto.smashFactor
-        undercutIn = dto.undercutIn
+        undercutMm = dto.undercutMm
         hangS = dto.hangS
-        carryFt = dto.carryFt
-        cameraDistanceFt = dto.cameraDistanceFt
-        lensHeightFt = dto.lensHeightFt
+        carryM = dto.carryM
+        cameraDistanceM = dto.cameraDistanceM
+        lensHeightM = dto.lensHeightM
         cameraRollDeg = dto.cameraRollDeg
         cameraTiltDeg = dto.cameraTiltDeg
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
@@ -151,11 +151,11 @@ final class SwingEntity {
         d.batFrames = batFrames
         d.batSpeedMph = batSpeedMph
         d.smashFactor = smashFactor
-        d.undercutIn = undercutIn
+        d.undercutMm = undercutMm
         d.hangS = hangS
-        d.carryFt = carryFt
-        d.cameraDistanceFt = cameraDistanceFt
-        d.lensHeightFt = lensHeightFt
+        d.carryM = carryM
+        d.cameraDistanceM = cameraDistanceM
+        d.lensHeightM = lensHeightM
         d.cameraRollDeg = cameraRollDeg
         d.cameraTiltDeg = cameraTiltDeg
         d.captureFlags = captureFlagsRaw.split(separator: "|")
@@ -171,10 +171,41 @@ final class SwiftDataSwingStore: SwingStoring {
     let container: ModelContainer
     private let context: ModelContext
 
+    /// Where the store lives. Explicit rather than SwiftData's default so a
+    /// store that cannot be opened can be removed and rebuilt.
+    static var storeURL: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory,
+                                            in: .userDomainMask)[0]
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        return base.appendingPathComponent("SwingLab.store")
+    }
+
     init(inMemory: Bool = false) throws {
-        let config = ModelConfiguration(isStoredInMemoryOnly: inMemory)
+        let config = inMemory
+            ? ModelConfiguration(isStoredInMemoryOnly: true)
+            : ModelConfiguration(url: Self.storeURL)
         container = try ModelContainer(for: SwingEntity.self, configurations: config)
         context = ModelContext(container)
+    }
+
+    /// Open the store, rebuilding it if the existing file cannot be migrated.
+    ///
+    /// Field units changed from feet/inches to metres/millimetres, which renames
+    /// stored properties — a schema change SwiftData cannot always migrate in
+    /// place. Losing a handful of pre-release test swings is a far better
+    /// outcome than an app that refuses to open, or one that silently drops to
+    /// memory-only and quietly stops saving anything.
+    static func openRecreatingIfNeeded() throws -> (store: SwiftDataSwingStore, wasReset: Bool) {
+        do {
+            return (try SwiftDataSwingStore(), false)
+        } catch {
+            let fm = FileManager.default
+            for suffix in ["", "-shm", "-wal"] {
+                let url = URL(fileURLWithPath: storeURL.path + suffix)
+                try? fm.removeItem(at: url)
+            }
+            return (try SwiftDataSwingStore(), true)
+        }
     }
 
     func all() throws -> [SwingDTO] {

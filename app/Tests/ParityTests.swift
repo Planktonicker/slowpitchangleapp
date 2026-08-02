@@ -123,7 +123,7 @@ final class ParityTests: XCTestCase {
         var bat_y0_px: Double
         var scale_m_per_px: Double
         var undercut_m: Double
-        var undercut_in: Double
+        var undercut_mm: Double
         var quality: String
     }
 
@@ -345,8 +345,8 @@ final class ParityTests: XCTestCase {
             let u = SLA.undercutM(ballY0Px: c.ball_y0_px, batY0Px: c.bat_y0_px,
                                   scaleMPerPx: c.scale_m_per_px)
             assertClose(u, c.undercut_m, rel: 1e-9, "\(c.name) undercut m")
-            assertClose(u * SLA.inchesPerM, c.undercut_in, rel: 1e-9,
-                        "\(c.name) undercut in")
+            assertClose(u * 1000, c.undercut_mm, rel: 1e-9,
+                        "\(c.name) undercut mm")
             XCTAssertEqual(ContactQuality(undercutM: u).rawValue, c.quality,
                            "\(c.name) quality")
         }
@@ -356,7 +356,6 @@ final class ParityTests: XCTestCase {
     func testContactConstantsMatchReference() {
         let c = Self.fixtures.constants
         assertClose(SLA.batBarrelDiameterM, c["BAT_BARREL_DIAMETER_M"]!, "barrel diameter")
-        assertClose(SLA.inchesPerM, c["INCHES_PER_M"]!, "inches per m")
         assertClose(SLA.contactPlausibleM, c["CONTACT_PLAUSIBLE_M"]!, "plausibility limit")
         assertClose(SLA.undercutToppedBelowM, c["UNDERCUT_TOPPED_BELOW_M"]!, "topped band")
         assertClose(SLA.undercutCenteredMaxM, c["UNDERCUT_CENTERED_MAX_M"]!, "centered band")

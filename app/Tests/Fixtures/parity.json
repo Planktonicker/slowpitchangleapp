@@ -34,7 +34,6 @@
   "MIN_RADIUS_PX_DEFAULT": 4.0,
   "MAX_RADIUS_PX_DEFAULT": 60.0,
   "BAT_BARREL_DIAMETER_M": 0.05715,
-  "INCHES_PER_M": 39.3701,
   "CONTACT_PLAUSIBLE_M": 0.07708542665440969,
   "UNDERCUT_TOPPED_BELOW_M": -0.006,
   "UNDERCUT_CENTERED_MAX_M": 0.01,
@@ -7552,7 +7551,7 @@
    "bat_y0_px": 504.0,
    "scale_m_per_px": 0.004166666666666667,
    "undercut_m": 0.016666666666666666,
-   "undercut_in": 0.6561683333333334,
+   "undercut_mm": 16.666666666666668,
    "quality": "under_carry"
   },
   {
@@ -7561,7 +7560,7 @@
    "bat_y0_px": 500.5,
    "scale_m_per_px": 0.004166666666666667,
    "undercut_m": 0.0020833333333333333,
-   "undercut_in": 0.08202104166666667,
+   "undercut_mm": 2.0833333333333335,
    "quality": "centered"
   },
   {
@@ -7570,7 +7569,7 @@
    "bat_y0_px": 497.0,
    "scale_m_per_px": 0.004166666666666667,
    "undercut_m": -0.0125,
-   "undercut_in": -0.49212625000000004,
+   "undercut_mm": -12.5,
    "quality": "topped"
   },
   {
@@ -7579,7 +7578,7 @@
    "bat_y0_px": 509.0,
    "scale_m_per_px": 0.004166666666666667,
    "undercut_m": 0.0375,
-   "undercut_in": 1.47637875,
+   "undercut_mm": 37.5,
    "quality": "under_popup"
   },
   {
@@ -7588,7 +7587,7 @@
    "bat_y0_px": 525.0,
    "scale_m_per_px": 0.004166666666666667,
    "undercut_m": 0.10416666666666667,
-   "undercut_in": 4.101052083333333,
+   "undercut_mm": 104.16666666666667,
    "quality": "implausible"
   },
   {
@@ -7597,7 +7596,7 @@
    "bat_y0_px": 498.56,
    "scale_m_per_px": 0.004166666666666667,
    "undercut_m": -0.005999999999999991,
-   "undercut_in": -0.23622059999999964,
+   "undercut_mm": -5.99999999999999,
    "quality": "centered"
   }
  ]

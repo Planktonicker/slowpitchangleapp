@@ -56,6 +56,16 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
+                Section("Units") {
+                    Picker("Speed", selection: $model.settings.speedUnit) {
+                        ForEach(SpeedUnit.allCases, id: \.self) { u in
+                            Text(u.displayName).tag(u)
+                        }
+                    }
+                    Text("Distances, sizes and offsets are always metric. Speed is offered in both because every published exit-velocity and bat-speed benchmark for the sport is in mph.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
                 Section("Camera orientation") {
                     Picker("Vision orientation", selection: $model.settings.visionOrientation) {
                         ForEach(VisionOrientationSetting.allCases, id: \.self) { o in
@@ -79,8 +89,7 @@ struct SettingsView: View {
                 }
 
                 Section("Reference") {
-                    LabeledContent("Ball diameter",
-                                   value: String(format: "%.2f in", SLA.ballDiameterM * 39.3701))
+                    LabeledContent("Ball diameter", value: Fmt.cm(SLA.ballDiameterM))
                     LabeledContent("Ball mass", value: String(format: "%.0f g", SLA.ballMassKg * 1000))
                     LabeledContent("Drag Cd", value: String(format: "%.2f", SLA.dragCd))
                     LabeledContent("Scale tolerance",

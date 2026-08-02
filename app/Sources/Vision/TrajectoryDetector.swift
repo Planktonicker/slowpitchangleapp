@@ -87,7 +87,7 @@ final class TrajectoryDetector {
         request = VNDetectTrajectoriesRequest(frameAnalysisSpacing: .zero,
                                               trajectoryLength: max(5, trajectoryLength),
                                               completionHandler: nil)
-        // A softball at 15-20 ft on a 1080-wide frame is roughly 1-3% of the
+        // A softball at 4.5-6 m on a 1080-wide frame is roughly 1-3% of the
         // frame width. Keep the window generous — cage clips sit at the small
         // end and the tee at the large end.
         request.objectMinimumNormalizedRadius = 0.003

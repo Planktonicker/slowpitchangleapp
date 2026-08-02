@@ -181,9 +181,8 @@ def main():
 
     # flight model sanity: 65 mph @ 25 deg carries roughly 130-190 ft in air
     carry_m, hang_s, _apex = sla.simulate_flight(TRUE_EV_MPH / sla.MPH_PER_MPS, TRUE_LA_DEG)
-    carry_ft = carry_m * 3.28084
-    check("drag flight model sanity", 120 <= carry_ft <= 200 and 1.5 <= hang_s <= 4.0,
-          f"carry {carry_ft:.0f} ft, hang {hang_s:.2f} s")
+    check("drag flight model sanity", 36 <= carry_m <= 61 and 1.5 <= hang_s <= 4.0,
+          f"carry {carry_m:.1f} m, hang {hang_s:.2f} s")
 
     print()
     if all(checks):
