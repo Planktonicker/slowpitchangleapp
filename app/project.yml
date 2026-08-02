@@ -42,6 +42,11 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.swinglab.SwingLab
         PRODUCT_NAME: SwingLab
         CODE_SIGN_STYLE: Automatic
+        # Named explicitly rather than left to Xcode's default. Once a catalogue
+        # exists, actool insists on finding the icon set this names — that is
+        # the "None of the input catalogs contained a matching ... app icon set"
+        # build error, and it is a missing icon, not a broken catalogue.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
         # Release builds get optimised: the fallback detector walks every
         # pixel of every frame, and -Onone makes that unusably slow.
