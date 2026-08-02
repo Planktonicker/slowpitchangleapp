@@ -62,6 +62,11 @@ struct AppSettings: Codable, Equatable {
     /// Everything else in the app is metric; ball and bat speed are the one
     /// exception, because the sport's published reference numbers are in mph.
     var speedUnit: SpeedUnit = .mph
+    /// Which way round the framing guide is drawn: hitter near the left edge
+    /// with the ball flying right, or mirrored. Purely a setup aid — the
+    /// measurement itself is direction-agnostic (`SwingAnalyzer` reports launch
+    /// angle up-positive whichever way the ball leaves).
+    var hitterOnLeft = true
 
     static let storageKey = "swinglab.settings.v1"
 

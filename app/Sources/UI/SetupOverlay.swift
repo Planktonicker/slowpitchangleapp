@@ -112,6 +112,15 @@ struct SetupOverlay: View {
             .shadow(radius: 3)
             Spacer()
             Button {
+                model.settings.hitterOnLeft.toggle()
+            } label: {
+                Image(systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right")
+                    .font(.system(size: 13, weight: .heavy))
+                    .padding(10)
+                    .background(.black.opacity(0.55), in: Circle())
+                    .foregroundStyle(.white)
+            }
+            Button {
                 showTips = true
             } label: {
                 Image(systemName: "questionmark")
@@ -123,36 +132,102 @@ struct SetupOverlay: View {
         }
     }
 
-    /// Where things should be in frame. Static template, no tracking — its job
-    /// is to make "film it the same way every time" visual.
+    /// A picture of the shot to set up, rather than an abstraction.
+    ///
+    /// This replaces a dashed rectangle labelled HITTER and a small circle
+    /// labelled BALL, which told you where two things belonged without ever
+    /// saying which way the hitter faced or which way the ball went — so it
+    /// could be matched exactly while still filming the wrong shot.
+    ///
+    /// The geometry it draws is not a style choice. Launch angle and exit
+    /// velocity are measured from the ball's path across the image, so the
+    /// flight has to run ACROSS the frame, not toward or away from the lens:
+    /// a ball flying at the camera is foreshortened, reads slow, and gets
+    /// flagged for depth motion. Hence hitter near one edge, tee in front of
+    /// them, and most of the frame left empty for the ball to travel through.
     private var framingGuide: some View {
         GeometryReader { geo in
             let w = geo.size.width, h = geo.size.height
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Theme.yellow.opacity(0.55),
-                                  style: StrokeStyle(lineWidth: 2, dash: [10, 7]))
-                    .frame(width: w * 0.30, height: h * 0.62)
-                    .position(x: w * 0.24, y: h * 0.52)
-                Text("HITTER")
-                    .font(Theme.label(11)).tracking(2)
-                    .foregroundStyle(Theme.yellow.opacity(0.8))
-                    .position(x: w * 0.24, y: h * 0.18)
+            let flip = model.settings.hitterOnLeft ? 1.0 : -1.0
+            // Mirror about the centre when the hitter works the other way.
+            func px(_ nx: Double) -> Double {
+                let centred = nx - 0.5
+                return (0.5 + centred * flip) * w
+            }
+            func py(_ ny: Double) -> Double { ny * h }
+            func pt(_ nx: Double, _ ny: Double) -> CGPoint {
+                CGPoint(x: px(nx), y: py(ny))
+            }
 
+            let stroke = StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
+            let ghost = Theme.yellow.opacity(0.7)
+
+            ZStack {
+                // Hitter, side-on, chest toward the camera side.
+                Path { p in
+                    p.addEllipse(in: CGRect(x: px(0.20) - 0.020 * w, y: py(0.30) - 0.020 * w,
+                                            width: 0.040 * w, height: 0.040 * w))
+                }
+                .stroke(ghost, style: stroke)
+                Path { p in
+                    p.move(to: pt(0.20, 0.345))          // neck
+                    p.addLine(to: pt(0.20, 0.56))        // spine to hips
+                    p.move(to: pt(0.20, 0.56))           // legs
+                    p.addLine(to: pt(0.165, 0.86))
+                    p.move(to: pt(0.20, 0.56))
+                    p.addLine(to: pt(0.245, 0.86))
+                    p.move(to: pt(0.20, 0.40))           // arms forward to the hands
+                    p.addLine(to: pt(0.245, 0.46))
+                    p.move(to: pt(0.245, 0.46))          // bat, cocked back over the shoulder
+                    p.addLine(to: pt(0.165, 0.30))
+                }
+                .stroke(ghost, style: stroke)
+
+                // Tee and ball, in front of the hitter at contact height.
+                Path { p in
+                    p.move(to: pt(0.33, 0.86))
+                    p.addLine(to: pt(0.33, 0.60))
+                }
+                .stroke(ghost, style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
                 Circle()
-                    .strokeBorder(Theme.yellow.opacity(0.55),
-                                  style: StrokeStyle(lineWidth: 2, dash: [6, 5]))
-                    .frame(width: 34, height: 34)
-                    .position(x: w * 0.34, y: h * 0.66)
-                Text("BALL")
-                    .font(Theme.label(10)).tracking(1.5)
-                    .foregroundStyle(Theme.yellow.opacity(0.8))
-                    .position(x: w * 0.34, y: h * 0.735)
+                    .strokeBorder(Theme.yellow, lineWidth: 2.5)
+                    .frame(width: 0.045 * w, height: 0.045 * w)
+                    .position(pt(0.33, 0.575))
+
+                // Where the ball goes — the whole reason the frame is composed
+                // this way, and the thing the old guide never said.
+                Path { p in
+                    p.move(to: pt(0.38, 0.55))
+                    p.addQuadCurve(to: pt(0.92, 0.28), control: pt(0.66, 0.34))
+                }
+                .stroke(Theme.yellow.opacity(0.75),
+                        style: StrokeStyle(lineWidth: 2.5, dash: [9, 6]))
+                Path { p in
+                    p.move(to: pt(0.855, 0.255))
+                    p.addLine(to: pt(0.92, 0.28))
+                    p.addLine(to: pt(0.862, 0.318))
+                }
+                .stroke(Theme.yellow, style: stroke)
+
+                guideLabel("STAND HERE", at: pt(0.20, 0.92))
+                guideLabel("FACING THE CAMERA", at: pt(0.20, 0.955), small: true)
+                guideLabel("TEE", at: pt(0.33, 0.92))
+                guideLabel("BALL FLIES THIS WAY", at: pt(0.68, 0.20))
             }
         }
         // Critical: the whole point of the overlay is that taps reach the
         // preview underneath so the user can tap the ball.
         .allowsHitTesting(false)
+    }
+
+    private func guideLabel(_ text: String, at point: CGPoint,
+                            small: Bool = false) -> some View {
+        Text(text)
+            .font(Theme.label(small ? 9 : 11))
+            .tracking(1.4)
+            .foregroundStyle(Theme.yellow.opacity(small ? 0.7 : 0.9))
+            .shadow(color: .black.opacity(0.9), radius: 3)
+            .position(point)
     }
 
     /// Roll as a ball on a beam, tilt as a hint underneath. Advisory only —
@@ -436,8 +511,8 @@ struct PlacementTipsView: View {
                         .frame(maxWidth: .infinity)
                         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
 
-                    tip("1", "Side-on, never behind",
-                        "Stand the tripod square to the hitter, on their chest side — 3B side for a righty, 1B side for a lefty — so their body never blocks the ball.")
+                    tip("1", "Side-on to the flight, never behind",
+                        "Square to the ball's flight, on the side the hitter FACES — first-base side for a right-hander, third-base side for a left-hander. Behind them their own body hides the bat at contact.")
                     tip("2", "Five to seven big steps",
                         "That's 4.5–6 m. Closer and the ball leaves the frame too fast; further and it gets too small to measure.")
                     tip("3", "Lens at belt height",
@@ -486,7 +561,9 @@ struct PlacementTipsView: View {
                          with: .color(Theme.yellow))
 
             context.draw(Text("HITTER").font(Theme.label(10)).foregroundStyle(.white),
-                         at: CGPoint(x: hitter.x, y: hitter.y - 22))
+                         at: CGPoint(x: hitter.x, y: hitter.y - 24))
+            context.draw(Text("faces the phone").font(Theme.label(8)).foregroundStyle(.white.opacity(0.7)),
+                         at: CGPoint(x: hitter.x + 4, y: hitter.y - 12))
             context.draw(Text("BALL FLIGHT").font(Theme.label(10)).foregroundStyle(Theme.yellow),
                          at: CGPoint(x: w * 0.7, y: h * 0.32))
             context.draw(Text("PHONE").font(Theme.label(10)).foregroundStyle(Theme.yellow),

@@ -29,12 +29,18 @@ disprove) the measurement approach before any app code exists.
 
 ## Geometry (this becomes the app's placement wizard — film it the same way)
 
-- Tripod **perpendicular to the line of play**, level, **4.5–6 m** from the
-  plate/tee. Measure the distance, write it in the log. Prefer 6 m if space
+- Tripod **perpendicular to the line of play** — square to the direction the
+  ball will travel, so the flight crosses the frame rather than running toward
+  or away from the lens. This is a measurement requirement, not a preference: a
+  ball flying at the camera is foreshortened, so its speed reads low and its
+  angle is wrong (the pipeline flags this as `DEPTH_MOTION`). Level, **4.5–6 m**
+  from the plate/tee. Measure the distance, write it in the log. Prefer 6 m if space
   allows (more flight stays in frame).
 - Lens height ≈ contact height (**~1.1 m**).
-- Stand the tripod on the **hitter's open side** — 3B side for a righty,
-  1B side for a lefty — so the body doesn't block the camera's view of contact.
+- Stand the tripod on the side the hitter **faces** — **1B side for a
+  right-hander**, 3B side for a left-hander. A right-hander bats from the 3B
+  box and turns to face the plate, so filming from the 3B side films their
+  back and their own body hides the bat at contact.
 - Frame it so the plate/tee sits about **one-third from the edge** of the frame
   on the catcher side, leaving ~70% of the width for the outgoing ball.
 
