@@ -447,7 +447,7 @@ struct SetupOverlay: View {
             }
             .buttonStyle(.plain)
 
-            if !cardCollapsed || hasSomethingToSay {
+            if !cardCollapsed {
                 instruction
 
                 // The fallback is a first-class option, not a hidden one.
@@ -490,6 +490,20 @@ struct SetupOverlay: View {
                 withAnimation(.easeInOut(duration: 0.18)) { cardCollapsed = true }
             }
         }
+        // ...but a tap always reopens it first, so whatever comes back — the
+        // diameter, or the reason it was rejected and the detector's
+        // diagnostic line — is on screen rather than behind a chevron.
+        //
+        // Reopening on the tap, rather than refusing to close while there is
+        // something to read: the earlier version did the latter and a failed
+        // measurement then jammed the panel open, because the collapse button
+        // was fighting a condition that never cleared. An explicit tap on the
+        // header must always win.
+        .onChange(of: measuring) { _, isMeasuring in
+            if isMeasuring {
+                withAnimation(.easeInOut(duration: 0.18)) { cardCollapsed = false }
+            }
+        }
         .alert("Distance from camera to hitter", isPresented: $showDistanceEntry) {
             TextField("metres", value: distanceEntryBinding, format: .number)
                 .keyboardType(.decimalPad)
@@ -498,22 +512,6 @@ struct SetupOverlay: View {
         } message: {
             Text("Measure with a tape or pace it off — about 0.9 m per big step. 4.5–6 m is the sweet spot.")
         }
-    }
-
-    /// Whether the panel is holding something the user needs to read, in which
-    /// case it stays open however it was left.
-    ///
-    /// Collapsing on a successful measurement is right; collapsing over a
-    /// *failed* one is not. `instruction` is the only thing in the app that
-    /// renders `failureText` and the detector's diagnostic line — the whole
-    /// point of which is to make a rejection explainable from a photo of the
-    /// screen — so hiding it behind a chevron the user has no reason to tap
-    /// puts them back to guessing.
-    private var hasSomethingToSay: Bool {
-        if measuring { return true }
-        guard let result = lastResult else { return false }
-        if case .found = result { return false }
-        return true
     }
 
     /// The one instruction that matters, and honest feedback on the last try.
