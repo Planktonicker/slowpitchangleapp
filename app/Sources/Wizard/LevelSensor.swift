@@ -15,12 +15,19 @@ import UIKit
 ///    just a setup warning: it is handed to `SwingAnalyzer` as `rollDeg`, so
 ///    a tripod that sits 1.5 degrees off has that 1.5 degrees taken back out
 ///    of the launch angle instead of quietly biasing every reading.
-///  * **tilt** — camera pointing up or down. There is no correcting this one
-///    after the fact; a tilted camera turns the flight plane into a projection
-///    and breaks the assumption that vertical pixels mean vertical metres.
+///  * **tilt** — camera pointing up or down. A tilted camera turns the flight
+///    plane into a projection and breaks the assumption that vertical pixels
+///    mean vertical metres. This one is handed to `TiltRectifier`, which warps
+///    the track back into the view a level camera would have recorded before
+///    anything is measured — so the short tripod that has to be aimed up at
+///    contact height still produces honest numbers.
 final class LevelSensor: ObservableObject {
 
     @Published private(set) var rollDeg: Double = 0
+    /// Camera pitch, **positive when the lens aims down**. Matches the sign
+    /// `TiltRectifier` and `sla_common.rectify_tilt` expect; `tiltSign` pins it
+    /// with a test, because a flipped sign here would double the projection
+    /// error instead of removing it, and would do so silently.
     @Published private(set) var tiltDeg: Double = 0
     @Published private(set) var isAvailable = false
     /// False until the first real reading lands. Without this, "no motion
@@ -98,9 +105,7 @@ final class LevelSensor: ObservableObject {
             while roll > 180 { roll -= 360 }
             while roll < -180 { roll += 360 }
 
-            // Camera axis is device -z, so gravity's z component is how far
-            // the lens is pointing up or down.
-            let tilt = asin(max(-1, min(1, g.z))) * 180 / .pi - self.tiltZero
+            let tilt = Self.tiltDown(gravityZ: g.z) - self.tiltZero
 
             let sr = self.smoothedRoll.map { $0 + self.smoothing * (roll - $0) } ?? roll
             let st = self.smoothedTilt.map { $0 + self.smoothing * (tilt - $0) } ?? tilt
@@ -156,6 +161,23 @@ final class LevelSensor: ObservableObject {
         tiltZero = 0
         smoothedRoll = nil
         smoothedTilt = nil
+    }
+
+    /// Camera pitch in degrees from `CMDeviceMotion.gravity`'s z component,
+    /// positive when the **rear lens aims down**.
+    ///
+    /// The rear camera looks along device −z, and CoreMotion reports gravity in
+    /// device coordinates. Lying flat screen-up the camera points at the table
+    /// and `g.z == -1`; face-down at the sky it is `+1`; standing upright in
+    /// portrait, level, it is `0`. Hence the negation — without it every sign
+    /// downstream, including the direction `TiltRectifier` warps the track, is
+    /// backwards.
+    ///
+    /// Pure and `static` so `PipelineTests` can pin the convention. It has to
+    /// be pinned: a wrong sign here does not fail loudly, it doubles the very
+    /// error it was added to remove.
+    static func tiltDown(gravityZ: Double) -> Double {
+        -asin(max(-1, min(1, gravityZ))) * 180 / .pi
     }
 
     private static func currentOrientation() -> UIInterfaceOrientation {

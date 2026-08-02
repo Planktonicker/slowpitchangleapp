@@ -197,6 +197,55 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(board.g5Passes, false, "80% is under the 90% G5 bar")
     }
 
+    // MARK: - Camera tilt sign convention
+
+    /// Pins the one number in the tilt correction that cannot be caught by a
+    /// parity fixture: which way round "tilt" points. `TiltRectifier` is pinned
+    /// against the Python for a *given* angle; nothing else checks that the IMU
+    /// hands it that angle with the sign it expects. Get this backwards and the
+    /// rectification doubles the projection error rather than removing it, with
+    /// no symptom beyond numbers being further off than before.
+    func testTiltIsPositiveWhenTheLensAimsDown() {
+        // Flat on a table, screen up: the rear lens stares at the table.
+        XCTAssertEqual(LevelSensor.tiltDown(gravityZ: -1), 90, accuracy: 1e-9)
+        // Face down: the lens stares at the sky.
+        XCTAssertEqual(LevelSensor.tiltDown(gravityZ: 1), -90, accuracy: 1e-9)
+        // Upright in portrait on a level tripod: the lens is horizontal.
+        XCTAssertEqual(LevelSensor.tiltDown(gravityZ: 0), 0, accuracy: 1e-9)
+        // Out-of-range input from a noisy sample must clamp, not produce NaN.
+        XCTAssertEqual(LevelSensor.tiltDown(gravityZ: -1.0001), 90, accuracy: 1e-9)
+        XCTAssertFalse(LevelSensor.tiltDown(gravityZ: 1.0001).isNaN)
+    }
+
+    /// A short tripod aimed up at contact height is the case the correction
+    /// exists for. Aiming up puts everything *lower* in the frame than a level
+    /// camera would, so rectifying must lift it back up — and by exactly the
+    /// tilt angle, since a pinhole rotation just adds angles.
+    func testAimingUpLiftsTheBallBackUpTheFrame() {
+        let f = TiltRectifier.focalPx(widthPx: 1920, fovDeg: 60)
+        let up = LevelSensor.tiltDown(gravityZ: sin(10 * Double.pi / 180))
+        XCTAssertLessThan(up, 0, "aiming up must read negative")
+
+        let r = TiltRectifier.rectify(x: 960, y: 300, tiltDeg: up,
+                                      focalPx: f, cx: 960, cy: 540)
+        XCTAssertLessThan(r.y, 300, "rectified ball should sit higher in frame")
+        XCTAssertEqual(r.x, 960, accuracy: 1e-9, "on-axis x must not move")
+        XCTAssertGreaterThan(r.magnification, 1,
+                             "aiming up magnifies above the axis, so the ball reads bigger")
+
+        // The angle-addition identity the homography reduces to on-axis:
+        // a point at angle a below the tilted axis is at a + tilt below level.
+        let alpha = atan((300.0 - 540) / f)
+        let expected = 540 + f * tan(alpha + up * Double.pi / 180)
+        XCTAssertEqual(r.y, expected, accuracy: 1e-6)
+
+        // A ball dead centre in a camera aimed up 10 degrees is really 10
+        // degrees above the horizon.
+        let axis = TiltRectifier.rectify(x: 960, y: 540, tiltDeg: up,
+                                         focalPx: f, cx: 960, cy: 540)
+        XCTAssertEqual(axis.y, 540 - f * tan(10 * Double.pi / 180), accuracy: 1e-6)
+    }
+
     // MARK: - Settings round-trip
 
     func testAppSettingsSurviveEncoding() {

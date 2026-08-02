@@ -36,7 +36,16 @@ disprove) the measurement approach before any app code exists.
   angle is wrong (the pipeline flags this as `DEPTH_MOTION`). Level, **4.5–6 m**
   from the plate/tee. Measure the distance, write it in the log. Prefer 6 m if space
   allows (more flight stays in frame).
-- Lens height ≈ contact height (**~1.1 m**).
+- Lens height ≈ contact height (**~1.1 m**), and **level** — the second word
+  matters more than the first. A level camera mounted low sees the same
+  geometry as a level camera at contact height; the ball simply rides higher in
+  the frame at the same scale. Tilting the phone **up** to reach contact height
+  is what breaks the measurement, because the sensor stops being parallel to
+  the flight plane. So if the tripod is short, leave it level and frame high.
+  The app measures tilt with the IMU and rectifies the track back to a level
+  view before measuring (`rectify_tilt` in `sla_common.py`), which recovers the
+  numbers exactly under a pinhole model — but past ~20° the lens's own
+  distortion is no longer negligible and the reading stays flagged.
 - Stand the tripod on the side the hitter **faces** — **1B side for a
   right-hander**, 3B side for a left-hander. A right-hander bats from the 3B
   box and turns to face the plate, so filming from the 3B side films their

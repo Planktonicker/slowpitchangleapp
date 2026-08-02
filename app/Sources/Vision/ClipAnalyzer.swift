@@ -52,6 +52,16 @@ enum ClipAnalyzer {
         var trackBat = true
         var direction: TrackBuilder.Direction = .auto
         var rollDeg: Double = 0
+        /// Camera pitch at capture time, positive when the lens aims **down**.
+        /// Together with `fieldOfViewDeg` this lets `TiltRectifier` warp every
+        /// observation into the view a level camera would have recorded, which
+        /// is what makes a tripod that could not reach contact height — and so
+        /// got aimed up at it — still measurable. Zero means no correction, so
+        /// clips recorded before this existed analyse exactly as they did.
+        var tiltDeg: Double = 0
+        /// Horizontal field of view of the capture format, degrees. Needed to
+        /// turn tilt into a focal length; without it, tilt cannot be undone.
+        var fieldOfViewDeg: Double = 0
         /// Container frame rate is trusted for clips this app recorded. Set
         /// this for imported footage whose metadata lies (iPhone slo-mo often
         /// reports 30 fps with every 240 fps frame present).
@@ -147,10 +157,35 @@ enum ClipAnalyzer {
         }
 
         let effectiveContact = contactTime ?? track[0].t
-        let metrics = SwingAnalyzer.analyze(track: track,
+
+        // Undo camera tilt before anything is measured. The track handed back
+        // to the caller stays in raw image coordinates — the debug overlay
+        // draws on the original frames — but every number comes from the
+        // rectified copy. The bat tape goes through the same warp, or the
+        // contact-offset reading would compare a rectified ball against an
+        // un-rectified barrel.
+        let focalPx = TiltRectifier.focalPx(widthPx: Double(width),
+                                            fovDeg: options.fieldOfViewDeg)
+        let cx = Double(width) / 2, cy = Double(height) / 2
+        let measured = TiltRectifier.rectify(track: track,
+                                             tiltDeg: options.tiltDeg,
+                                             focalPx: focalPx, cx: cx, cy: cy)
+        let measuredTape: [BatTracker.TapeObservation]
+        if options.tiltDeg != 0, focalPx > 0 {
+            measuredTape = tape.map { o in
+                let r = TiltRectifier.rectify(x: o.x, y: o.y,
+                                              tiltDeg: options.tiltDeg,
+                                              focalPx: focalPx, cx: cx, cy: cy)
+                return BatTracker.TapeObservation(t: o.t, x: r.x, y: r.y)
+            }
+        } else {
+            measuredTape = tape
+        }
+
+        let metrics = SwingAnalyzer.analyze(track: measured,
                                             contactTime: effectiveContact,
                                             rollDeg: options.rollDeg)
-        let bat = options.trackBat ? BatTracker.analyze(observations: tape,
+        let bat = options.trackBat ? BatTracker.analyze(observations: measuredTape,
                                                         contactTime: effectiveContact) : nil
         progress?(1.0)
 

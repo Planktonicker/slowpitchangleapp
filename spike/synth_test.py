@@ -179,6 +179,41 @@ def main():
     check("CSV round-trip", len(rt) == len(track) and "contact_time" in meta,
           f"{len(rt)} rows, meta keys {sorted(meta)}")
 
+    # --- camera tilt: does the rectification actually recover the truth? ---
+    #
+    # Re-project this very track through a camera pitched up at the contact
+    # point (the mistake a short tripod invites), then rectify it back. The
+    # uncorrected numbers are printed too, because the size of the error is the
+    # argument for bothering: tilt costs far more exit velocity than launch
+    # angle, which is the opposite of what "the camera is aimed up so the angle
+    # will be wrong" intuition suggests.
+    fov_deg = 60.0
+    focal = sla.focal_px_from_fov(W, fov_deg)
+    ccx, ccy = W / 2.0, H / 2.0
+    for tilt in (-8.0, -16.0):
+        t = math.radians(tilt)
+        tilted = []
+        for o in track:
+            u, v = o.x - ccx, o.y - ccy
+            d = focal * math.cos(t) + v * math.sin(t)
+            mag = focal / d
+            tilted.append(sla.BallObservation(
+                o.frame, o.t, ccx + u * mag,
+                ccy + (v * math.cos(t) - focal * math.sin(t)) * mag,
+                o.diameter_px * mag, o.area_px))
+        m_raw = sla.analyze_track(tilted, contact_time=CONTACT_FRAME / FPS)
+        m_fix = sla.analyze_track(
+            sla.rectify_tilt(tilted, tilt, focal, ccx, ccy),
+            contact_time=CONTACT_FRAME / FPS)
+        print(f"    tilt {tilt:+.0f} deg  uncorrected LA {m_raw.launch_angle_deg:.2f} "
+              f"EV {m_raw.exit_velo_mph:.2f}  ->  corrected LA {m_fix.launch_angle_deg:.2f} "
+              f"EV {m_fix.exit_velo_mph:.2f}")
+        check(f"tilt {tilt:+.0f} deg rectified",
+              abs(m_fix.launch_angle_deg - m.launch_angle_deg) <= 0.05
+              and abs(m_fix.exit_velo_mph / m.exit_velo_mph - 1) <= 0.005,
+              f"LA err {m_fix.launch_angle_deg - m.launch_angle_deg:+.3f} deg, "
+              f"EV err {(m_fix.exit_velo_mph / m.exit_velo_mph - 1) * 100:+.2f}%")
+
     # flight model sanity: 65 mph @ 25 deg carries roughly 130-190 ft in air
     carry_m, hang_s, _apex = sla.simulate_flight(TRUE_EV_MPH / sla.MPH_PER_MPS, TRUE_LA_DEG)
     check("drag flight model sanity", 36 <= carry_m <= 61 and 1.5 <= hang_s <= 4.0,

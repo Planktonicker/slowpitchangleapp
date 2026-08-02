@@ -77,9 +77,13 @@ final class AppModel: ObservableObject {
         capture.$activeFormatDescription
             .receive(on: DispatchQueue.main)
             .sink { [weak self] description in
-                // "1920x1080 @ 240fps" -> 1920
+                // "1920x1080 @ 240fps" -> 1920, 1080
                 if let width = description.split(separator: "x").first.flatMap({ Double($0) }) {
                     self?.wizard.imageWidthPx = width
+                }
+                if let height = description.split(separator: "x").dropFirst().first
+                    .flatMap({ Double($0.prefix(while: \.isNumber)) }) {
+                    self?.wizard.imageHeightPx = height
                 }
             }
             .store(in: &cancellables)
@@ -168,6 +172,8 @@ final class AppModel: ObservableObject {
         dropsAtClipStart = capture.droppedFrameCount
         var options = settings.analyzerOptions
         options.rollDeg = placement.rollDeg
+        options.tiltDeg = placement.tiltDeg
+        options.fieldOfViewDeg = placement.fovDeg
 
         analysisProgress = 0
 
@@ -251,6 +257,7 @@ final class AppModel: ObservableObject {
         dto.lensHeightM = placement.heightM
         dto.cameraRollDeg = placement.rollDeg
         dto.cameraTiltDeg = placement.tiltDeg
+        dto.cameraFovDeg = placement.fovDeg > 0 ? placement.fovDeg : nil
         dto.captureFlags = placement.captureFlags
             + (hitterGateDisabledForSession ? [.hitterGateDisabled] : [])
             + (droppedFrames ? [.framesDropped] : [])
@@ -296,6 +303,10 @@ final class AppModel: ObservableObject {
         let url = ClipStore.clipURL(named: clipName)
         var options = settings.analyzerOptions
         options.rollDeg = swing.cameraRollDeg ?? 0
+        // Re-analysis has to use the optics and pose the clip was filmed with,
+        // not whatever the phone is pointing at now.
+        options.tiltDeg = swing.cameraTiltDeg ?? 0
+        options.fieldOfViewDeg = swing.cameraFovDeg ?? 0
         options.forceFallbackDetector = forceFallback
         analysisProgress = 0
 

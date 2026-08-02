@@ -17,7 +17,13 @@ import Foundation
 /// rule still holds: a reading taken in poor conditions is *labelled*, not
 /// silently reported as if it were clean, and not refused outright.
 enum CaptureFlag: String, Codable, CaseIterable, Sendable {
+    /// Tilt beyond what the rectification can honestly claim to undo, or tilt
+    /// with unknown optics so it could not be undone at all.
     case cameraTilted = "CAMERA_TILTED"
+    /// The camera was aimed up or down and the tilt *was* corrected. Recorded
+    /// rather than hidden: the correction is exact for a pinhole and real
+    /// lenses are not, so a reading that needed it is worth knowing about.
+    case tiltCorrected = "TILT_CORRECTED"
     case notLevel = "NOT_LEVEL"
     case levelUnknown = "LEVEL_UNKNOWN"
     case distanceOutsideProtocol = "DISTANCE_OUTSIDE_PROTOCOL"
@@ -32,13 +38,15 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
     var explanation: String {
         switch self {
         case .cameraTilted:
-            return "The camera was pointing up or down rather than level. That turns the flight plane into a projection, and unlike roll it cannot be corrected afterwards — treat the launch angle as approximate."
+            return "The camera was pointing up or down steeply, or its lens field of view was unknown, so the tilt could not be corrected. That leaves the flight plane projected — treat the launch angle as approximate. Raise the tripod and keep it level rather than aiming up at contact height."
+        case .tiltCorrected:
+            return "The camera was aimed up or down, and the track was rectified to what a level camera would have recorded before anything was measured. Costs little accuracy at this angle; recorded so a surprising reading can be traced."
         case .notLevel:
             return "The horizon sat at an angle in frame. This one IS corrected in the maths, so it costs little accuracy; it is recorded so a surprising reading can be explained."
         case .levelUnknown:
             return "No motion-sensor reading was available, so the camera's angle is unknown rather than known-good."
         case .distanceOutsideProtocol:
-            return "The camera was outside the 12–28 ft window the capture protocol asks for. Readings are still computed, but the ball is smaller or larger in frame than the detector is tuned for."
+            return "The camera was outside the 3.5–8.5 m window the capture protocol asks for. Readings are still computed, but the ball is smaller or larger in frame than the detector is tuned for."
         case .scaleFromManualDistance:
             return "Scale came from a typed distance rather than a measured object, so it inherits whatever error is in that number."
         case .hitterGateDisabled:
@@ -52,6 +60,7 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
     var shortLabel: String {
         switch self {
         case .cameraTilted: return "tilted"
+        case .tiltCorrected: return "tilt corrected"
         case .notLevel: return "off level"
         case .levelUnknown: return "level unknown"
         case .distanceOutsideProtocol: return "distance"

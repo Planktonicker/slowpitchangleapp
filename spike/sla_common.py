@@ -426,6 +426,124 @@ def solve_gravity_scale(
     return min(roots)
 
 
+# ---------------------------------------------------------------------------
+# Camera tilt rectification
+# ---------------------------------------------------------------------------
+#
+# Every number here assumes the sensor plane is parallel to the plane the ball
+# flies in. Only then does one vertical pixel mean the same number of vertical
+# metres everywhere in frame.
+#
+# A camera that sits *below* contact height does not break that assumption.
+# Sliding a level camera down a tripod leg is a pure translation of the
+# viewpoint: the ball simply lands higher in the frame, at the same scale, with
+# the same vertical mapping. Nothing needs correcting.
+#
+# Aiming the camera *up* to compensate for the low mount is what breaks it. Now
+# the sensor is oblique to the flight plane, vertical pixels stop mapping
+# linearly to vertical metres, the horizontal scale stretches with height, and
+# the launch angle is biased.
+#
+# That part is recoverable, because pitching a pinhole camera is a pure
+# rotation about its own optical centre: the tilted and level views of the same
+# world are related by a homography that depends on nothing but the tilt angle
+# and the focal length — the IMU measures the first, the capture format's field
+# of view gives the second. Rectifying each observation into the virtual level
+# camera reproduces what a level camera at the same point would have recorded,
+# after which everything downstream holds exactly as written.
+#
+# Derivation. Camera axes x right, y down, z along the optical axis; focal
+# length f in pixels; image coordinates measured from the principal point. A
+# camera pitched *down* by t has its basis, expressed in the level camera's
+# frame,
+#
+#     x_t = (1, 0, 0)    y_t = (0, cos t, -sin t)    z_t = (0, sin t, cos t)
+#
+# so a ray the tilted camera reports as (u, v, f) is, in level coordinates,
+# (u, v cos t + f sin t, f cos t - v sin t). Re-projecting through the same
+# pinhole, with D = f cos t - v sin t:
+#
+#     u' = f u / D
+#     v' = f (v cos t + f sin t) / D
+#
+# A sphere's projected diameter follows the transverse magnification du'/du,
+# so the measured diameter rectifies the same way:
+#
+#     d' = d f / D
+#
+# which matters: the diameter is what sets the metres-per-pixel scale, so
+# leaving it alone would correct the geometry and then apply the wrong ruler
+# to it.
+#
+# This is exact for a pinhole. What it does not undo is lens distortion, which
+# grows toward the frame edge and is where a large tilt pushes the flight —
+# hence TILT_CORRECTABLE_MAX_DEG, past which the app keeps flagging the reading
+# rather than claiming the correction rescued it.
+
+TILT_CORRECTABLE_MAX_DEG = 20.0
+
+
+def focal_px_from_fov(width_px: float, fov_deg: float) -> float:
+    """Pinhole focal length in pixels, from the capture format's horizontal FOV.
+
+    Returns 0.0 for unusable inputs, which callers treat as "no rectification".
+    """
+    if width_px <= 0 or not 0 < fov_deg < 180:
+        return 0.0
+    return (width_px / 2.0) / math.tan(math.radians(fov_deg) / 2.0)
+
+
+def rectify_tilt_point(
+    x: float, y: float, tilt_deg: float, focal_px: float, cx: float, cy: float
+) -> tuple[float, float, float]:
+    """Map one image point into the virtual level camera.
+
+    Returns (x', y', magnification). The magnification is du'/du at that point:
+    multiply any length measured there — a ball diameter — by it.
+
+    tilt_deg is positive when the camera aims *down*, matching the IMU
+    convention the app publishes.
+    """
+    if tilt_deg == 0.0 or focal_px <= 0:
+        return x, y, 1.0
+    t = math.radians(tilt_deg)
+    u = x - cx
+    v = y - cy
+    d = focal_px * math.cos(t) - v * math.sin(t)
+    if d <= 0:
+        # The point is at or past the horizon of the rectified view. Only
+        # reachable at tilts far beyond anything a tripod produces, and there
+        # is nothing sensible to map it to, so leave it alone.
+        return x, y, 1.0
+    mag = focal_px / d
+    return (cx + u * mag,
+            cy + (v * math.cos(t) + focal_px * math.sin(t)) * mag,
+            mag)
+
+
+def rectify_tilt(
+    track: list[BallObservation],
+    tilt_deg: float,
+    focal_px: float,
+    cx: float,
+    cy: float,
+) -> list[BallObservation]:
+    """Rectify a whole ball track into the virtual level camera.
+
+    Frame index, time and area are carried through untouched — area is not used
+    for measurement, only for candidate ranking, which happened before this.
+    """
+    if tilt_deg == 0.0 or focal_px <= 0:
+        return list(track)
+    out = []
+    for o in track:
+        x, y, mag = rectify_tilt_point(o.x, o.y, tilt_deg, focal_px, cx, cy)
+        out.append(BallObservation(frame=o.frame, t=o.t, x=x, y=y,
+                                   diameter_px=o.diameter_px * mag,
+                                   area_px=o.area_px))
+    return out
+
+
 def analyze_track(
     track: list[BallObservation],
     contact_time: float | None = None,

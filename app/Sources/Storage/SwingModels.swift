@@ -117,9 +117,15 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     var cameraDistanceM: Double?
     var lensHeightM: Double?
     var cameraRollDeg: Double?
-    /// Recorded but never corrected — unlike roll, camera tilt cannot be
-    /// undone after the fact.
+    /// Camera pitch at capture, positive aiming down. Corrected, not merely
+    /// recorded: `TiltRectifier` warps the track into the view a level camera
+    /// would have seen before any number is taken from it.
     var cameraTiltDeg: Double?
+    /// Horizontal field of view of the capture format. Stored because the tilt
+    /// correction is meaningless without it — re-analysing an old clip has to
+    /// use the optics it was actually filmed with, not whatever lens the phone
+    /// happens to be on today.
+    var cameraFovDeg: Double?
     /// Conditions the camera was in, kept beside the measurement `flags`.
     /// Level no longer blocks arming, so this is what keeps a reading taken on
     /// an off-level tripod honest instead of merely absent.
@@ -128,10 +134,14 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     var notes: String?
 
     /// High confidence means the measurement is clean *and* it was taken in
-    /// conditions worth trusting. `.notLevel` is excluded: roll is corrected
-    /// downstream, so it costs accuracy only in the third decimal.
+    /// conditions worth trusting. Two flags are excluded because both name a
+    /// condition that is *corrected* rather than merely recorded: roll is
+    /// rotated out of the velocity vector, and tilt inside
+    /// `SLA.tiltCorrectableMaxDeg` is rectified out of the whole track before
+    /// anything is measured. Steeper tilt arrives as `.cameraTilted`, which
+    /// still demotes the reading.
     var highConfidence: Bool {
-        flags.isEmpty && captureFlags.allSatisfy { $0 == .notLevel }
+        flags.isEmpty && captureFlags.allSatisfy { $0 == .notLevel || $0 == .tiltCorrected }
     }
 
     /// G1 counts a clip as tracked at 12+ frames, matching `G1_MIN_FRAMES`.

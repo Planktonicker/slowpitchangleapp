@@ -386,7 +386,8 @@ struct CaptureView: View {
             measuring = false
             lastResult = result
             if case .found(let m) = result {
-                model.wizard.applyBallMeasurement(diameterPx: m.diameterPx)
+                model.wizard.applyBallMeasurement(diameterPx: m.diameterPx,
+                                                  atX: m.x, atY: m.y)
                 foundBall = true
             }
         }

@@ -49,6 +49,7 @@ final class SwingEntity {
     var lensHeightM: Double?
     var cameraRollDeg: Double?
     var cameraTiltDeg: Double?
+    var cameraFovDeg: Double?
     /// Pipe-separated `CaptureFlag` raw values, same encoding as `flagsRaw`.
     var captureFlagsRaw: String = ""
 
@@ -86,6 +87,7 @@ final class SwingEntity {
         lensHeightM = dto.lensHeightM
         cameraRollDeg = dto.cameraRollDeg
         cameraTiltDeg = dto.cameraTiltDeg
+        cameraFovDeg = dto.cameraFovDeg
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
         notes = dto.notes
     }
@@ -121,6 +123,7 @@ final class SwingEntity {
         lensHeightM = dto.lensHeightM
         cameraRollDeg = dto.cameraRollDeg
         cameraTiltDeg = dto.cameraTiltDeg
+        cameraFovDeg = dto.cameraFovDeg
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
         notes = dto.notes
     }
@@ -158,6 +161,7 @@ final class SwingEntity {
         d.lensHeightM = lensHeightM
         d.cameraRollDeg = cameraRollDeg
         d.cameraTiltDeg = cameraTiltDeg
+        d.cameraFovDeg = cameraFovDeg
         d.captureFlags = captureFlagsRaw.split(separator: "|")
             .compactMap { CaptureFlag(rawValue: String($0)) }
         d.notes = notes

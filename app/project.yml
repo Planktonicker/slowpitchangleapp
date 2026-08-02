@@ -33,6 +33,10 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+      # Asset catalogue: the batter guide artwork. Shipped as an alpha-only
+      # PNG with a template rendering intent, so SwiftUI tints it rather than
+      # drawing the artist's black.
+      - path: Resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.swinglab.SwingLab

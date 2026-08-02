@@ -60,6 +60,12 @@ enum SLA {
     static let diameterDriftTol = 0.10     // depth-motion (cosine error) flag threshold
     static let residualTolPx = 3.0
 
+    /// Beyond this much camera tilt the rectification is still applied, but the
+    /// reading stays flagged: the homography is exact for a pinhole and lens
+    /// distortion is not, and a big tilt is exactly what pushes the flight into
+    /// the distorted part of the frame.
+    static let tiltCorrectableMaxDeg = 20.0
+
     // MARK: - Capture defaults
 
     static let targetFPS = 240.0

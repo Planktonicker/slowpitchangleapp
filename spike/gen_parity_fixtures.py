@@ -292,6 +292,44 @@ def contact_offset_cases():
     ]
 
 
+def tilt_rectify_cases():
+    """Camera-tilt homography cases.
+
+    1920x1080 at a 60 deg horizontal FOV, so f = 1662.77 px and the principal
+    point is (960, 540). Covers: no tilt (identity), aimed up, aimed down, a
+    point on the optical axis (where only v moves), a point near the frame
+    corner (largest magnification swing), and a tilt past
+    TILT_CORRECTABLE_MAX_DEG so the port cannot quietly clamp.
+    """
+    f = sla.focal_px_from_fov(1920.0, 60.0)
+    cx, cy = 960.0, 540.0
+    pts = [
+        ("axis", 960.0, 540.0, 40.0),
+        ("upper_left", 300.0, 180.0, 36.0),
+        ("lower_right", 1700.0, 900.0, 44.0),
+    ]
+    cases = []
+    for tilt in (0.0, 6.0, -6.0, 12.0, -12.0, 25.0):
+        for name, x, y, d in pts:
+            cases.append({"name": f"{name}_tilt{tilt:+.0f}".replace("+", "p").replace("-", "m"),
+                          "x": x, "y": y, "diameter_px": d,
+                          "tilt_deg": tilt, "focal_px": f, "cx": cx, "cy": cy})
+    # Unusable optics: no FOV, so no rectification is possible at all.
+    cases.append({"name": "no_focal", "x": 300.0, "y": 180.0, "diameter_px": 36.0,
+                  "tilt_deg": 12.0, "focal_px": 0.0, "cx": cx, "cy": cy})
+    return cases
+
+
+def focal_cases():
+    return [
+        {"name": "hd_60deg", "width_px": 1920.0, "fov_deg": 60.0},
+        {"name": "hd_73deg", "width_px": 1920.0, "fov_deg": 73.0},
+        {"name": "vga_45deg", "width_px": 640.0, "fov_deg": 45.0},
+        {"name": "zero_fov", "width_px": 1920.0, "fov_deg": 0.0},
+        {"name": "zero_width", "width_px": 0.0, "fov_deg": 60.0},
+    ]
+
+
 def flight_cases():
     return [
         {"name": "synth_test_reference", "ev_mps": 65.0 / sla.MPH_PER_MPS,
@@ -356,6 +394,7 @@ def main():
             "UNDERCUT_TOPPED_BELOW_M": sla.UNDERCUT_TOPPED_BELOW_M,
             "UNDERCUT_CENTERED_MAX_M": sla.UNDERCUT_CENTERED_MAX_M,
             "UNDERCUT_CARRY_MAX_M": sla.UNDERCUT_CARRY_MAX_M,
+            "TILT_CORRECTABLE_MAX_DEG": sla.TILT_CORRECTABLE_MAX_DEG,
         },
         "fit_quadratic": [],
         "solve_gravity_scale": [],
@@ -364,6 +403,8 @@ def main():
         "vy0_from_hang_time": [],
         "bat_metrics": [],
         "contact_offset": [],
+        "focal_px_from_fov": [],
+        "rectify_tilt": [],
     }
 
     for c in fit_cases():
@@ -421,6 +462,22 @@ def main():
             "quality": sla.contact_quality(u),
         })
 
+    for c in focal_cases():
+        out["focal_px_from_fov"].append({
+            **c, "expected": sla.focal_px_from_fov(c["width_px"], c["fov_deg"]),
+        })
+
+    for c in tilt_rectify_cases():
+        x, y, mag = sla.rectify_tilt_point(
+            c["x"], c["y"], c["tilt_deg"], c["focal_px"], c["cx"], c["cy"])
+        out["rectify_tilt"].append({
+            **c,
+            "expected_x": x,
+            "expected_y": y,
+            "expected_magnification": mag,
+            "expected_diameter_px": c["diameter_px"] * mag,
+        })
+
     dst = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "..", "app", "Tests", "Fixtures", "parity.json")
     dst = os.path.normpath(dst)
@@ -436,7 +493,8 @@ def main():
           f"{len(out['analyze_track'])} analyze cases ({n_obs} observations), "
           f"{len(out['simulate_flight'])} flight cases, "
           f"{len(out['bat_metrics'])} bat cases, "
-          f"{len(out['contact_offset'])} contact-offset cases")
+          f"{len(out['contact_offset'])} contact-offset cases, "
+          f"{len(out['rectify_tilt'])} tilt-rectify cases")
 
 
 if __name__ == "__main__":

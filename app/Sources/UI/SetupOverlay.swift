@@ -183,8 +183,7 @@ struct SetupOverlay: View {
 
         return ZStack {
             BatterOutline()
-                .stroke(Theme.yellow.opacity(0.85),
-                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                .foregroundStyle(Theme.yellow.opacity(0.9))
                 .frame(width: figureW * w, height: figureH * h)
                 .scaleEffect(x: flip, y: 1, anchor: .center)
                 .position(pt(centreX, (headY + footY) / 2))
@@ -285,20 +284,34 @@ struct SetupOverlay: View {
             }
             .frame(maxWidth: 280)
 
-            Group {
-                if !wizard.level.isAvailable || !wizard.level.hasReading {
-                    StatChip(text: "Level unknown", color: Theme.steel)
-                } else if wizard.level.isLevel {
-                    StatChip(text: "Level ✓", color: Theme.pass)
-                } else if !wizard.level.isTiltOK {
-                    StatChip(text: wizard.level.tiltDeg > 0 ? "Aiming down — still fine" : "Aiming up — still fine",
-                             color: Theme.warn)
-                } else {
-                    StatChip(text: "Slightly off level — corrected", color: Theme.warn)
-                }
-            }
+            StatChip(text: levelChip.text, color: levelChip.color)
         }
         .allowsHitTesting(false)
+    }
+
+    /// Plain function, not a `@ViewBuilder`: the branching is about *words*,
+    /// and picking the words first keeps the view a single unconditional chip.
+    private var levelChip: (text: String, color: Color) {
+        let level = wizard.level
+        guard level.isAvailable, level.hasReading else {
+            return ("Level unknown", Theme.steel)
+        }
+        if level.isLevel { return ("Level ✓", Theme.pass) }
+        guard !level.isTiltOK else {
+            return ("Slightly off level — corrected", Theme.warn)
+        }
+        // Tilt used to read "still fine", which quietly encouraged aiming the
+        // phone up at contact height when the tripod was short. It is not
+        // fine — it is corrected, and only up to a point.
+        let dir = level.tiltDeg > 0 ? "down" : "up"
+        let mag = abs(level.tiltDeg)
+        if !wizard.canCorrectTilt {
+            return (String(format: "Aiming %@ %.0f° — lens unknown", dir, mag), Theme.fail)
+        }
+        if wizard.isTiltCorrectable {
+            return (String(format: "Aiming %@ %.0f° — corrected ✓", dir, mag), Theme.warn)
+        }
+        return (String(format: "Aiming %@ %.0f° — too steep", dir, mag), Theme.fail)
     }
 
     private var plateHint: some View {
@@ -487,89 +500,27 @@ struct SetupOverlay: View {
     }
 }
 
-/// The batter, traced as a vector so it stays crisp at any size and can be
-/// tinted and mirrored without shipping image assets.
+/// The batter, drawn from the artwork in `Assets.xcassets/BatterOutline`.
 ///
-/// Front-on stance with the hands on one side and the bat cocked over the
-/// shoulder — which is what the camera actually sees from the side the hitter
-/// faces, the position `CAPTURE_PROTOCOL.md` asks for. Drawn as several
-/// subpaths (body, head, cap, arms, hands, bat) rather than one silhouette:
-/// stroked outlines of overlapping parts read far better at guide opacity over
-/// live video than a single traced boundary.
-struct BatterOutline: Shape {
-    /// Width ÷ height of the figure, including the raised bat.
-    static let aspect = 0.45
+/// The PNG is an alpha-only line drawing — every pixel is black with the ink in
+/// the alpha channel — so `.renderingMode(.template)` tints the whole figure a
+/// single colour and nothing of the original black survives. That is why it can
+/// be shipped as-is rather than re-traced: the asset already *is* a mask.
+///
+/// It replaces a hand-traced `Shape`. The trace was close but not the drawing,
+/// and "close but not it" is worse than either — the guide is meant to be
+/// recognised at a glance over live video, not admired.
+struct BatterOutline: View {
+    /// Width ÷ height of the artwork (421 × 970 px), including the raised bat.
+    /// Used to size the figure from the optics, so this must track the asset:
+    /// re-crop the PNG and this number changes with it.
+    static let aspect = 421.0 / 970.0
 
-    func path(in rect: CGRect) -> Path {
-        func p(_ x: Double, _ y: Double) -> CGPoint {
-            CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
-        }
-        var path = Path()
-
-        // --- torso and legs, one closed outline ---
-        path.move(to: p(0.375, 0.195))
-        path.addLine(to: p(0.275, 0.235))          // left shoulder
-        path.addLine(to: p(0.255, 0.330))
-        path.addLine(to: p(0.250, 0.480))          // waist
-        path.addLine(to: p(0.235, 0.565))          // hip
-        path.addCurve(to: p(0.105, 0.870),         // outside of the front leg
-                      control1: p(0.200, 0.700), control2: p(0.130, 0.780))
-        path.addLine(to: p(0.070, 0.935))
-        path.addCurve(to: p(0.180, 0.965),         // front shoe
-                      control1: p(0.010, 0.995), control2: p(0.095, 1.000))
-        path.addCurve(to: p(0.375, 0.610),         // inside of the front leg
-                      control1: p(0.235, 0.855), control2: p(0.315, 0.690))
-        path.addCurve(to: p(0.520, 0.860),         // inside of the back leg
-                      control1: p(0.440, 0.690), control2: p(0.490, 0.780))
-        path.addLine(to: p(0.560, 0.940))
-        path.addCurve(to: p(0.680, 0.935),         // back shoe
-                      control1: p(0.640, 1.000), control2: p(0.730, 0.985))
-        path.addCurve(to: p(0.545, 0.565),         // outside of the back leg
-                      control1: p(0.630, 0.860), control2: p(0.575, 0.700))
-        path.addLine(to: p(0.530, 0.480))
-        path.addLine(to: p(0.545, 0.330))
-        path.addLine(to: p(0.565, 0.235))          // right shoulder
-        path.addLine(to: p(0.470, 0.195))
-        path.closeSubpath()
-
-        // Belt, which is also where contact happens.
-        path.move(to: p(0.252, 0.495))
-        path.addQuadCurve(to: p(0.528, 0.495), control: p(0.390, 0.535))
-
-        // --- head, cap crown and brim ---
-        path.addEllipse(in: CGRect(x: rect.minX + 0.340 * rect.width,
-                                   y: rect.minY + 0.028 * rect.height,
-                                   width: 0.170 * rect.width,
-                                   height: 0.175 * rect.height))
-        path.move(to: p(0.345, 0.108))             // cap band
-        path.addLine(to: p(0.508, 0.108))
-        path.move(to: p(0.345, 0.112))             // brim, toward the pitcher
-        path.addCurve(to: p(0.240, 0.140),
-                      control1: p(0.290, 0.108), control2: p(0.248, 0.120))
-        path.addLine(to: p(0.348, 0.145))
-
-        // --- arms to the hands, both across the body ---
-        path.move(to: p(0.290, 0.245))
-        path.addQuadCurve(to: p(0.135, 0.330), control: p(0.205, 0.290))
-        path.move(to: p(0.555, 0.252))
-        path.addCurve(to: p(0.150, 0.345),
-                      control1: p(0.430, 0.320), control2: p(0.260, 0.360))
-
-        // --- hands ---
-        path.addEllipse(in: CGRect(x: rect.minX + 0.062 * rect.width,
-                                   y: rect.minY + 0.298 * rect.height,
-                                   width: 0.088 * rect.width,
-                                   height: 0.072 * rect.height))
-
-        // --- bat, cocked up over the shoulder ---
-        path.move(to: p(0.027, 0.313))
-        path.addLine(to: p(0.373, 0.012))
-        path.addQuadCurve(to: p(0.427, 0.078), control: p(0.435, 0.010))
-        path.addLine(to: p(0.063, 0.357))
-        path.addQuadCurve(to: p(0.027, 0.313), control: p(0.020, 0.360))
-        path.closeSubpath()
-
-        return path
+    var body: some View {
+        Image("BatterOutline")
+            .renderingMode(.template)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
     }
 }
 
@@ -633,8 +584,8 @@ struct PlacementTipsView: View {
                         "Square to the ball's flight, on the side the hitter FACES — first-base side for a right-hander, third-base side for a left-hander. Behind them their own body hides the bat at contact.")
                     tip("2", "Five to seven big steps",
                         "That's 4.5–6 m. Closer and the ball leaves the frame too fast; further and it gets too small to measure.")
-                    tip("3", "Lens at belt height",
-                        "About 1.1 m up — the height where bat meets ball. Most tripods reach it near full extension.")
+                    tip("3", "As high as the tripod goes — but keep it level",
+                        "Belt height (about 1.1 m, where bat meets ball) is ideal. A shorter tripod is fine: a level camera sitting low sees exactly the same geometry, just with the ball higher in the picture. What costs you accuracy is tilting the phone UP to point at contact height — so if it won't reach, leave it level and let the ball ride high in frame. The app measures any tilt and corrects for it, but correcting is not the same as not needing to.")
                     tip("4", "Tap the ball on screen",
                         "Put a ball on the tee — where contact will actually happen — and touch it on the picture. That one tap gives both the scale and the distance. Measure it at the hitting spot: the scale is only right at that distance, so a ball held near the lens would set the wrong one.")
                 }

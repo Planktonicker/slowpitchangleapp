@@ -36,6 +36,7 @@ final class PlacementWizard: ObservableObject {
 
     /// From the active capture format; needed to turn scale into distance.
     @Published var imageWidthPx: Double = Double(SLA.targetWidth)
+    @Published var imageHeightPx: Double = Double(SLA.targetHeight)
     @Published var fieldOfViewDeg: Double = 0
 
     /// Endpoints of the plate's front edge, normalized preview coordinates.
@@ -62,9 +63,21 @@ final class PlacementWizard: ObservableObject {
 
     /// The one-tap path: the detector measured the resting ball at
     /// `diameterPx`; the ball is 9.7 cm across, so the scale is immediate.
-    func applyBallMeasurement(diameterPx: Double) {
+    ///
+    /// `atX`/`atY` are where in the frame it was measured, in pixels. They
+    /// matter when the camera is tilted: the same ball reads bigger high in a
+    /// down-aimed frame than it would to a level camera, and the derived
+    /// distance would inherit that. Rectifying the diameter at the point it was
+    /// measured keeps this number in the same frame as everything the analyzer
+    /// reports.
+    func applyBallMeasurement(diameterPx: Double, atX: Double, atY: Double) {
+        let focal = TiltRectifier.focalPx(widthPx: imageWidthPx, fovDeg: fieldOfViewDeg)
+        let r = TiltRectifier.rectify(x: atX, y: atY,
+                                      tiltDeg: level.tiltDeg, focalPx: focal,
+                                      cx: imageWidthPx / 2, cy: imageHeightPx / 2)
+        // Reported raw, so the diagnostics line and the picture agree.
         lastBallDiameterPx = diameterPx
-        measuredPxPerM = diameterPx / SLA.ballDiameterM
+        measuredPxPerM = diameterPx * r.magnification / SLA.ballDiameterM
         scaleSource = .ball
         showPlateMarkers = false
     }
@@ -143,6 +156,21 @@ final class PlacementWizard: ObservableObject {
         scaleSource != .none && !isDistanceAbsurd
     }
 
+    // MARK: - Tilt
+
+    /// Whether the optics needed to undo camera tilt are known. Without a
+    /// field of view there is no focal length, and without a focal length the
+    /// tilt homography has no scale.
+    var canCorrectTilt: Bool { fieldOfViewDeg > 0 }
+
+    /// Whether the current tilt is inside the range the correction can honestly
+    /// claim. The homography is exact for a pinhole; real lenses distort, and
+    /// a steep tilt is exactly what pushes the flight toward the frame edge
+    /// where that distortion lives.
+    var isTiltCorrectable: Bool {
+        canCorrectTilt && abs(level.tiltDeg) <= SLA.tiltCorrectableMaxDeg
+    }
+
     /// Severity of an advisory, so the UI can colour it.
     enum AdviceLevel { case blocking, warning }
 
@@ -162,8 +190,15 @@ final class PlacementWizard: ObservableObject {
             out.append((.warning, "No motion sensor reading — tripod level unknown."))
         } else {
             if !level.isTiltOK {
-                out.append((.warning, String(format: "Camera points %@ by %.1f°. Readings will be less accurate.",
-                                             level.tiltDeg > 0 ? "down" : "up", abs(level.tiltDeg))))
+                let dir = level.tiltDeg > 0 ? "down" : "up"
+                let mag = abs(level.tiltDeg)
+                if !canCorrectTilt {
+                    out.append((.warning, String(format: "Camera aims %@ %.0f° and the lens is unknown, so the tilt can't be corrected. Level it if you can.", dir, mag)))
+                } else if !isTiltCorrectable {
+                    out.append((.warning, String(format: "Camera aims %@ %.0f° — corrected, but that's steep. Raise the tripod instead of aiming up.", dir, mag)))
+                } else {
+                    out.append((.warning, String(format: "Camera aims %@ %.0f° — corrected automatically.", dir, mag)))
+                }
             }
             if !level.isRollOK {
                 out.append((.warning, String(format: "Horizon is %.1f° off — corrected in the maths, but level it if you can.",
@@ -190,7 +225,9 @@ final class PlacementWizard: ObservableObject {
         if !level.isAvailable || !level.hasReading {
             out.append(.levelUnknown)
         } else {
-            if !level.isTiltOK { out.append(.cameraTilted) }
+            if !level.isTiltOK {
+                out.append(isTiltCorrectable ? .tiltCorrected : .cameraTilted)
+            }
             if !level.isRollOK { out.append(.notLevel) }
         }
         if !isDistanceAcceptable { out.append(.distanceOutsideProtocol) }
@@ -205,10 +242,14 @@ final class PlacementWizard: ObservableObject {
         var distanceM: Double?
         var heightM: Double?
         var rollDeg: Double
-        /// Recorded, never corrected: a tilted camera projects the flight plane
-        /// and there is no undoing that after the fact. Kept so a suspicious
-        /// reading can be explained later.
+        /// Camera pitch, positive aiming down. Corrected downstream by
+        /// `TiltRectifier`, which needs `fovDeg` alongside it — a tilted camera
+        /// projects the flight plane, and undoing that projection is a
+        /// homography in the tilt angle and the focal length.
         var tiltDeg: Double
+        /// Horizontal field of view of the capture format. Zero means the
+        /// optics are unknown, and tilt then cannot be undone.
+        var fovDeg: Double
         var plateScaleDisagreement: Double?
         var captureFlags: [CaptureFlag]
     }
@@ -216,10 +257,11 @@ final class PlacementWizard: ObservableObject {
     var placement: Placement {
         Placement(distanceM: derivedDistanceM,
                   heightM: nil,
-                  // Handed to the analyzer so tripod roll is corrected, not
-                  // just reported.
+                  // Both angles are handed to the analyzer to be corrected,
+                  // not merely reported.
                   rollDeg: level.rollDeg,
                   tiltDeg: level.tiltDeg,
+                  fovDeg: fieldOfViewDeg,
                   plateScaleDisagreement: nil,
                   captureFlags: captureFlags)
     }

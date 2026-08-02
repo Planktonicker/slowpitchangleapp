@@ -28,6 +28,8 @@ final class ParityTests: XCTestCase {
         var vy0_from_hang_time: [Vy0Case]
         var bat_metrics: [BatCase]
         var contact_offset: [ContactCase]
+        var focal_px_from_fov: [FocalCase]
+        var rectify_tilt: [TiltCase]
     }
 
     struct FitCase: Decodable {
@@ -125,6 +127,28 @@ final class ParityTests: XCTestCase {
         var undercut_m: Double
         var undercut_mm: Double
         var quality: String
+    }
+
+    struct FocalCase: Decodable {
+        var name: String
+        var width_px: Double
+        var fov_deg: Double
+        var expected: Double
+    }
+
+    struct TiltCase: Decodable {
+        var name: String
+        var x: Double
+        var y: Double
+        var diameter_px: Double
+        var tilt_deg: Double
+        var focal_px: Double
+        var cx: Double
+        var cy: Double
+        var expected_x: Double
+        var expected_y: Double
+        var expected_magnification: Double
+        var expected_diameter_px: Double
     }
 
     private static var fixtures: Fixtures!
@@ -353,6 +377,79 @@ final class ParityTests: XCTestCase {
         XCTAssertEqual(ContactQuality(undercutM: nil), .unknown)
     }
 
+    // MARK: - Camera tilt rectification
+
+    func testFocalFromFOVMatchesReference() {
+        for c in Self.fixtures.focal_px_from_fov {
+            let f = TiltRectifier.focalPx(widthPx: c.width_px, fovDeg: c.fov_deg)
+            assertClose(f, c.expected, rel: 1e-9, "\(c.name) focal px")
+        }
+    }
+
+    func testTiltRectificationMatchesReference() {
+        for c in Self.fixtures.rectify_tilt {
+            let r = TiltRectifier.rectify(x: c.x, y: c.y, tiltDeg: c.tilt_deg,
+                                          focalPx: c.focal_px, cx: c.cx, cy: c.cy)
+            assertClose(r.x, c.expected_x, rel: 1e-9, "\(c.name) x")
+            assertClose(r.y, c.expected_y, rel: 1e-9, "\(c.name) y")
+            assertClose(r.magnification, c.expected_magnification, rel: 1e-9,
+                        "\(c.name) magnification")
+            assertClose(c.diameter_px * r.magnification, c.expected_diameter_px,
+                        rel: 1e-9, "\(c.name) diameter")
+        }
+    }
+
+    /// The track-level wrapper must agree with the point-level one, and must
+    /// leave a zero-tilt track byte-identical — every clip recorded before the
+    /// correction existed re-analyses through this path.
+    func testTiltRectificationOfATrackIsIdentityAtZeroTilt() {
+        let track = Self.fixtures.analyze_track[0].track.map(\.observation)
+        let same = TiltRectifier.rectify(track: track, tiltDeg: 0,
+                                         focalPx: 1662.77, cx: 960, cy: 540)
+        XCTAssertEqual(same, track)
+        let noOptics = TiltRectifier.rectify(track: track, tiltDeg: 8,
+                                             focalPx: 0, cx: 960, cy: 540)
+        XCTAssertEqual(noOptics, track)
+
+        let warped = TiltRectifier.rectify(track: track, tiltDeg: 8,
+                                           focalPx: 1662.77, cx: 960, cy: 540)
+        XCTAssertEqual(warped.count, track.count)
+        for (a, b) in zip(track, warped) {
+            let r = TiltRectifier.rectify(x: a.x, y: a.y, tiltDeg: 8,
+                                          focalPx: 1662.77, cx: 960, cy: 540)
+            assertClose(b.x, r.x, rel: 1e-12, "track x")
+            assertClose(b.y, r.y, rel: 1e-12, "track y")
+            assertClose(b.diameterPx, a.diameterPx * r.magnification, rel: 1e-12,
+                        "track diameter")
+            XCTAssertEqual(b.t, a.t)
+            XCTAssertEqual(b.frame, a.frame)
+        }
+    }
+
+    /// Rectifying a tilted view of a level camera's frame must give that frame
+    /// back. This is the property the whole correction rests on, and it is not
+    /// something a fixture can express — it needs a round trip.
+    func testTiltRectificationInvertsAForwardProjection() {
+        let f = 1662.77, cx = 960.0, cy = 540.0
+        let tilt = 11.0
+        let t = tilt * Double.pi / 180
+        for level in [(x: 200.0, y: 150.0), (x: 960.0, y: 540.0),
+                      (x: 1500.0, y: 820.0), (x: 700.0, y: 960.0)] {
+            // Forward: where a camera pitched DOWN by `tilt` would see a point
+            // the level camera sees at `level`. Inverse of the rectification.
+            let u = level.x - cx, v = level.y - cy
+            let d = f * cos(t) + v * sin(t)
+            let tiltedX = cx + f * u / d
+            let tiltedY = cy + f * (v * cos(t) - f * sin(t)) / d
+
+            let back = TiltRectifier.rectify(x: tiltedX, y: tiltedY,
+                                             tiltDeg: tilt, focalPx: f,
+                                             cx: cx, cy: cy)
+            assertClose(back.x, level.x, rel: 1e-9, abs: 1e-7, "round trip x")
+            assertClose(back.y, level.y, rel: 1e-9, abs: 1e-7, "round trip y")
+        }
+    }
+
     func testContactConstantsMatchReference() {
         let c = Self.fixtures.constants
         assertClose(SLA.batBarrelDiameterM, c["BAT_BARREL_DIAMETER_M"]!, "barrel diameter")
@@ -360,5 +457,7 @@ final class ParityTests: XCTestCase {
         assertClose(SLA.undercutToppedBelowM, c["UNDERCUT_TOPPED_BELOW_M"]!, "topped band")
         assertClose(SLA.undercutCenteredMaxM, c["UNDERCUT_CENTERED_MAX_M"]!, "centered band")
         assertClose(SLA.undercutCarryMaxM, c["UNDERCUT_CARRY_MAX_M"]!, "carry band")
+        assertClose(SLA.tiltCorrectableMaxDeg, c["TILT_CORRECTABLE_MAX_DEG"]!,
+                    "tilt correctable limit")
     }
 }
