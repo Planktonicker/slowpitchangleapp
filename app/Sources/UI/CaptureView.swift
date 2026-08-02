@@ -110,7 +110,11 @@ struct CaptureView: View {
                     .background(
                         LinearGradient(colors: [.black.opacity(0.8), .clear],
                                        startPoint: .top, endPoint: .bottom)
-                            .ignoresSafeArea(edges: .top)
+                            // Horizontal as well as top: in landscape the
+                            // Dynamic Island insets the safe area at the sides,
+                            // so a top-only bleed leaves the fade stopping
+                            // short of both screen edges.
+                            .ignoresSafeArea(edges: [.top, .horizontal])
                     )
 
                 // The clear band. Only the result and the escape banner may
@@ -138,9 +142,11 @@ struct CaptureView: View {
 
                 bottomRow(isLandscape: isLandscape)
                     .padding(.horizontal, 16)
-                    // The tab bar floats over the content on modern iOS, so
-                    // the safe area alone does not clear it.
-                    .padding(.bottom, 64)
+                    // Just enough to sit off the tab bar. The TabView already
+                    // insets its content for the floating bar, so the earlier
+                    // 64pt clearance was stacked on top of that inset and
+                    // stranded the controls halfway up the screen.
+                    .padding(.bottom, 8)
             }
         }
     }
