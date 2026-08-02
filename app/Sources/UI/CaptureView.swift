@@ -24,7 +24,10 @@ struct CaptureView: View {
     @State private var permissionDenied = false
     @State private var measuring = false
     @State private var lastResult: BallMeasureResult?
-    @State private var tapPoint: CGPoint?
+    /// Where the last measurement tap landed, in screen coordinates. Screen
+    /// rather than normalised camera coords: under a fill crop the two do not
+    /// map by a simple scale, and the marker must sit under the finger.
+    @State private var tapViewPoint: CGPoint?
     @State private var foundBall = false
 
     @AppStorage("swinglab.hasCompletedFirstSetup") private var hasCompletedFirstSetup = false
@@ -355,7 +358,7 @@ struct CaptureView: View {
 
     // MARK: - Tap
 
-    private func handleTap(_ devicePoint: CGPoint) {
+    private func handleTap(_ devicePoint: CGPoint, _ viewPoint: CGPoint) {
         // Measuring is allowed whenever there is no scale yet — not only while
         // the setup panel is open. The HUD says "tap the ball in the picture",
         // and it has to be true wherever that text is on screen.
@@ -368,7 +371,7 @@ struct CaptureView: View {
             // tap after landing on the screen arms that and asks again.
             model.capture.wantsLiveMeasurement = true
         }
-        tapPoint = devicePoint
+        tapViewPoint = viewPoint
         foundBall = false
         measuring = true
         model.capture.lockExposureAndFocus(at: devicePoint)
@@ -384,16 +387,18 @@ struct CaptureView: View {
     }
 
     /// Confirms where the tap landed — the fastest way to see the app is
-    /// looking where you pointed.
+    /// looking where you pointed. Positioned in raw screen coordinates, in a
+    /// full-bleed space matching the preview view the gesture came from.
     @ViewBuilder private var tapMarker: some View {
-        if showSetup, let point = tapPoint {
-            GeometryReader { geo in
+        if let point = tapViewPoint, showSetup || model.wizard.scaleSource == .none {
+            GeometryReader { _ in
                 Circle()
                     .strokeBorder(foundBall ? Theme.pass : Theme.warn, lineWidth: 2.5)
                     .frame(width: 46, height: 46)
-                    .position(x: point.x * geo.size.width, y: point.y * geo.size.height)
+                    .position(point)
                     .animation(.easeOut(duration: 0.15), value: foundBall)
             }
+            .ignoresSafeArea()
             .allowsHitTesting(false)
         }
     }

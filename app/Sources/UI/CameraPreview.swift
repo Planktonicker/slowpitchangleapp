@@ -8,9 +8,18 @@ import UIKit
 
 /// Live camera preview.
 ///
-/// `.resizeAspect` rather than `.resizeAspectFill`: framing matters here — the
-/// protocol asks for the plate about a third in from the edge — and a fill
-/// crop would hide part of what is actually being recorded.
+/// `.resizeAspectFill`: the preview covers the whole screen with no letterbox.
+/// The sensor is 16:9 and a modern iPhone screen is ~19.5:9, so filling crops
+/// about 9% of the recorded frame off each of two edges (top/bottom in
+/// landscape, left/right in portrait). That is a display crop only — the full
+/// 16:9 frame is still encoded, ringed and analysed. The earlier aspect-fit
+/// choice showed the whole recorded frame but wrapped it in black bars, which
+/// read as a broken screen rather than an instrument.
+///
+/// Tap positions are converted through
+/// `captureDevicePointConverted(fromLayerPoint:)`, which accounts for the fill
+/// crop, the rotation and any mirroring — so measurement taps stay exact no
+/// matter the gravity mode.
 ///
 /// There is exactly **one** of these in the app, in `CaptureView`. Setup draws
 /// over it rather than creating a second one. Two preview layers sharing a
@@ -20,9 +29,10 @@ import UIKit
 /// only robust fix is to never have a second layer.
 struct CameraPreview: UIViewRepresentable {
     let controller: CaptureController
-    /// Tap in image-pixel coordinates of the capture buffer, plus the
-    /// normalised device point for focus/exposure.
-    var onTap: ((_ devicePoint: CGPoint) -> Void)?
+    /// Tap as a normalised camera point (for measurement and focus) and as a
+    /// screen point (so a marker can be drawn exactly where the finger was —
+    /// under a fill crop the two are not a simple scale of each other).
+    var onTap: ((_ devicePoint: CGPoint, _ viewPoint: CGPoint) -> Void)?
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
@@ -52,7 +62,7 @@ struct CameraPreview: UIViewRepresentable {
 
     final class PreviewView: UIView {
         weak var controller: CaptureController?
-        var onTap: ((CGPoint) -> Void)?
+        var onTap: ((CGPoint, CGPoint) -> Void)?
 
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
 
@@ -62,7 +72,7 @@ struct CameraPreview: UIViewRepresentable {
 
         override init(frame: CGRect) {
             super.init(frame: frame)
-            videoPreviewLayer.videoGravity = .resizeAspect
+            videoPreviewLayer.videoGravity = .resizeAspectFill
             // A UIKit recognizer rather than SwiftUI's `.onTapGesture`: the
             // handler needs the layer itself to convert the touch into camera
             // coordinates, and SwiftUI never sees the layer.
@@ -76,12 +86,12 @@ struct CameraPreview: UIViewRepresentable {
         @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
             guard let onTap else { return }
             let location = gesture.location(in: self)
-            // Does the whole job: undoes the `.resizeAspect` letterbox, the
-            // connection's rotation, and any mirroring. Hand-rolling this is
-            // how you get a bug that only reproduces in one orientation.
+            // Does the whole job: undoes the fill crop, the connection's
+            // rotation, and any mirroring. Hand-rolling this is how you get a
+            // bug that only reproduces in one orientation.
             let devicePoint = videoPreviewLayer
                 .captureDevicePointConverted(fromLayerPoint: location)
-            onTap(devicePoint)
+            onTap(devicePoint, location)
         }
 
         /// Where a camera point lands on screen — used to draw the reticle
