@@ -279,10 +279,13 @@ struct SetupOverlay: View {
             }
             .stroke(Theme.yellow,
                     style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-            // Under the arc: above it lands on the level bar in landscape, and
-            // the arc itself runs through the middle.
+            // Tucked under the arrowhead, a third of the way along rather than
+            // halfway. Halfway and low put it inside the control column once
+            // the column was allowed to be short, and above the arc put it on
+            // the level bar; between the two is the one band that is clear in
+            // every orientation and both panel states.
             guideLabel("BALL FLIES THIS WAY",
-                       at: pt((teeX + flightEndX) / 2, min(footY - 0.03, ballY + 0.07)))
+                       at: pt(teeX + (flightEndX - teeX) * 0.35, arrowTopY + 0.06))
 
             // Two short lines rather than one long one. A single 30-character
             // caption centred on the batter — who stands near the edge, which
@@ -444,7 +447,7 @@ struct SetupOverlay: View {
             }
             .buttonStyle(.plain)
 
-            if !cardCollapsed {
+            if !cardCollapsed || hasSomethingToSay {
                 instruction
 
                 // The fallback is a first-class option, not a hidden one.
@@ -495,6 +498,22 @@ struct SetupOverlay: View {
         } message: {
             Text("Measure with a tape or pace it off — about 0.9 m per big step. 4.5–6 m is the sweet spot.")
         }
+    }
+
+    /// Whether the panel is holding something the user needs to read, in which
+    /// case it stays open however it was left.
+    ///
+    /// Collapsing on a successful measurement is right; collapsing over a
+    /// *failed* one is not. `instruction` is the only thing in the app that
+    /// renders `failureText` and the detector's diagnostic line — the whole
+    /// point of which is to make a rejection explainable from a photo of the
+    /// screen — so hiding it behind a chevron the user has no reason to tap
+    /// puts them back to guessing.
+    private var hasSomethingToSay: Bool {
+        if measuring { return true }
+        guard let result = lastResult else { return false }
+        if case .found = result { return false }
+        return true
     }
 
     /// The one instruction that matters, and honest feedback on the last try.

@@ -121,7 +121,14 @@ final class AppModel: ObservableObject {
         capture.isArmed = true
         armedAt = CACurrentMediaTime()
         sessionSwingCount = 0
-        dropsAtClipStart = capture.droppedFrameCount
+        // Zero, not `capture.droppedFrameCount`. Arming resets that counter,
+        // but asynchronously — `isArmed`'s didSet hops to the pipeline queue,
+        // then the session queue, then back to main — so reading it here
+        // latched the idle count from before arming. Every clip was then
+        // compared against a baseline the counter had already dropped below,
+        // and the .framesDropped flag stayed off through the drops it exists
+        // to record.
+        dropsAtClipStart = 0
         // Off-level is allowed now, so say so once rather than silently
         // recording a compromised reading.
         if let warning = wizard.advisories.first(where: { $0.level == .warning }) {

@@ -52,6 +52,12 @@ struct CaptureScreen: View {
     /// cluttered one, so this lives in exactly one place.
     private var hudState: HUDState {
         if capture.interruptionMessage != nil { return .interrupted }
+        // A failed configuration is not "still starting". `.starting` shows a
+        // disabled "Starting camera…" slab, so a camera that failed to
+        // configure — no 240fps format, permissions revoked mid-session —
+        // stranded the user on a button that could never be pressed. Route it
+        // to the one state with a working Retry.
+        if case .failed = capture.status { return .interrupted }
         if capture.isRecordingClip { return .recording }
         // Armed outranks analysing. Analysis is background work on the last
         // swing — the camera is still armed and still listening, so saying
@@ -99,6 +105,7 @@ struct CaptureScreen: View {
                     break
                 }
             }
+            .onChange(of: wizard.scaleSource) { _, _ in syncLiveMeasurement() }
             .sheet(isPresented: $showStatus) {
                 StatusSheet(capture: capture, wizard: wizard).environmentObject(model)
             }
@@ -321,6 +328,12 @@ struct CaptureScreen: View {
         if capture.interruptionMessage != nil {
             out.append(("Camera paused", "exclamationmark.triangle.fill", Theme.fail))
         }
+        // Without this, a configuration failure reached the user as a Retry
+        // button with no stated reason. The detail lives in Status; the chip
+        // is what tells them to go and look.
+        if case .failed = capture.status {
+            out.append(("Camera failed", "exclamationmark.octagon.fill", Theme.fail))
+        }
         if capture.droppedFrameCount > 0 {
             out.append(("\(capture.droppedFrameCount) dropped",
                         "exclamationmark.triangle.fill", Theme.warn))
@@ -495,18 +508,31 @@ struct CaptureScreen: View {
         }
         model.startCapture()
         wizard.startSensors()
+        syncLiveMeasurement()
         if !hasCompletedFirstSetup { openSetup() }
     }
 
     private func openSetup() {
         showSetup = true
-        capture.wantsLiveMeasurement = true
+        syncLiveMeasurement()
     }
 
     private func closeSetup() {
         showSetup = false
-        capture.wantsLiveMeasurement = false
         hasCompletedFirstSetup = true
+        syncLiveMeasurement()
+    }
+
+    /// Keep frame conversion on exactly while a tap could mean "measure the
+    /// ball here".
+    ///
+    /// It used to follow the setup overlay alone, but the HUD says "Tap the
+    /// ball" whenever there is no scale yet, and `handleTap` honours that
+    /// wherever it is shown. With conversion off, the first such tap could only
+    /// ever come back `.noFrameYet` — the app asking for something it had
+    /// switched off its own ability to receive.
+    private func syncLiveMeasurement() {
+        capture.wantsLiveMeasurement = showSetup || wizard.scaleSource == .none
     }
 }
 
@@ -533,6 +559,9 @@ struct StatusSheet: View {
                     row("Exposure", capture.exposureLocked ? "locked" : "auto")
                     if let interruption = capture.interruptionMessage {
                         Text(interruption).foregroundStyle(Theme.warn)
+                    }
+                    if case .failed(let why) = capture.status {
+                        Text(why).foregroundStyle(Theme.fail)
                     }
                 }
                 Section {
