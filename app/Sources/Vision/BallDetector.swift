@@ -414,6 +414,27 @@ enum ConnectedComponents {
         /// Direction of the *minor* axis in degrees, image coords (y down) —
         /// this is what the sub-pixel profile is sampled along.
         var minorAxisDeg: Double
+        /// Bounding box in mask coordinates. Additive only — the parity-pinned
+        /// `detect` ignores these; they exist so the setup-only `measureAt`
+        /// can tell a round ball from a rectangular tabletop, which second
+        /// moments alone do not distinguish well.
+        var minX: Int
+        var maxX: Int
+        var minY: Int
+        var maxY: Int
+
+        var boxWidth: Double { Double(maxX - minX + 1) }
+        var boxHeight: Double { Double(maxY - minY + 1) }
+        /// Fraction of the bounding box that is filled. A solid disc gives
+        /// pi/4 ~ 0.785; a filled rectangle gives ~1.0.
+        var extent: Double {
+            let box = boxWidth * boxHeight
+            return box > 0 ? Double(count) / box : 0
+        }
+        /// 1.0 for a square box, further from 1 the more oblong.
+        var boxAspect: Double {
+            boxHeight > 0 ? boxWidth / boxHeight : .infinity
+        }
     }
 
     /// Two-pass 8-connected labelling with union-find.
@@ -467,6 +488,8 @@ enum ConnectedComponents {
             var n = 0
             var sx = 0.0, sy = 0.0
             var sxx = 0.0, syy = 0.0, sxy = 0.0
+            var minX = Int.max, maxX = Int.min
+            var minY = Int.max, maxY = Int.min
         }
         var acc: [Int32: Acc] = [:]
         for y in 0..<h {
@@ -479,6 +502,10 @@ enum ConnectedComponents {
                 a.n += 1
                 a.sx += dx; a.sy += dy
                 a.sxx += dx * dx; a.syy += dy * dy; a.sxy += dx * dy
+                if x < a.minX { a.minX = x }
+                if x > a.maxX { a.maxX = x }
+                if y < a.minY { a.minY = y }
+                if y > a.maxY { a.maxY = y }
                 acc[root] = a
             }
         }
@@ -503,7 +530,9 @@ enum ConnectedComponents {
             let thetaDeg = 0.5 * atan2(2 * mu11, mu20 - mu02) * 180 / Double.pi
             blobs.append(Blob(count: a.n, meanX: mx, meanY: my,
                               majorAxis: majorAxis, minorAxis: minorAxis,
-                              minorAxisDeg: thetaDeg + 90))
+                              minorAxisDeg: thetaDeg + 90,
+                              minX: a.minX, maxX: a.maxX,
+                              minY: a.minY, maxY: a.maxY))
         }
         // Deterministic order so repeated runs on one frame agree.
         blobs.sort { $0.meanY != $1.meanY ? $0.meanY < $1.meanY : $0.meanX < $1.meanX }
