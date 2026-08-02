@@ -159,72 +159,97 @@ struct SetupOverlay: View {
     /// builder allows.
     private func guideDrawing(in size: CGSize) -> some View {
         let w = size.width, h = size.height
+        let isLandscape = w > h
         let flip = model.settings.hitterOnLeft ? 1.0 : -1.0
         // Mirror about the centre when the hitter works the other way.
-        func px(_ nx: Double) -> Double {
-            let centred = nx - 0.5
-            return (0.5 + centred * flip) * w
-        }
+        func px(_ nx: Double) -> Double { (0.5 + (nx - 0.5) * flip) * w }
         func py(_ ny: Double) -> Double { ny * h }
-        func pt(_ nx: Double, _ ny: Double) -> CGPoint {
-            CGPoint(x: px(nx), y: py(ny))
-        }
+        func pt(_ nx: Double, _ ny: Double) -> CGPoint { CGPoint(x: px(nx), y: py(ny)) }
 
-        let stroke = StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
-        let ghost = Theme.yellow.opacity(0.7)
+        // The outline is sized from the real optics, so standing the hitter
+        // inside it *is* the distance check: if they fit, the camera is about
+        // 5 m away. Guessing a fraction of the screen instead would be wrong
+        // by a factor of two between portrait and landscape, because filling
+        // the screen crops a different amount of the sensor in each.
+        let figureH = batterHeightFraction(isLandscape: isLandscape,
+                                           screenAspect: w / max(1, h))
+        let figureW = figureH * BatterOutline.aspect * (h / max(1, w))
+        let footY = 0.90
+        let headY = footY - figureH
+        let centreX = 0.24
+        // Contact happens around belt height, a little over half way up.
+        let ballY = footY - figureH * 0.46
+        let teeX = centreX + BatterOutline.aspect * figureH * (h / max(1, w)) * 0.62
 
         return ZStack {
-            // Hitter, side-on, chest toward the camera side.
-            Path { p in
-                p.addEllipse(in: CGRect(x: px(0.20) - 0.020 * w, y: py(0.30) - 0.020 * w,
-                                        width: 0.040 * w, height: 0.040 * w))
-            }
-            .stroke(ghost, style: stroke)
-            Path { p in
-                p.move(to: pt(0.20, 0.345))          // neck
-                p.addLine(to: pt(0.20, 0.56))        // spine to hips
-                p.move(to: pt(0.20, 0.56))           // legs
-                p.addLine(to: pt(0.165, 0.86))
-                p.move(to: pt(0.20, 0.56))
-                p.addLine(to: pt(0.245, 0.86))
-                p.move(to: pt(0.20, 0.40))           // arms forward to the hands
-                p.addLine(to: pt(0.245, 0.46))
-                p.move(to: pt(0.245, 0.46))          // bat, cocked back over the shoulder
-                p.addLine(to: pt(0.165, 0.30))
-            }
-            .stroke(ghost, style: stroke)
+            BatterOutline()
+                .stroke(Theme.yellow.opacity(0.85),
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                .frame(width: figureW * w, height: figureH * h)
+                .scaleEffect(x: flip, y: 1, anchor: .center)
+                .position(pt(centreX, (headY + footY) / 2))
+                .shadow(color: .black.opacity(0.55), radius: 4)
 
             // Tee and ball, in front of the hitter at contact height.
             Path { p in
-                p.move(to: pt(0.33, 0.86))
-                p.addLine(to: pt(0.33, 0.60))
+                p.move(to: pt(teeX, footY))
+                p.addLine(to: pt(teeX, ballY + 0.012))
             }
-            .stroke(ghost, style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
+            .stroke(Theme.yellow.opacity(0.7),
+                    style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
             Circle()
                 .strokeBorder(Theme.yellow, lineWidth: 2.5)
-                .frame(width: 0.045 * w, height: 0.045 * w)
-                .position(pt(0.33, 0.575))
+                .frame(width: 0.042 * min(w, h), height: 0.042 * min(w, h))
+                .position(pt(teeX, ballY))
 
             // Where the ball goes — the whole reason the frame is composed
             // this way, and the thing the old guide never said.
             Path { p in
-                p.move(to: pt(0.38, 0.55))
-                p.addQuadCurve(to: pt(0.92, 0.28), control: pt(0.66, 0.34))
+                p.move(to: pt(teeX + 0.05, ballY - 0.01))
+                p.addQuadCurve(to: pt(0.93, ballY - 0.30),
+                               control: pt(teeX + 0.32, ballY - 0.24))
             }
             .stroke(Theme.yellow.opacity(0.75),
                     style: StrokeStyle(lineWidth: 2.5, dash: [9, 6]))
             Path { p in
-                p.move(to: pt(0.855, 0.255))
-                p.addLine(to: pt(0.92, 0.28))
-                p.addLine(to: pt(0.862, 0.318))
+                p.move(to: pt(0.865, ballY - 0.325))
+                p.addLine(to: pt(0.93, ballY - 0.30))
+                p.addLine(to: pt(0.872, ballY - 0.262))
             }
-            .stroke(Theme.yellow, style: stroke)
+            .stroke(Theme.yellow,
+                    style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
 
-            guideLabel("STAND HERE", at: pt(0.20, 0.92))
-            guideLabel("FACING THE CAMERA", at: pt(0.20, 0.955), small: true)
-            guideLabel("TEE", at: pt(0.33, 0.92))
-            guideLabel("BALL FLIES THIS WAY", at: pt(0.68, 0.20))
+            guideLabel("STAND HERE", at: pt(centreX, footY + 0.045))
+            guideLabel("FACING THE CAMERA", at: pt(centreX, footY + 0.078), small: true)
+            guideLabel("TEE", at: pt(teeX, footY + 0.045), small: true)
+            guideLabel("BALL FLIES THIS WAY", at: pt(0.70, ballY - 0.37))
         }
+    }
+
+    /// How tall a 1.75 m hitter standing 5 m away actually appears, as a
+    /// fraction of screen height.
+    ///
+    /// The preview fills the screen, which crops the sensor differently in each
+    /// orientation: in portrait the screen's long axis spans the camera's full
+    /// horizontal field of view, while in landscape the screen's *width* spans
+    /// it and the visible vertical angle is narrowed by the screen's aspect
+    /// ratio. The same person is therefore about a third of the height in
+    /// portrait and roughly two thirds in landscape — a fixed fraction would be
+    /// wrong in one of them, and the outline would quietly teach the wrong
+    /// distance.
+    private func batterHeightFraction(isLandscape: Bool, screenAspect: Double) -> Double {
+        let targetDistanceM = 5.25      // middle of the 4.5-6 m window
+        let hitterHeightM = 1.75
+        let fov = model.capture.fieldOfViewDeg
+        guard fov > 5 else { return isLandscape ? 0.62 : 0.30 }
+
+        let horizontalHalf = fov * .pi / 360
+        let visibleVerticalHalf = isLandscape
+            ? atan(tan(horizontalHalf) / max(0.1, screenAspect))
+            : horizontalHalf
+        let visibleMetres = 2 * targetDistanceM * tan(visibleVerticalHalf)
+        guard visibleMetres > 0.1 else { return isLandscape ? 0.62 : 0.30 }
+        return min(0.80, max(0.15, hitterHeightM / visibleMetres))
     }
 
     private func guideLabel(_ text: String, at point: CGPoint,
@@ -459,6 +484,92 @@ struct SetupOverlay: View {
     private func plateBinding(_ keyPath: ReferenceWritableKeyPath<PlacementWizard, CGPoint>) -> Binding<CGPoint> {
         Binding(get: { wizard[keyPath: keyPath] },
                 set: { wizard[keyPath: keyPath] = $0 })
+    }
+}
+
+/// The batter, traced as a vector so it stays crisp at any size and can be
+/// tinted and mirrored without shipping image assets.
+///
+/// Front-on stance with the hands on one side and the bat cocked over the
+/// shoulder — which is what the camera actually sees from the side the hitter
+/// faces, the position `CAPTURE_PROTOCOL.md` asks for. Drawn as several
+/// subpaths (body, head, cap, arms, hands, bat) rather than one silhouette:
+/// stroked outlines of overlapping parts read far better at guide opacity over
+/// live video than a single traced boundary.
+struct BatterOutline: Shape {
+    /// Width ÷ height of the figure, including the raised bat.
+    static let aspect = 0.45
+
+    func path(in rect: CGRect) -> Path {
+        func p(_ x: Double, _ y: Double) -> CGPoint {
+            CGPoint(x: rect.minX + x * rect.width, y: rect.minY + y * rect.height)
+        }
+        var path = Path()
+
+        // --- torso and legs, one closed outline ---
+        path.move(to: p(0.375, 0.195))
+        path.addLine(to: p(0.275, 0.235))          // left shoulder
+        path.addLine(to: p(0.255, 0.330))
+        path.addLine(to: p(0.250, 0.480))          // waist
+        path.addLine(to: p(0.235, 0.565))          // hip
+        path.addCurve(to: p(0.105, 0.870),         // outside of the front leg
+                      control1: p(0.200, 0.700), control2: p(0.130, 0.780))
+        path.addLine(to: p(0.070, 0.935))
+        path.addCurve(to: p(0.180, 0.965),         // front shoe
+                      control1: p(0.010, 0.995), control2: p(0.095, 1.000))
+        path.addCurve(to: p(0.375, 0.610),         // inside of the front leg
+                      control1: p(0.235, 0.855), control2: p(0.315, 0.690))
+        path.addCurve(to: p(0.520, 0.860),         // inside of the back leg
+                      control1: p(0.440, 0.690), control2: p(0.490, 0.780))
+        path.addLine(to: p(0.560, 0.940))
+        path.addCurve(to: p(0.680, 0.935),         // back shoe
+                      control1: p(0.640, 1.000), control2: p(0.730, 0.985))
+        path.addCurve(to: p(0.545, 0.565),         // outside of the back leg
+                      control1: p(0.630, 0.860), control2: p(0.575, 0.700))
+        path.addLine(to: p(0.530, 0.480))
+        path.addLine(to: p(0.545, 0.330))
+        path.addLine(to: p(0.565, 0.235))          // right shoulder
+        path.addLine(to: p(0.470, 0.195))
+        path.closeSubpath()
+
+        // Belt, which is also where contact happens.
+        path.move(to: p(0.252, 0.495))
+        path.addQuadCurve(to: p(0.528, 0.495), control: p(0.390, 0.535))
+
+        // --- head, cap crown and brim ---
+        path.addEllipse(in: CGRect(x: rect.minX + 0.340 * rect.width,
+                                   y: rect.minY + 0.028 * rect.height,
+                                   width: 0.170 * rect.width,
+                                   height: 0.175 * rect.height))
+        path.move(to: p(0.345, 0.108))             // cap band
+        path.addLine(to: p(0.508, 0.108))
+        path.move(to: p(0.345, 0.112))             // brim, toward the pitcher
+        path.addCurve(to: p(0.240, 0.140),
+                      control1: p(0.290, 0.108), control2: p(0.248, 0.120))
+        path.addLine(to: p(0.348, 0.145))
+
+        // --- arms to the hands, both across the body ---
+        path.move(to: p(0.290, 0.245))
+        path.addQuadCurve(to: p(0.135, 0.330), control: p(0.205, 0.290))
+        path.move(to: p(0.555, 0.252))
+        path.addCurve(to: p(0.150, 0.345),
+                      control1: p(0.430, 0.320), control2: p(0.260, 0.360))
+
+        // --- hands ---
+        path.addEllipse(in: CGRect(x: rect.minX + 0.062 * rect.width,
+                                   y: rect.minY + 0.298 * rect.height,
+                                   width: 0.088 * rect.width,
+                                   height: 0.072 * rect.height))
+
+        // --- bat, cocked up over the shoulder ---
+        path.move(to: p(0.027, 0.313))
+        path.addLine(to: p(0.373, 0.012))
+        path.addQuadCurve(to: p(0.427, 0.078), control: p(0.435, 0.010))
+        path.addLine(to: p(0.063, 0.357))
+        path.addQuadCurve(to: p(0.027, 0.313), control: p(0.020, 0.360))
+        path.closeSubpath()
+
+        return path
     }
 }
 
