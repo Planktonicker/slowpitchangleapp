@@ -93,47 +93,50 @@ struct ScoreBug: View {
     /// Optional qualifier beside the label, e.g. GOOD / OK / MOVE.
     var qualifier: (text: String, color: Color)?
     var subline: String?
+    /// Shared with the buttons beside it. A row only reads as a row when every
+    /// piece in it is the same height.
+    var height: CGFloat = 60
     var onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 0) {
-                VStack(spacing: 2) {
+                VStack(spacing: 1) {
                     Image(systemName: state.symbol)
-                        .font(.system(size: 24, weight: .semibold))
+                        .font(.system(size: 19, weight: .semibold))
                     Text(state.word.uppercased())
-                        .font(Theme.label(12))
-                        .tracking(1.0)
+                        .font(Theme.label(10))
+                        .tracking(0.8)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                 }
                 .foregroundStyle(state.onTint)
-                .frame(width: 74, height: 74)
+                .frame(width: height, height: height)
                 .background(state.tint)
 
                 VStack(alignment: .leading, spacing: 0) {
                     if state.isLoud {
                         Text(state.word.uppercased())
-                            .font(Theme.numeral(28))
+                            .font(Theme.numeral(23))
                             .foregroundStyle(.white)
                         if let subline {
                             Text(subline)
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .font(.system(size: 10, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(Theme.steel)
                         }
                     } else {
                         HStack(spacing: 5) {
                             Text(label.uppercased())
-                                .font(Theme.label(10)).tracking(1.2)
+                                .font(Theme.label(9)).tracking(1.1)
                                 .foregroundStyle(Theme.steel)
                             if let qualifier {
                                 Text(qualifier.text.uppercased())
-                                    .font(Theme.label(10)).tracking(0.8)
+                                    .font(Theme.label(9)).tracking(0.7)
                                     .foregroundStyle(qualifier.color)
                             }
                         }
                         Text(value)
-                            .font(Theme.numeral(value.count > 6 ? 20 : 36))
+                            .font(Theme.numeral(value.count > 6 ? 17 : 29))
                             .monospacedDigit()
                             .foregroundStyle(.white)
                             .lineLimit(2)
@@ -141,11 +144,11 @@ struct ScoreBug: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .frame(width: 178, height: 74, alignment: .leading)
-                .padding(.horizontal, 12)
+                .frame(width: 148, height: height, alignment: .leading)
+                .padding(.horizontal, 11)
                 .background(.black.opacity(0.86))
             }
-            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
@@ -159,7 +162,6 @@ struct ScoreBug: View {
 /// is what lets a single amber chip mean "look at me".
 struct ExceptionRibbon: View {
     var chips: [(text: String, symbol: String, color: Color)]
-    var setting: String
     var onChipTap: () -> Void
     var settingMenu: AnyView
 

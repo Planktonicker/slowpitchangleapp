@@ -37,6 +37,7 @@ struct RootView: View {
         .overlay(alignment: .top) {
             if let banner = model.banner {
                 BannerView(banner: banner) { model.banner = nil }
+                    .padding(.top, 6)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }

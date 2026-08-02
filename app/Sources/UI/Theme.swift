@@ -84,6 +84,11 @@ struct SlabButtonStyle: ButtonStyle {
     var textColor: Color = .black
     var size: CGFloat = 17
     var verticalPadding: CGFloat = 16
+    /// Stretch to whatever height the caller framed the button at, instead of
+    /// sizing from padding. The HUD row pins one height for the score bug and
+    /// every control beside it; padding alone leaves a short slab floating in
+    /// a tall frame, which is what made that row look unproportioned.
+    var fillsHeight = false
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -93,8 +98,8 @@ struct SlabButtonStyle: ButtonStyle {
             .tracking(1.2)
             .lineLimit(1)
             .minimumScaleFactor(0.7)
-            .frame(maxWidth: .infinity)
             .padding(.vertical, verticalPadding)
+            .frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil)
             .background(isEnabled ? fill : Theme.surface,
                         in: RoundedRectangle(cornerRadius: 14))
             .foregroundStyle(isEnabled ? textColor : Theme.steel)
@@ -105,6 +110,10 @@ struct SlabButtonStyle: ButtonStyle {
 
 /// Secondary action: black slab, yellow outline.
 struct OutlineButtonStyle: ButtonStyle {
+    var verticalPadding: CGFloat = 12
+    var cornerRadius: CGFloat = 12
+    /// See `SlabButtonStyle.fillsHeight`.
+    var fillsHeight = false
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -112,10 +121,10 @@ struct OutlineButtonStyle: ButtonStyle {
             .font(.system(size: 14, weight: .bold, design: .rounded))
             .textCase(.uppercase)
             .tracking(0.8)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 12)
-            .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12)
+            .padding(.vertical, verticalPadding)
+            .frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil)
+            .background(Color.black.opacity(0.55), in: RoundedRectangle(cornerRadius: cornerRadius))
+            .overlay(RoundedRectangle(cornerRadius: cornerRadius)
                 .strokeBorder(Theme.yellow.opacity(isEnabled ? 0.85 : 0.3), lineWidth: 1.5))
             .foregroundStyle(isEnabled ? Theme.yellow : Theme.steel)
             .opacity(configuration.isPressed ? 0.7 : 1)

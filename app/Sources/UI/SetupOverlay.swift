@@ -23,6 +23,10 @@ import SwiftUI
 /// tilt is flagged, so a tripod on uneven grass still measures.
 struct SetupOverlay: View {
     @EnvironmentObject private var model: AppModel
+    /// Held directly rather than reached through `model`, so a 10 Hz level
+    /// reading invalidates this overlay and nothing else in the app.
+    @ObservedObject var capture: CaptureController
+    @ObservedObject var wizard: PlacementWizard
 
     /// Live measurement state, owned by `CaptureView` because the tap arrives
     /// on the preview it owns.
@@ -34,14 +38,21 @@ struct SetupOverlay: View {
 
     @State private var showDistanceEntry = false
     @State private var showTips = false
-
-    private var wizard: PlacementWizard { model.wizard }
+    /// The panel covers the picture, and the picture is the thing being set
+    /// up. Collapsing it leaves the header — which still carries the distance
+    /// and its verdict — and hands the frame back.
+    @State private var cardCollapsed = false
 
     var body: some View {
         GeometryReader { geo in
             let isLandscape = geo.size.width > geo.size.height
             ZStack {
-                framingGuide
+                // The guide is drawn into the part of the frame the panels do
+                // not cover. Without this the ball-flight arrow and its label
+                // ran straight under the distance card in landscape, so the
+                // one thing the guide exists to say was the one thing hidden.
+                framingGuide(rightInset: isLandscape
+                             ? Double((Self.panelWidth + 28) / max(1, geo.size.width)) : 0)
 
                 if isLandscape {
                     VStack(spacing: 10) {
@@ -58,7 +69,7 @@ struct SetupOverlay: View {
                             distanceCard
                             armButton
                         }
-                        .frame(width: 340)
+                        .frame(width: Self.panelWidth)
                         .padding(14)
                     }
                 } else {
@@ -85,6 +96,10 @@ struct SetupOverlay: View {
         .sheet(isPresented: $showTips) { PlacementTipsView() }
     }
 
+    /// Width of the landscape control column. Named because the framing guide
+    /// has to know it too — it draws around the panel, not under it.
+    private static let panelWidth: CGFloat = 300
+
     // MARK: - Pieces
 
     private var topBar: some View {
@@ -106,8 +121,8 @@ struct SetupOverlay: View {
                 // Proof the hitter detector is alive. Without this the user
                 // has no way to know the pose gate works until a swing goes
                 // silently unrecorded in the field.
-                StatChip(text: model.capture.hitterPresent ? "Hitter detected ✓" : "Looking for hitter…",
-                         color: model.capture.hitterPresent ? Theme.pass : Theme.steel)
+                StatChip(text: capture.hitterPresent ? "Hitter detected ✓" : "Looking for hitter…",
+                         color: capture.hitterPresent ? Theme.pass : Theme.steel)
             }
             .shadow(radius: 3)
             Spacer()
@@ -145,9 +160,9 @@ struct SetupOverlay: View {
     /// a ball flying at the camera is foreshortened, reads slow, and gets
     /// flagged for depth motion. Hence hitter near one edge, tee in front of
     /// them, and most of the frame left empty for the ball to travel through.
-    private var framingGuide: some View {
+    private func framingGuide(rightInset: Double) -> some View {
         GeometryReader { geo in
-            guideDrawing(in: geo.size)
+            guideDrawing(in: geo.size, rightInset: rightInset)
         }
         // Critical: the whole point of the overlay is that taps reach the
         // preview underneath so the user can tap the ball.
@@ -157,7 +172,10 @@ struct SetupOverlay: View {
     /// Deliberately a plain function rather than a `@ViewBuilder` body: it
     /// declares local helpers and returns explicitly, neither of which a result
     /// builder allows.
-    private func guideDrawing(in size: CGSize) -> some View {
+    ///
+    /// `rightInset` is the fraction of the width the control column covers.
+    /// Everything the guide draws stays left of it.
+    private func guideDrawing(in size: CGSize, rightInset: Double) -> some View {
         let w = size.width, h = size.height
         let isLandscape = w > h
         let flip = model.settings.hitterOnLeft ? 1.0 : -1.0
@@ -174,12 +192,21 @@ struct SetupOverlay: View {
         let figureH = batterHeightFraction(isLandscape: isLandscape,
                                            screenAspect: w / max(1, h))
         let figureW = figureH * BatterOutline.aspect * (h / max(1, w))
-        let footY = 0.90
+        // Where the hitter's feet go. Not a style choice — it is whatever the
+        // panels leave free. In landscape they sit in a column on the right, so
+        // the full height is available bar the floating tab bar. In portrait
+        // they stack across the bottom, and at 0.90 the batter and the caption
+        // under them were simply drawn behind the distance card.
+        let footY = isLandscape ? 0.84 : (cardCollapsed ? 0.74 : 0.50)
         let headY = footY - figureH
-        let centreX = 0.24
+        let centreX = 0.22
         // Contact happens around belt height, a little over half way up.
         let ballY = footY - figureH * 0.46
-        let teeX = centreX + BatterOutline.aspect * figureH * (h / max(1, w)) * 0.62
+        let teeX = centreX + figureW * 0.62
+        // Where the flight arrow may run to. In landscape the control column
+        // owns the right of the screen, so the arrow stops before it.
+        let flightEndX = min(0.93, 1 - rightInset - 0.04)
+        let arrowTopY = max(0.10, ballY - (isLandscape ? 0.30 : 0.22))
 
         return ZStack {
             BatterOutline()
@@ -200,28 +227,41 @@ struct SetupOverlay: View {
                 .strokeBorder(Theme.yellow, lineWidth: 2.5)
                 .frame(width: 0.042 * min(w, h), height: 0.042 * min(w, h))
                 .position(pt(teeX, ballY))
+            // Above the ball, not below: below is where the hitter's caption
+            // goes, and the two labels collided into "STAND HERETEE".
+            guideLabel("BALL ON TEE", at: pt(teeX, ballY - 0.055), small: true)
 
             // Where the ball goes — the whole reason the frame is composed
             // this way, and the thing the old guide never said.
             Path { p in
                 p.move(to: pt(teeX + 0.05, ballY - 0.01))
-                p.addQuadCurve(to: pt(0.93, ballY - 0.30),
-                               control: pt(teeX + 0.32, ballY - 0.24))
+                p.addQuadCurve(to: pt(flightEndX, arrowTopY),
+                               control: pt(teeX + (flightEndX - teeX) * 0.55,
+                                           arrowTopY + 0.06))
             }
             .stroke(Theme.yellow.opacity(0.75),
                     style: StrokeStyle(lineWidth: 2.5, dash: [9, 6]))
+            // Arrowhead in points, not in fractions of each axis. Fractions
+            // are stretched by the screen's own aspect, which in landscape
+            // turned the head into a flat wedge.
             Path { p in
-                p.move(to: pt(0.865, ballY - 0.325))
-                p.addLine(to: pt(0.93, ballY - 0.30))
-                p.addLine(to: pt(0.872, ballY - 0.262))
+                let tip = pt(flightEndX, arrowTopY)
+                let a = 0.032 * min(w, h)
+                p.move(to: CGPoint(x: tip.x - flip * a * 1.15, y: tip.y - a * 0.5))
+                p.addLine(to: tip)
+                p.addLine(to: CGPoint(x: tip.x - flip * a * 0.85, y: tip.y + a * 1.05))
             }
             .stroke(Theme.yellow,
                     style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+            // Under the arc, not above it: above lands on the level bar in
+            // landscape, and the arc itself runs through the middle.
+            guideLabel("BALL FLIES THIS WAY",
+                       at: pt((teeX + flightEndX) / 2, min(footY - 0.03, ballY + 0.07)))
 
-            guideLabel("STAND HERE", at: pt(centreX, footY + 0.045))
-            guideLabel("FACING THE CAMERA", at: pt(centreX, footY + 0.078), small: true)
-            guideLabel("TEE", at: pt(teeX, footY + 0.045), small: true)
-            guideLabel("BALL FLIES THIS WAY", at: pt(0.70, ballY - 0.37))
+            // One caption, not two stacked ones. Two lines under the feet is
+            // what pushed the second off the bottom of the picture.
+            guideLabel("STAND HERE · FACING THE CAMERA",
+                       at: pt(centreX, footY + 0.042))
         }
     }
 
@@ -239,7 +279,7 @@ struct SetupOverlay: View {
     private func batterHeightFraction(isLandscape: Bool, screenAspect: Double) -> Double {
         let targetDistanceM = 5.25      // middle of the 4.5-6 m window
         let hitterHeightM = 1.75
-        let fov = model.capture.fieldOfViewDeg
+        let fov = capture.fieldOfViewDeg
         guard fov > 5 else { return isLandscape ? 0.62 : 0.30 }
 
         let horizontalHalf = fov * .pi / 360
@@ -326,57 +366,66 @@ struct SetupOverlay: View {
 
     private var distanceCard: some View {
         VStack(spacing: 10) {
-            HStack {
-                Text("Distance")
-                    .font(Theme.label(12)).tracking(1)
-                    .foregroundStyle(Theme.steel)
-                Spacer()
-                if let m = wizard.derivedDistanceM {
-                    Text(String(format: "≈ %.1f m", m))
-                        .font(Theme.numeral(24))
-                        .foregroundStyle(wizard.isDistanceIdeal ? Theme.pass
-                                         : (wizard.isDistanceAcceptable ? Theme.warn : Theme.fail))
-                    if wizard.isDistanceIdeal {
-                        StatChip(text: "Good", color: Theme.pass)
-                    } else if wizard.isDistanceAcceptable {
-                        StatChip(text: "Workable", color: Theme.warn)
-                    } else {
-                        StatChip(text: "Move", color: Theme.fail)
-                    }
-                } else {
-                    Text("—")
-                        .font(Theme.numeral(24))
+            Button { withAnimation(.easeInOut(duration: 0.18)) { cardCollapsed.toggle() } } label: {
+                HStack(spacing: 8) {
+                    Text("Distance")
+                        .font(Theme.label(12)).tracking(1)
                         .foregroundStyle(Theme.steel)
+                    Spacer(minLength: 0)
+                    if let m = wizard.derivedDistanceM {
+                        Text(String(format: "≈ %.1f m", m))
+                            .font(Theme.numeral(22))
+                            .foregroundStyle(wizard.isDistanceIdeal ? Theme.pass
+                                             : (wizard.isDistanceAcceptable ? Theme.warn : Theme.fail))
+                        if wizard.isDistanceIdeal {
+                            StatChip(text: "Good", color: Theme.pass)
+                        } else if wizard.isDistanceAcceptable {
+                            StatChip(text: "Workable", color: Theme.warn)
+                        } else {
+                            StatChip(text: "Move", color: Theme.fail)
+                        }
+                    } else {
+                        Text("not set")
+                            .font(Theme.label(12))
+                            .foregroundStyle(Theme.steel)
+                    }
+                    Image(systemName: cardCollapsed ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 12, weight: .black))
+                        .foregroundStyle(Theme.yellow)
                 }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
 
-            instruction
+            if !cardCollapsed {
+                instruction
 
-            // The fallback is a first-class option, not a hidden one. There
-            // may be no ball to hand, it may be too dark, or the ball may be
-            // sitting on something its own colour — in every one of those cases
-            // the user still needs a way to finish setup.
-            HStack(spacing: 8) {
-                Button { showDistanceEntry = true } label: {
-                    Text("No ball? Type distance")
-                }
-                .buttonStyle(OutlineButtonStyle())
-
-                Menu {
-                    Button("Mark home plate instead") {
-                        wizard.showPlateMarkers = true
-                        wizard.applyPlateMeasurement()
+                // The fallback is a first-class option, not a hidden one.
+                // There may be no ball to hand, it may be too dark, or the
+                // ball may be sitting on something its own colour — in every
+                // one of those cases the user still needs a way to finish.
+                HStack(spacing: 8) {
+                    Button { showDistanceEntry = true } label: {
+                        Text("No ball? Type distance")
                     }
-                    if wizard.scaleSource != .none {
-                        Button("Clear measurement", role: .destructive) { wizard.clearScale() }
+                    .buttonStyle(OutlineButtonStyle(verticalPadding: 10))
+
+                    Menu {
+                        Button("Mark home plate instead") {
+                            wizard.showPlateMarkers = true
+                            wizard.applyPlateMeasurement()
+                        }
+                        if wizard.scaleSource != .none {
+                            Button("Clear measurement", role: .destructive) { wizard.clearScale() }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 15, weight: .bold))
+                            .frame(width: 40)
                     }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 15, weight: .bold))
-                        .frame(width: 44)
+                    .buttonStyle(OutlineButtonStyle(verticalPadding: 10))
+                    .frame(width: 52)
                 }
-                .buttonStyle(OutlineButtonStyle())
-                .frame(width: 56)
             }
         }
         .padding(12)
@@ -384,6 +433,13 @@ struct SetupOverlay: View {
         // Swallow taps: without this, tapping the card would fall through to
         // the preview and be read as "the ball is here".
         .contentShape(Rectangle())
+        // A successful measurement is the panel's whole job. Getting out of
+        // the way afterwards is more useful than staying open to be admired.
+        .onChange(of: wizard.scaleSource) { _, source in
+            if source != .none {
+                withAnimation(.easeInOut(duration: 0.18)) { cardCollapsed = true }
+            }
+        }
         .alert("Distance from camera to hitter", isPresented: $showDistanceEntry) {
             TextField("metres", value: distanceEntryBinding, format: .number)
                 .keyboardType(.decimalPad)
@@ -436,7 +492,7 @@ struct SetupOverlay: View {
     /// its job is to make a rejection diagnosable from a photo of the screen,
     /// instead of another round of guessing at which threshold was too tight.
     @ViewBuilder private var detectorReport: some View {
-        if let report = model.capture.lastMeasureReport {
+        if let report = capture.lastMeasureReport {
             Text(report)
                 .font(.system(size: 9, weight: .regular, design: .monospaced))
                 .foregroundStyle(Theme.steel.opacity(0.8))
@@ -473,15 +529,18 @@ struct SetupOverlay: View {
         VStack(spacing: 6) {
             if let advice = wizard.topAdvisory {
                 Text(advice.text)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(advice.level == .blocking ? Theme.warn : Theme.steel)
                     .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Button(action: onArm) {
                 Text(wizard.isArmingAllowed ? "Arm — let's hit" : "Arm")
             }
             .buttonStyle(SlabButtonStyle(fill: wizard.isArmingAllowed ? Theme.yellow : Theme.surface,
-                                         textColor: wizard.isArmingAllowed ? .black : Theme.steel))
+                                         textColor: wizard.isArmingAllowed ? .black : Theme.steel,
+                                         size: 18, verticalPadding: 15))
             .disabled(!wizard.isArmingAllowed)
         }
         .contentShape(Rectangle())

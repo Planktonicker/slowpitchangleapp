@@ -152,26 +152,49 @@ struct ConfidenceRow: View {
 }
 
 /// Transient message bar.
+///
+/// Opaque, not tinted glass. It sits over the live camera preview, and a 15%
+/// wash let the video and the HUD chips read straight through it — the top of
+/// the capture screen became an unreadable pile. It also clears itself: a
+/// warning that has to be dismissed by hand is a warning that stays on screen
+/// covering the picture long after it stopped being news. Errors stay, because
+/// those the user has to actually see.
 struct BannerView: View {
     var banner: AppModel.Banner
     var onDismiss: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(tint)
             Text(banner.text)
-                .font(.footnote)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(4)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            Button(action: onDismiss) {
-                Image(systemName: "xmark").font(.caption)
-            }
-            .buttonStyle(.plain)
+            Image(systemName: "xmark")
+                .font(.system(size: 12, weight: .heavy))
+                .foregroundStyle(Theme.steel)
         }
-        .padding(10)
-        .background(tint.opacity(0.15), in: RoundedRectangle(cornerRadius: 10))
-        .foregroundStyle(tint)
-        .padding(.horizontal)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Theme.black.opacity(0.94), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(tint.opacity(0.8), lineWidth: 1.5))
+        .frame(maxWidth: 620)
+        .padding(.horizontal, 12)
+        // The whole bar dismisses, not a 12pt glyph. It lives over a camera
+        // preview whose taps mean "measure the ball here", so it has to be
+        // easy to get rid of and impossible to miss.
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onDismiss)
+        .task(id: banner.id) {
+            guard banner.kind != .error else { return }
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            guard !Task.isCancelled else { return }
+            onDismiss()
+        }
     }
 
     private var icon: String {
@@ -184,9 +207,9 @@ struct BannerView: View {
 
     private var tint: Color {
         switch banner.kind {
-        case .info: return .blue
-        case .warning: return .orange
-        case .error: return .red
+        case .info: return Theme.yellow
+        case .warning: return Theme.warn
+        case .error: return Theme.fail
         }
     }
 }

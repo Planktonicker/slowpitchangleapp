@@ -11,12 +11,28 @@ import UIKit
 /// It owns the app's **only** `CameraPreview`; setup draws over it rather than
 /// creating a second one, because two preview layers cannot share a session.
 ///
+/// A thin shell on purpose. Everything lives in `CaptureScreen`, which takes
+/// the camera and the placement wizard as `@ObservedObject`s instead of
+/// reaching them through `AppModel`. That is what keeps a 10 Hz trigger-meter
+/// reading from invalidating every tab in the app — see the comment in
+/// `AppModel.init`.
+struct CaptureView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        CaptureScreen(model: model, capture: model.capture, wizard: model.wizard)
+    }
+}
+
 /// The HUD is a broadcast score bug (see `CaptureHUD.swift`): one state signal
 /// at one fixed address, one primary action, and an empty ribbon when nothing
 /// is wrong. The middle band of the frame is kept clear in every state — that
 /// is where the hitter and the ball are, and it is what the user is judging.
-struct CaptureView: View {
-    @EnvironmentObject private var model: AppModel
+struct CaptureScreen: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var capture: CaptureController
+    @ObservedObject var wizard: PlacementWizard
+
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var showSetup = false
@@ -35,12 +51,12 @@ struct CaptureView: View {
     /// Strict precedence. A HUD that reports the wrong state is worse than a
     /// cluttered one, so this lives in exactly one place.
     private var hudState: HUDState {
-        if model.capture.interruptionMessage != nil { return .interrupted }
-        if model.capture.isRecordingClip { return .recording }
+        if capture.interruptionMessage != nil { return .interrupted }
+        if capture.isRecordingClip { return .recording }
         if model.analysisProgress != nil { return .analysing }
-        if model.capture.isArmed { return .armed }
-        if model.capture.status != .running { return .starting }
-        if model.wizard.scaleSource == .none { return .needsSetup }
+        if capture.isArmed { return .armed }
+        if capture.status != .running { return .starting }
+        if wizard.scaleSource == .none { return .needsSetup }
         return .ready
     }
 
@@ -48,13 +64,15 @@ struct CaptureView: View {
         NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
-                CameraPreview(controller: model.capture, onTap: handleTap)
+                CameraPreview(controller: capture, onTap: handleTap)
                     .ignoresSafeArea()
 
                 tapMarker
 
                 if showSetup {
-                    SetupOverlay(measuring: $measuring,
+                    SetupOverlay(capture: capture,
+                                 wizard: wizard,
+                                 measuring: $measuring,
                                  lastResult: $lastResult,
                                  onClose: { closeSetup() },
                                  onArm: { model.arm(); closeSetup() })
@@ -69,10 +87,10 @@ struct CaptureView: View {
                 switch phase {
                 case .background:
                     model.stopCapture()
-                    model.wizard.stopSensors()
+                    wizard.stopSensors()
                 case .active:
-                    if model.capture.status != .running { model.startCapture() }
-                    model.wizard.startSensors()
+                    if capture.status != .running { model.startCapture() }
+                    wizard.startSensors()
                 default:
                     break
                 }
@@ -102,11 +120,16 @@ struct CaptureView: View {
             let isLandscape = geo.size.width > geo.size.height
             VStack(spacing: 0) {
                 ExceptionRibbon(chips: exceptionChips,
-                                setting: model.currentSetting.displayName,
                                 onChipTap: { showStatus = true },
                                 settingMenu: AnyView(settingMenu))
                     .padding(.horizontal, 16)
-                    .padding(.top, 4)
+                    // The transient banner is an overlay on the whole TabView
+                    // and lands here. Rather than letting the two draw through
+                    // each other — which is exactly how the top of the screen
+                    // became unreadable — the persistent row steps aside for
+                    // the temporary one.
+                    .padding(.top, model.banner == nil ? 4 : 62)
+                    .animation(.easeInOut(duration: 0.2), value: model.banner == nil)
                     .background(
                         LinearGradient(colors: [.black.opacity(0.8), .clear],
                                        startPoint: .top, endPoint: .bottom)
@@ -134,10 +157,10 @@ struct CaptureView: View {
                 }
 
                 if hudState != .starting && hudState != .needsSetup {
-                    SeamMeter(db: model.capture.triggerLevelDb,
+                    SeamMeter(db: capture.triggerLevelDb,
                               thresholdDb: model.settings.triggerDb)
                         .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
+                        .padding(.bottom, 10)
                 }
 
                 bottomRow(isLandscape: isLandscape)
@@ -151,6 +174,11 @@ struct CaptureView: View {
         }
     }
 
+    /// Height of the bottom controls. One constant, used by the bug, the
+    /// context button and the primary slab, because three separately-tuned
+    /// heights is how a row stops looking like a row.
+    private static let controlHeight: CGFloat = 60
+
     private func bottomRow(isLandscape: Bool) -> some View {
         // Landscape has room for bug and action side by side. Portrait does
         // not — squeezing them together is what turned the primary button into
@@ -160,7 +188,7 @@ struct CaptureView: View {
                 HStack(alignment: .bottom, spacing: 12) {
                     bug
                     Spacer(minLength: 0)
-                    actionCluster.frame(width: 300)
+                    actionCluster.frame(width: 264)
                 }
             } else {
                 VStack(spacing: 10) {
@@ -177,6 +205,7 @@ struct CaptureView: View {
                  value: bugValue,
                  qualifier: bugQualifier,
                  subline: "\(model.sessionSwingCount) swings",
+                 height: Self.controlHeight,
                  onTap: { showStatus = true })
     }
 
@@ -184,17 +213,17 @@ struct CaptureView: View {
         HStack(spacing: 10) {
             if let icon = contextAction {
                 Button(action: icon.action) {
-                    VStack(spacing: 3) {
-                        Image(systemName: icon.symbol).font(.system(size: 20, weight: .bold))
-                        Text(icon.caption).font(Theme.label(9)).tracking(0.6)
+                    VStack(spacing: 2) {
+                        Image(systemName: icon.symbol).font(.system(size: 17, weight: .bold))
+                        Text(icon.caption).font(Theme.label(9)).tracking(0.5)
                     }
-                    .frame(width: 56, height: 74)
+                    .frame(width: 52, height: Self.controlHeight)
                 }
-                .buttonStyle(OutlineButtonStyle())
-                .frame(width: 56)
+                .buttonStyle(OutlineButtonStyle(verticalPadding: 0, cornerRadius: 14, fillsHeight: true))
+                .frame(width: 52)
                 .disabled(icon.disabled)
             }
-            primaryButton.frame(height: 74)
+            primaryButton.frame(height: Self.controlHeight)
         }
     }
 
@@ -203,25 +232,25 @@ struct CaptureView: View {
         case .starting:
             Button {} label: { Text("Starting camera…") }
                 .buttonStyle(SlabButtonStyle(fill: Theme.surface, textColor: Theme.steel,
-                                             size: 15, verticalPadding: 24))
+                                             size: 14, verticalPadding: 0, fillsHeight: true))
                 .disabled(true)
         case .interrupted:
             Button { model.startCapture() } label: { Text("Retry") }
-                .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 24))
+                .buttonStyle(SlabButtonStyle(size: 17, verticalPadding: 0, fillsHeight: true))
         case .needsSetup:
             Button { openSetup() } label: { Text("1 · Set up camera") }
-                .buttonStyle(SlabButtonStyle(size: 17, verticalPadding: 24))
+                .buttonStyle(SlabButtonStyle(size: 15, verticalPadding: 0, fillsHeight: true))
         case .ready:
             Button { model.arm() } label: { Text("2 · Arm") }
-                .buttonStyle(SlabButtonStyle(size: 21, verticalPadding: 24))
+                .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 0, fillsHeight: true))
         case .armed, .analysing:
             Button { model.disarm() } label: { Text("Stop") }
                 .buttonStyle(SlabButtonStyle(fill: Theme.fail, textColor: .white,
-                                             size: 21, verticalPadding: 24))
+                                             size: 19, verticalPadding: 0, fillsHeight: true))
         case .recording:
             Button {} label: { Text("Stop") }
                 .buttonStyle(SlabButtonStyle(fill: Theme.fail, textColor: .white,
-                                             size: 21, verticalPadding: 24))
+                                             size: 19, verticalPadding: 0, fillsHeight: true))
                 .disabled(true)
         }
     }
@@ -233,7 +262,7 @@ struct CaptureView: View {
         case .ready:
             return ("viewfinder", "FRAME", false, { openSetup() })
         case .armed, .recording, .analysing:
-            return ("bolt.fill", "MANUAL", model.capture.isRecordingClip,
+            return ("bolt.fill", "MANUAL", capture.isRecordingClip,
                     { model.triggerManually() })
         }
     }
@@ -256,7 +285,7 @@ struct CaptureView: View {
             // bug into a paragraph, which is not what a glanceable readout is.
             return "Tap the ball"
         case .ready:
-            if let m = model.wizard.derivedDistanceM { return String(format: "%.1f", m) }
+            if let m = wizard.derivedDistanceM { return String(format: "%.1f", m) }
             return "SET"
         case .analysing:
             return "\(Int((model.analysisProgress ?? 0) * 100))"
@@ -268,9 +297,9 @@ struct CaptureView: View {
     }
 
     private var bugQualifier: (text: String, color: Color)? {
-        guard hudState == .ready, model.wizard.derivedDistanceM != nil else { return nil }
-        if model.wizard.isDistanceIdeal { return ("good", Theme.pass) }
-        if model.wizard.isDistanceAcceptable { return ("ok", Theme.yellow) }
+        guard hudState == .ready, wizard.derivedDistanceM != nil else { return nil }
+        if wizard.isDistanceIdeal { return ("good", Theme.pass) }
+        if wizard.isDistanceAcceptable { return ("ok", Theme.yellow) }
         return ("move", Theme.warn)
     }
 
@@ -278,31 +307,35 @@ struct CaptureView: View {
 
     private var exceptionChips: [(text: String, symbol: String, color: Color)] {
         var out: [(String, String, Color)] = []
-        if model.capture.interruptionMessage != nil {
+        if capture.interruptionMessage != nil {
             out.append(("Camera paused", "exclamationmark.triangle.fill", Theme.fail))
         }
-        if model.capture.droppedFrameCount > 0 {
-            out.append(("\(model.capture.droppedFrameCount) dropped",
+        if capture.droppedFrameCount > 0 {
+            out.append(("\(capture.droppedFrameCount) dropped",
                         "exclamationmark.triangle.fill", Theme.warn))
         }
-        if model.capture.suppressedTriggerCount > 0 {
-            out.append(("\(model.capture.suppressedTriggerCount) ignored",
+        if capture.suppressedTriggerCount > 0 {
+            out.append(("\(capture.suppressedTriggerCount) ignored",
                         "bolt.slash.fill", Theme.warn))
         }
-        if model.settings.requireHitter, model.capture.isArmed, !model.capture.hitterPresent {
+        if model.settings.requireHitter, capture.isArmed, !capture.hitterPresent {
             out.append(("No hitter", "person.slash.fill", Theme.warn))
         }
-        if model.capture.status == .running, model.capture.fps < SLA.targetFPS - 1 {
-            out.append(("\(Int(model.capture.fps)) fps", "speedometer", Theme.fail))
+        if capture.status == .running, capture.fps < SLA.targetFPS - 1 {
+            out.append(("\(Int(capture.fps)) fps", "speedometer", Theme.fail))
         }
         return out
     }
 
+    /// A plain button and a confirmation dialog rather than a `Menu`.
+    ///
+    /// `Menu` re-evaluates its label and its content closure on every
+    /// invalidation of the enclosing view, which is what made switching
+    /// setting feel laggy while the HUD was rebuilding underneath it. A
+    /// dialog is presented once and is nobody's child.
     private var settingMenu: some View {
-        Menu {
-            ForEach(SwingSetting.allCases) { setting in
-                Button(setting.displayName) { model.currentSetting = setting }
-            }
+        Button {
+            showSettingPicker = true
         } label: {
             HStack(spacing: 4) {
                 Text(model.currentSetting.displayName.uppercased())
@@ -315,7 +348,16 @@ struct CaptureView: View {
             .foregroundStyle(Theme.yellow)
             .frame(height: 44)
         }
+        .buttonStyle(.plain)
+        .confirmationDialog("Which setting?", isPresented: $showSettingPicker,
+                            titleVisibility: .visible) {
+            ForEach(SwingSetting.allCases) { setting in
+                Button(setting.displayName) { model.currentSetting = setting }
+            }
+        }
     }
+
+    @State private var showSettingPicker = false
 
     // MARK: - Result and escape
 
@@ -368,26 +410,26 @@ struct CaptureView: View {
         // Measuring is allowed whenever there is no scale yet — not only while
         // the setup panel is open. The HUD says "tap the ball in the picture",
         // and it has to be true wherever that text is on screen.
-        guard showSetup || model.wizard.scaleSource == .none else {
-            model.capture.lockExposureAndFocus(at: devicePoint)
+        guard showSetup || wizard.scaleSource == .none else {
+            capture.lockExposureAndFocus(at: devicePoint)
             return
         }
-        if !model.capture.wantsLiveMeasurement {
+        if !capture.wantsLiveMeasurement {
             // Frames are only converted for measurement on demand; the first
             // tap after landing on the screen arms that and asks again.
-            model.capture.wantsLiveMeasurement = true
+            capture.wantsLiveMeasurement = true
         }
         tapViewPoint = viewPoint
         foundBall = false
         measuring = true
-        model.capture.lockExposureAndFocus(at: devicePoint)
-        model.capture.measure(atDevicePoint: devicePoint,
-                              detector: model.settings.detector) { result in
+        capture.lockExposureAndFocus(at: devicePoint)
+        capture.measure(atDevicePoint: devicePoint,
+                        detector: model.settings.detector) { result in
             measuring = false
             lastResult = result
             if case .found(let m) = result {
-                model.wizard.applyBallMeasurement(diameterPx: m.diameterPx,
-                                                  atX: m.x, atY: m.y)
+                wizard.applyBallMeasurement(diameterPx: m.diameterPx,
+                                            atX: m.x, atY: m.y)
                 foundBall = true
             }
         }
@@ -397,7 +439,7 @@ struct CaptureView: View {
     /// looking where you pointed. Positioned in raw screen coordinates, in a
     /// full-bleed space matching the preview view the gesture came from.
     @ViewBuilder private var tapMarker: some View {
-        if let point = tapViewPoint, showSetup || model.wizard.scaleSource == .none {
+        if let point = tapViewPoint, showSetup || wizard.scaleSource == .none {
             GeometryReader { _ in
                 Circle()
                     .strokeBorder(foundBall ? Theme.pass : Theme.warn, lineWidth: 2.5)
@@ -418,18 +460,18 @@ struct CaptureView: View {
             return
         }
         model.startCapture()
-        model.wizard.startSensors()
+        wizard.startSensors()
         if !hasCompletedFirstSetup { openSetup() }
     }
 
     private func openSetup() {
         showSetup = true
-        model.capture.wantsLiveMeasurement = true
+        capture.wantsLiveMeasurement = true
     }
 
     private func closeSetup() {
         showSetup = false
-        model.capture.wantsLiveMeasurement = false
+        capture.wantsLiveMeasurement = false
         hasCompletedFirstSetup = true
     }
 }

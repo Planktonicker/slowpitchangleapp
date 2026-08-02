@@ -52,19 +52,23 @@ final class AppModel: ObservableObject {
             self?.banner = Banner(kind: .error, text: message)
         }
 
-        // SwiftUI observes AppModel, not the objects hanging off it — a
-        // nested ObservableObject's @Published changes never invalidate a
-        // view that reached it via `model.capture...`. Republish both, or
-        // the bubble level, distance readout and trigger meter render once
-        // and freeze.
-        capture.objectWillChange
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
-        wizard.objectWillChange
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.objectWillChange.send() }
-            .store(in: &cancellables)
+        // NOT done here: republishing capture.objectWillChange and
+        // wizard.objectWillChange into this object's own objectWillChange.
+        //
+        // It looks like the obvious fix for "SwiftUI observes AppModel, not
+        // the objects hanging off it", and it works — by invalidating every
+        // view in the app twenty times a second. The trigger meter publishes
+        // at 10 Hz and the level sensor at 10 Hz, so every one of those ticks
+        // re-evaluated the whole TabView: the capture HUD, the setup overlay,
+        // and every other tab the user had visited, including ValidationView,
+        // which rebuilds its scoreboard from every stored swing each time.
+        // That is what made the setting menu feel laggy — it was competing
+        // for a main thread already doing twenty full layout passes a second
+        // next to a 240fps capture session.
+        //
+        // Instead, the two views that need live camera and placement state
+        // hold them as `@ObservedObject` directly (see `CaptureScreen`), so a
+        // 10 Hz reading invalidates the HUD and nothing else.
 
         // Field of view and frame width are only known once the capture
         // format has been chosen, and the plate scale check needs both.
