@@ -161,6 +161,19 @@ struct SwingDetailView: View {
                 }
                 .font(.callout)
             }
+            if let u = swing.undercutIn {
+                HStack {
+                    Text("Contact").foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "%+.2f in", u)).monospacedDigit()
+                    Text(swing.contactQuality.label)
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .foregroundStyle(contactColour)
+                }
+                .font(.callout)
+                Text("How far the barrel centre passed under (+) or over (−) the ball centre — measured tape-to-ball, so it reads true when contact happens near the tape. Slightly under (~½–1 in) puts backspin and carry on the ball; over it drives it into the ground.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             detail("Frames on the barrel", swing.batFrames.map(String.init) ?? "—")
             Text("Bat speed is the barrel-tape speed at contact, converted with the same scale the exit-velocity reading uses. Smash factor is exit velocity ÷ bat speed — how flush the contact was; ~1.35+ is a well-struck ball. It's exact off a tee and approximate off live pitching, where the ball carries its own speed into the collision.")
                 .font(.caption).foregroundStyle(.secondary)
@@ -175,6 +188,14 @@ struct SwingDetailView: View {
         case .fair: return Theme.yellow
         case .poor: return Theme.fail
         case .unknown: return Theme.steel
+        }
+    }
+
+    private var contactColour: Color {
+        switch swing.contactQuality {
+        case .centered, .underCarry: return Theme.pass
+        case .topped, .underPopup: return Theme.warn
+        case .implausible, .unknown: return Theme.steel
         }
     }
 

@@ -105,6 +105,63 @@ enum SLA {
     static func inSlowpitchLaunchWindow(_ launchAngleDeg: Double) -> Bool {
         launchAngleDeg >= slowpitchLaunchLo && launchAngleDeg <= slowpitchLaunchHi
     }
+
+    // MARK: - Contact offset ("undercut")
+
+    /// Max legal slow-pitch barrel (2.25 in). Matches `sla_common.py`.
+    static let batBarrelDiameterM = 2.25 * 0.0254
+    static let inchesPerM = 39.3701
+
+    /// Centres farther apart than the two radii cannot have touched: the tape
+    /// was not at the contact point, or a fit went wrong. Reading discarded.
+    static let contactPlausibleM = (ballDiameterM + batBarrelDiameterM) / 2
+
+    /// Undercut bands (metres), positive = barrel centre BELOW ball centre.
+    /// Nathan's collision model puts max-carry undercut ~0.5-1.2 in; coaching
+    /// guidance for labels, not validated slow-pitch norms.
+    static let undercutToppedBelowM = -0.006
+    static let undercutCenteredMaxM = 0.010
+    static let undercutCarryMaxM = 0.030
+
+    /// Vertical offset of barrel centre below ball centre at contact, metres.
+    /// Image y grows down, so bat below ball -> positive -> backspin/loft.
+    /// Port of `undercut_m`.
+    static func undercutM(ballY0Px: Double, batY0Px: Double,
+                          scaleMPerPx: Double) -> Double {
+        (batY0Px - ballY0Px) * scaleMPerPx
+    }
+}
+
+/// Where the barrel met the ball vertically. Raw values match the strings
+/// returned by `contact_quality` in `sla_common.py` so fixtures compare
+/// directly. This is the side-view-honest half of b4-app's Bat Contact Point:
+/// knob-to-tip position is foreshortened from a side-on camera, but the
+/// vertical miss — the thing that decides topped vs flush vs popup — is
+/// exactly what a side view measures well.
+enum ContactQuality: String, Codable, Sendable {
+    case unknown, implausible, topped, centered
+    case underCarry = "under_carry"
+    case underPopup = "under_popup"
+
+    init(undercutM u: Double?) {
+        guard let u else { self = .unknown; return }
+        if abs(u) > SLA.contactPlausibleM { self = .implausible }
+        else if u < SLA.undercutToppedBelowM { self = .topped }
+        else if u <= SLA.undercutCenteredMaxM { self = .centered }
+        else if u <= SLA.undercutCarryMaxM { self = .underCarry }
+        else { self = .underPopup }
+    }
+
+    var label: String {
+        switch self {
+        case .unknown: return "—"
+        case .implausible: return "Not readable"
+        case .topped: return "Over the ball"
+        case .centered: return "Centered"
+        case .underCarry: return "Under it — carry"
+        case .underPopup: return "Way under it"
+        }
+    }
 }
 
 /// Coarse label for a smash-factor reading. Raw values match the strings

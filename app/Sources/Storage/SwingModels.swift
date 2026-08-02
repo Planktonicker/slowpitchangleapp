@@ -98,8 +98,16 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     /// Exit velocity ÷ bat speed (collision efficiency / b4-app's "flush"),
     /// exact off a tee and approximate off live pitching. `nil` without bat.
     var smashFactor: Double?
+    /// Vertical contact offset in inches: how far the barrel centre passed
+    /// BELOW the ball centre at contact (Nathan's "undercut"). Positive =
+    /// backspin/loft, negative = over the ball. `nil` when the bat was not
+    /// tracked or the reading failed the geometric plausibility gate.
+    var undercutIn: Double?
 
     var smashQuality: SmashQuality { SmashQuality(smash: smashFactor) }
+    var contactQuality: ContactQuality {
+        ContactQuality(undercutM: undercutIn.map { $0 / SLA.inchesPerM })
+    }
 
     // G3 ground truth, entered by hand after a fly ball
     var hangS: Double?
@@ -151,6 +159,15 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
             self.batSpeedMph = bs * SLA.mphPerMps
             self.smashFactor = SLA.smashFactor(exitVeloMps: m.exitVeloMps,
                                                batSpeedMps: bs)
+
+            // Contact offset: tape centroid vs ball centre, both extrapolated
+            // to the contact instant. Implausible gaps (centres farther apart
+            // than the two radii) are discarded, not displayed.
+            let u = SLA.undercutM(ballY0Px: m.y0Px, batY0Px: bat.contactYPx,
+                                  scaleMPerPx: m.scaleBallMPerPx)
+            if abs(u) <= SLA.contactPlausibleM {
+                self.undercutIn = u * SLA.inchesPerM
+            }
         }
     }
 }

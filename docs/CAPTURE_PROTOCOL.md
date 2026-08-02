@@ -10,7 +10,10 @@ disprove) the measurement approach before any app code exists.
 - Tape measure (or practiced 3-ft paces) for camera distance and carry distances
 - The actual game balls — standard **12 in optic-yellow** slow-pitch softballs
 - A strip of **fluorescent pink/orange tape** wrapped once around the bat barrel
-  (bat tracking is Phase 3, but this footage lets us test barrel visibility early)
+  **at the sweet spot** (~4–6 in from the barrel end). Placement matters twice:
+  attack angle is measured at the tape, and the contact-offset ("undercut")
+  reading assumes contact happens near the tape — put it where you actually
+  hit the ball.
 - Paper + pen for the clip log (template at the bottom) and a marker card to
   "slate" clips
 

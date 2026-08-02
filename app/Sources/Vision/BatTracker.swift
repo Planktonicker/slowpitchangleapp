@@ -15,6 +15,10 @@ struct BatMetrics: Equatable, Codable, Sendable {
     var pathPx: [CGPoint]
     var vxPxS: Double
     var vyPxS: Double
+    /// Tape centroid at contact (t = 0 of the fit), in image pixels. Paired
+    /// with the ball's position at t0 for the contact-offset (undercut) read.
+    var contactXPx: Double
+    var contactYPx: Double
 
     /// The barrel path is measured over a much shorter window than the ball
     /// flight and from a single side-on view, so treat it as indicative.
@@ -106,7 +110,9 @@ enum BatTracker {
             fitRmsPx: rms,
             pathPx: zip(xs, ys).map { CGPoint(x: $0, y: $1) },
             vxPxS: vx,
-            vyPxS: vy
+            vyPxS: vy,
+            contactXPx: fx.c,
+            contactYPx: fy.c
         )
     }
 }

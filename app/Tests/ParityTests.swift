@@ -27,6 +27,7 @@ final class ParityTests: XCTestCase {
         var simulate_flight: [FlightCase]
         var vy0_from_hang_time: [Vy0Case]
         var bat_metrics: [BatCase]
+        var contact_offset: [ContactCase]
     }
 
     struct FitCase: Decodable {
@@ -76,6 +77,8 @@ final class ParityTests: XCTestCase {
         var t0: Double
         var vx_px_s: Double
         var vy_px_s: Double
+        var x0_px: Double
+        var y0_px: Double
         var flags: [String]
     }
 
@@ -112,6 +115,16 @@ final class ParityTests: XCTestCase {
         var bat_speed_mph: Double
         var smash_factor: Double?
         var smash_quality: String
+    }
+
+    struct ContactCase: Decodable {
+        var name: String
+        var ball_y0_px: Double
+        var bat_y0_px: Double
+        var scale_m_per_px: Double
+        var undercut_m: Double
+        var undercut_in: Double
+        var quality: String
     }
 
     private static var fixtures: Fixtures!
@@ -240,6 +253,8 @@ final class ParityTests: XCTestCase {
             assertClose(m.t0, e.t0, "\(c.name) t0")
             assertClose(m.vxPxS, e.vx_px_s, "\(c.name) vx")
             assertClose(m.vyPxS, e.vy_px_s, "\(c.name) vy")
+            assertClose(m.x0Px, e.x0_px, "\(c.name) x0")
+            assertClose(m.y0Px, e.y0_px, "\(c.name) y0")
             XCTAssertEqual(m.nFrames, e.n_frames, "\(c.name) frame count")
 
             switch (m.scaleGravityMPerPx, e.scale_gravity_m_per_px) {
@@ -309,5 +324,30 @@ final class ParityTests: XCTestCase {
             XCTAssertEqual(SmashQuality(smash: smash).rawValue, c.smash_quality,
                            "\(c.name) smash quality")
         }
+    }
+
+    // MARK: - Contact offset / undercut (side-view-honest Bat Contact Point)
+
+    func testContactOffsetMatchesReference() {
+        for c in Self.fixtures.contact_offset {
+            let u = SLA.undercutM(ballY0Px: c.ball_y0_px, batY0Px: c.bat_y0_px,
+                                  scaleMPerPx: c.scale_m_per_px)
+            assertClose(u, c.undercut_m, rel: 1e-9, "\(c.name) undercut m")
+            assertClose(u * SLA.inchesPerM, c.undercut_in, rel: 1e-9,
+                        "\(c.name) undercut in")
+            XCTAssertEqual(ContactQuality(undercutM: u).rawValue, c.quality,
+                           "\(c.name) quality")
+        }
+        XCTAssertEqual(ContactQuality(undercutM: nil), .unknown)
+    }
+
+    func testContactConstantsMatchReference() {
+        let c = Self.fixtures.constants
+        assertClose(SLA.batBarrelDiameterM, c["BAT_BARREL_DIAMETER_M"]!, "barrel diameter")
+        assertClose(SLA.inchesPerM, c["INCHES_PER_M"]!, "inches per m")
+        assertClose(SLA.contactPlausibleM, c["CONTACT_PLAUSIBLE_M"]!, "plausibility limit")
+        assertClose(SLA.undercutToppedBelowM, c["UNDERCUT_TOPPED_BELOW_M"]!, "topped band")
+        assertClose(SLA.undercutCenteredMaxM, c["UNDERCUT_CENTERED_MAX_M"]!, "centered band")
+        assertClose(SLA.undercutCarryMaxM, c["UNDERCUT_CARRY_MAX_M"]!, "carry band")
     }
 }

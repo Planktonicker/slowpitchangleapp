@@ -36,6 +36,11 @@ struct SwingMetrics: Equatable, Codable, Sendable {
     var t0: Double                      // contact time used (s)
     var vxPxS: Double
     var vyPxS: Double                   // down-positive (image coords)
+    /// Ball centre at t0 from the velocity fit (px, raw image coords — the
+    /// roll correction rotates velocities only). Extrapolated when the batter
+    /// hides the first frames. Feeds the contact-offset (undercut) reading.
+    var x0Px: Double = 0
+    var y0Px: Double = 0
     var flags: [SwingFlag]
 
     var highConfidence: Bool { flags.isEmpty }

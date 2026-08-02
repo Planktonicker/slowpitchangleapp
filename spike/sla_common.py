@@ -102,6 +102,11 @@ class SwingMetrics:
     t0: float                              # contact time used (s)
     vx_px_s: float
     vy_px_s: float                         # down-positive (image coords)
+    # Ball centre at t0 from the velocity fit (px, raw image coords — the roll
+    # correction rotates velocities only). Extrapolated when the batter hides
+    # the first frames. Feeds the contact-offset (undercut) measurement.
+    x0_px: float = 0.0
+    y0_px: float = 0.0
     flags: list[str] = field(default_factory=list)
 
     @property
@@ -520,6 +525,8 @@ def analyze_track(
         t0=t0,
         vx_px_s=vx,
         vy_px_s=vy,
+        x0_px=float(cx[2]),
+        y0_px=float(cy[2]),
         flags=flags,
     )
 
@@ -639,6 +646,76 @@ def smash_quality(smash: float | None) -> str:
 def in_slowpitch_launch_window(launch_angle_deg: float) -> bool:
     """True when a launch angle sits in the slow-pitch line-drive band."""
     return SLOWPITCH_LAUNCH_LO <= launch_angle_deg <= SLOWPITCH_LAUNCH_HI
+
+
+# ---------------------------------------------------------------------------
+# Contact offset ("undercut") — the side-view-honest half of b4-app's
+# Bat Contact Point
+# ---------------------------------------------------------------------------
+#
+# b4-app reports WHERE on the bat the ball struck (knob-to-tip ratio). From a
+# side-on camera the bat points nearly along the optical axis at contact, so
+# the knob-to-tip axis is foreshortened and that ratio is not honestly
+# measurable here. What the side view measures WELL is the VERTICAL offset
+# between the barrel centre and the ball centre at contact — Alan Nathan's
+# "undercut distance", the quantity that decides topped vs flush vs popup and
+# sets backspin. Sign: positive = barrel centre passed BELOW the ball centre.
+#
+# The barrel position at contact comes from the tape-path fit evaluated at t0,
+# the ball position from the velocity fit at t0 (x0_px/y0_px). Caveat, stated
+# in the UI: the tape centroid stands in for the barrel at the contact point,
+# so the reading is accurate when contact happens near the tape — which is why
+# CAPTURE_PROTOCOL.md puts the tape at the sweet spot. Bat droop between tape
+# and true contact point adds bias when contact is far from the tape; the
+# plausibility gate below catches the gross cases.
+
+BAT_BARREL_DIAMETER_M = 2.25 * 0.0254   # max legal slow-pitch barrel (2.25 in)
+INCHES_PER_M = 39.3701
+
+# Centres farther apart than the two radii cannot have touched: the tape was
+# not at the contact point (or a fit went wrong). Reading is discarded.
+CONTACT_PLAUSIBLE_M = (BALL_DIAMETER_M + BAT_BARREL_DIAMETER_M) / 2
+
+# Undercut bands (metres). Nathan's collision model puts max-carry undercut
+# around 0.5-1.2 in for typical bat/ball speeds; near-centred contact makes
+# line drives; hitting the top half tops the ball into the ground. Coaching
+# guidance for labels, NOT validated slow-pitch norms.
+UNDERCUT_TOPPED_BELOW_M = -0.006    # barrel > 6 mm above centre -> topped
+UNDERCUT_CENTERED_MAX_M = 0.010     # -6..+10 mm -> centred, line-drive zone
+UNDERCUT_CARRY_MAX_M = 0.030        # 10-30 mm -> backspin carry zone
+                                    # beyond -> under the ball, popup territory
+
+CONTACT_UNKNOWN = "unknown"
+CONTACT_IMPLAUSIBLE = "implausible"
+CONTACT_TOPPED = "topped"
+CONTACT_CENTERED = "centered"
+CONTACT_UNDER_CARRY = "under_carry"
+CONTACT_UNDER_POPUP = "under_popup"
+
+
+def undercut_m(ball_y0_px: float, bat_y0_px: float, scale_m_per_px: float) -> float:
+    """Vertical offset of barrel centre below ball centre at contact (metres).
+
+    Image y grows DOWN, so bat_y0 > ball_y0 means the barrel was below the
+    ball centre -> positive undercut -> backspin/loft.
+    """
+    return (bat_y0_px - ball_y0_px) * scale_m_per_px
+
+
+def contact_quality(u_m: float | None) -> str:
+    """Label an undercut reading. None -> unknown; beyond the geometric
+    plausibility limit -> implausible (discard, don't display)."""
+    if u_m is None:
+        return CONTACT_UNKNOWN
+    if abs(u_m) > CONTACT_PLAUSIBLE_M:
+        return CONTACT_IMPLAUSIBLE
+    if u_m < UNDERCUT_TOPPED_BELOW_M:
+        return CONTACT_TOPPED
+    if u_m <= UNDERCUT_CENTERED_MAX_M:
+        return CONTACT_CENTERED
+    if u_m <= UNDERCUT_CARRY_MAX_M:
+        return CONTACT_UNDER_CARRY
+    return CONTACT_UNDER_POPUP
 
 
 # ---------------------------------------------------------------------------

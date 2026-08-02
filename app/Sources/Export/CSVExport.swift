@@ -50,7 +50,7 @@ enum CSVExport {
     static let fullColumns = summaryColumns + [
         "captured_at", "fps", "contact_time_s", "track_duration_s",
         "auto_triggered", "used_vision_hint", "bat_attack_angle_deg",
-        "bat_frames", "bat_speed_mph", "smash_factor",
+        "bat_frames", "bat_speed_mph", "smash_factor", "undercut_in",
         "hang_s", "carry_ft", "model_hang_s", "model_carry_ft",
         "hang_err_pct", "carry_err_pct", "camera_distance_ft", "lens_height_ft",
         "camera_roll_deg", "track_csv", "notes",
@@ -86,6 +86,7 @@ enum CSVExport {
                 s.batFrames.map(String.init) ?? "",
                 s.batSpeedMph.map(round1) ?? "",
                 s.smashFactor.map(round2) ?? "",
+                s.undercutIn.map(round2) ?? "",
                 s.hangS.map(round2) ?? "",
                 s.carryFt.map(round1) ?? "",
                 round2(flight.hangS),

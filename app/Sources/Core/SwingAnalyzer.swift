@@ -124,6 +124,8 @@ enum SwingAnalyzer {
             t0: t0,
             vxPxS: vx,
             vyPxS: vy,
+            x0Px: fitX.c,
+            y0Px: fitY.c,
             flags: flags
         )
     }

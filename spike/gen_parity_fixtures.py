@@ -117,6 +117,8 @@ def metrics_to_json(m: sla.SwingMetrics):
         "t0": m.t0,
         "vx_px_s": m.vx_px_s,
         "vy_px_s": m.vy_px_s,
+        "x0_px": m.x0_px,
+        "y0_px": m.y0_px,
         "flags": m.flags,
     }
 
@@ -261,6 +263,35 @@ def bat_cases():
     ]
 
 
+def contact_offset_cases():
+    """(ball_y0_px, bat_y0_px, scale) hitting every contact_quality band.
+
+    At scale 1/240 m/px, 1 px ~ 4.17 mm. Bands: topped < -6 mm,
+    centred <= +10 mm, carry <= +30 mm, popup beyond, implausible > ~77 mm.
+    """
+    s = 1.0 / 240.0
+    return [
+        # Barrel 4 px (~16.7 mm) below ball centre: carry zone.
+        {"name": "under_carry", "ball_y0_px": 500.0, "bat_y0_px": 504.0,
+         "scale_m_per_px": s},
+        # Dead centre.
+        {"name": "centered_flush", "ball_y0_px": 500.0, "bat_y0_px": 500.5,
+         "scale_m_per_px": s},
+        # Barrel 3 px (~12.5 mm) ABOVE the ball: topped.
+        {"name": "topped", "ball_y0_px": 500.0, "bat_y0_px": 497.0,
+         "scale_m_per_px": s},
+        # Barrel 9 px (~37.5 mm) below: under it, popup territory.
+        {"name": "under_popup", "ball_y0_px": 500.0, "bat_y0_px": 509.0,
+         "scale_m_per_px": s},
+        # 25 px (~104 mm) apart: centres could not have touched.
+        {"name": "implausible_gap", "ball_y0_px": 500.0, "bat_y0_px": 525.0,
+         "scale_m_per_px": s},
+        # Exactly on the topped boundary (-6 mm): stays topped-side check.
+        {"name": "boundary_neg6mm", "ball_y0_px": 500.0,
+         "bat_y0_px": 500.0 - 0.006 / s, "scale_m_per_px": s},
+    ]
+
+
 def flight_cases():
     return [
         {"name": "synth_test_reference", "ev_mps": 65.0 / sla.MPH_PER_MPS,
@@ -309,6 +340,12 @@ def main():
             "SMASH_GOOD_HI": sla.SMASH_GOOD_HI,
             "SLOWPITCH_LAUNCH_LO": sla.SLOWPITCH_LAUNCH_LO,
             "SLOWPITCH_LAUNCH_HI": sla.SLOWPITCH_LAUNCH_HI,
+            "BAT_BARREL_DIAMETER_M": sla.BAT_BARREL_DIAMETER_M,
+            "INCHES_PER_M": sla.INCHES_PER_M,
+            "CONTACT_PLAUSIBLE_M": sla.CONTACT_PLAUSIBLE_M,
+            "UNDERCUT_TOPPED_BELOW_M": sla.UNDERCUT_TOPPED_BELOW_M,
+            "UNDERCUT_CENTERED_MAX_M": sla.UNDERCUT_CENTERED_MAX_M,
+            "UNDERCUT_CARRY_MAX_M": sla.UNDERCUT_CARRY_MAX_M,
         },
         "fit_quadratic": [],
         "solve_gravity_scale": [],
@@ -316,6 +353,7 @@ def main():
         "simulate_flight": [],
         "vy0_from_hang_time": [],
         "bat_metrics": [],
+        "contact_offset": [],
     }
 
     for c in fit_cases():
@@ -364,6 +402,15 @@ def main():
             "smash_quality": sla.smash_quality(smash),
         })
 
+    for c in contact_offset_cases():
+        u = sla.undercut_m(c["ball_y0_px"], c["bat_y0_px"], c["scale_m_per_px"])
+        out["contact_offset"].append({
+            **c,
+            "undercut_m": u,
+            "undercut_in": u * sla.INCHES_PER_M,
+            "quality": sla.contact_quality(u),
+        })
+
     dst = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "..", "app", "Tests", "Fixtures", "parity.json")
     dst = os.path.normpath(dst)
@@ -378,7 +425,8 @@ def main():
           f"{len(out['solve_gravity_scale'])} gravity-scale cases, "
           f"{len(out['analyze_track'])} analyze cases ({n_obs} observations), "
           f"{len(out['simulate_flight'])} flight cases, "
-          f"{len(out['bat_metrics'])} bat cases")
+          f"{len(out['bat_metrics'])} bat cases, "
+          f"{len(out['contact_offset'])} contact-offset cases")
 
 
 if __name__ == "__main__":

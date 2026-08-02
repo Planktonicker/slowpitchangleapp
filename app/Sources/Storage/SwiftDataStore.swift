@@ -40,6 +40,7 @@ final class SwingEntity {
     var batFrames: Int?
     var batSpeedMph: Double?
     var smashFactor: Double?
+    var undercutIn: Double?
 
     var hangS: Double?
     var carryFt: Double?
@@ -75,6 +76,7 @@ final class SwingEntity {
         batFrames = dto.batFrames
         batSpeedMph = dto.batSpeedMph
         smashFactor = dto.smashFactor
+        undercutIn = dto.undercutIn
         hangS = dto.hangS
         carryFt = dto.carryFt
         cameraDistanceFt = dto.cameraDistanceFt
@@ -107,6 +109,7 @@ final class SwingEntity {
         batFrames = dto.batFrames
         batSpeedMph = dto.batSpeedMph
         smashFactor = dto.smashFactor
+        undercutIn = dto.undercutIn
         hangS = dto.hangS
         carryFt = dto.carryFt
         cameraDistanceFt = dto.cameraDistanceFt
@@ -141,6 +144,7 @@ final class SwingEntity {
         d.batFrames = batFrames
         d.batSpeedMph = batSpeedMph
         d.smashFactor = smashFactor
+        d.undercutIn = undercutIn
         d.hangS = hangS
         d.carryFt = carryFt
         d.cameraDistanceFt = cameraDistanceFt

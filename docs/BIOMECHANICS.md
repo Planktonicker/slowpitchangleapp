@@ -75,13 +75,32 @@ Reference math is in `spike/sla_common.py` (`bat_speed_mps`, `smash_factor`,
 computes when the bat was tracked with acceptable confidence and the ball scale
 is sound; otherwise it shows "—".
 
+## Shipped now: contact offset ("undercut")
+
+The side-view-honest half of b4-app's Bat Contact Point. At contact the bat
+points nearly along the camera's optical axis, so the knob-to-tip position b4
+reports is foreshortened from a side view and **not** honestly measurable here.
+What the side view measures *well* is the **vertical offset between barrel
+centre and ball centre** — Alan Nathan's "undercut distance", the quantity that
+decides topped vs flush vs popup and sets backspin (~½–1 in under the centre is
+the carry zone).
+
+Computed from two numbers the pipeline already fits: the tape path evaluated at
+contact and the ball's position at contact (both extrapolated through the
+occlusion around impact). Sign: positive = barrel under the ball. Readings
+where the two centres are farther apart than the two radii (~3 in) cannot have
+been a contact — they're discarded by a plausibility gate, not displayed.
+Stated caveat: the tape centroid stands in for the barrel at the contact point,
+so the reading is accurate when contact happens near the tape — which is why
+`CAPTURE_PROTOCOL.md` puts the tape at the sweet spot. Reference math:
+`undercut_m` / `contact_quality` in `sla_common.py`, pinned by
+`ParityTests.testContactOffsetMatchesReference`.
+
 ## Roadmap (in priority order)
 
-1. **Bat Contact Point (BCP)** — where on the barrel the ball struck, as a
-   knob-to-tip ratio, plus the b4-app-style "your best exit velo comes from
-   *this* spot" report. Needs the bat's long-axis endpoints, not just the tape
-   centroid we track today — a real vision addition (detect the barrel line /
-   two ends), so it's the next build, not a free one.
+1. **Knob-to-tip Bat Contact Point** — deferred: needs either a non-side camera
+   angle or barrel-endpoint detection robust to foreshortening. The EV-vs-
+   contact-spot report can proceed from undercut alone (EV vs vertical miss).
 2. **Slow-pitch launch-window guidance** — colour launch angle against the
    slow-pitch line-drive band (~10–25°, distinct from MLB's 25–35°, which
    misleads slow-pitch hitters) and add a "will it clear a 300 ft fence?" carry
