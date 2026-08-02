@@ -147,77 +147,84 @@ struct SetupOverlay: View {
     /// them, and most of the frame left empty for the ball to travel through.
     private var framingGuide: some View {
         GeometryReader { geo in
-            let w = geo.size.width, h = geo.size.height
-            let flip = model.settings.hitterOnLeft ? 1.0 : -1.0
-            // Mirror about the centre when the hitter works the other way.
-            func px(_ nx: Double) -> Double {
-                let centred = nx - 0.5
-                return (0.5 + centred * flip) * w
-            }
-            func py(_ ny: Double) -> Double { ny * h }
-            func pt(_ nx: Double, _ ny: Double) -> CGPoint {
-                CGPoint(x: px(nx), y: py(ny))
-            }
-
-            let stroke = StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
-            let ghost = Theme.yellow.opacity(0.7)
-
-            ZStack {
-                // Hitter, side-on, chest toward the camera side.
-                Path { p in
-                    p.addEllipse(in: CGRect(x: px(0.20) - 0.020 * w, y: py(0.30) - 0.020 * w,
-                                            width: 0.040 * w, height: 0.040 * w))
-                }
-                .stroke(ghost, style: stroke)
-                Path { p in
-                    p.move(to: pt(0.20, 0.345))          // neck
-                    p.addLine(to: pt(0.20, 0.56))        // spine to hips
-                    p.move(to: pt(0.20, 0.56))           // legs
-                    p.addLine(to: pt(0.165, 0.86))
-                    p.move(to: pt(0.20, 0.56))
-                    p.addLine(to: pt(0.245, 0.86))
-                    p.move(to: pt(0.20, 0.40))           // arms forward to the hands
-                    p.addLine(to: pt(0.245, 0.46))
-                    p.move(to: pt(0.245, 0.46))          // bat, cocked back over the shoulder
-                    p.addLine(to: pt(0.165, 0.30))
-                }
-                .stroke(ghost, style: stroke)
-
-                // Tee and ball, in front of the hitter at contact height.
-                Path { p in
-                    p.move(to: pt(0.33, 0.86))
-                    p.addLine(to: pt(0.33, 0.60))
-                }
-                .stroke(ghost, style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
-                Circle()
-                    .strokeBorder(Theme.yellow, lineWidth: 2.5)
-                    .frame(width: 0.045 * w, height: 0.045 * w)
-                    .position(pt(0.33, 0.575))
-
-                // Where the ball goes — the whole reason the frame is composed
-                // this way, and the thing the old guide never said.
-                Path { p in
-                    p.move(to: pt(0.38, 0.55))
-                    p.addQuadCurve(to: pt(0.92, 0.28), control: pt(0.66, 0.34))
-                }
-                .stroke(Theme.yellow.opacity(0.75),
-                        style: StrokeStyle(lineWidth: 2.5, dash: [9, 6]))
-                Path { p in
-                    p.move(to: pt(0.855, 0.255))
-                    p.addLine(to: pt(0.92, 0.28))
-                    p.addLine(to: pt(0.862, 0.318))
-                }
-                .stroke(Theme.yellow, style: stroke)
-
-                guideLabel("STAND HERE", at: pt(0.20, 0.92))
-                guideLabel("FACING THE CAMERA", at: pt(0.20, 0.955), small: true)
-                guideLabel("TEE", at: pt(0.33, 0.92))
-                guideLabel("BALL FLIES THIS WAY", at: pt(0.68, 0.20))
-            }
+            guideDrawing(in: geo.size)
         }
         // Critical: the whole point of the overlay is that taps reach the
         // preview underneath so the user can tap the ball.
         .allowsHitTesting(false)
+    }
+
+    /// Deliberately a plain function rather than a `@ViewBuilder` body: it
+    /// declares local helpers and returns explicitly, neither of which a result
+    /// builder allows.
+    private func guideDrawing(in size: CGSize) -> some View {
+        let w = size.width, h = size.height
+        let flip = model.settings.hitterOnLeft ? 1.0 : -1.0
+        // Mirror about the centre when the hitter works the other way.
+        func px(_ nx: Double) -> Double {
+            let centred = nx - 0.5
+            return (0.5 + centred * flip) * w
+        }
+        func py(_ ny: Double) -> Double { ny * h }
+        func pt(_ nx: Double, _ ny: Double) -> CGPoint {
+            CGPoint(x: px(nx), y: py(ny))
+        }
+
+        let stroke = StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round)
+        let ghost = Theme.yellow.opacity(0.7)
+
+        return ZStack {
+            // Hitter, side-on, chest toward the camera side.
+            Path { p in
+                p.addEllipse(in: CGRect(x: px(0.20) - 0.020 * w, y: py(0.30) - 0.020 * w,
+                                        width: 0.040 * w, height: 0.040 * w))
+            }
+            .stroke(ghost, style: stroke)
+            Path { p in
+                p.move(to: pt(0.20, 0.345))          // neck
+                p.addLine(to: pt(0.20, 0.56))        // spine to hips
+                p.move(to: pt(0.20, 0.56))           // legs
+                p.addLine(to: pt(0.165, 0.86))
+                p.move(to: pt(0.20, 0.56))
+                p.addLine(to: pt(0.245, 0.86))
+                p.move(to: pt(0.20, 0.40))           // arms forward to the hands
+                p.addLine(to: pt(0.245, 0.46))
+                p.move(to: pt(0.245, 0.46))          // bat, cocked back over the shoulder
+                p.addLine(to: pt(0.165, 0.30))
+            }
+            .stroke(ghost, style: stroke)
+
+            // Tee and ball, in front of the hitter at contact height.
+            Path { p in
+                p.move(to: pt(0.33, 0.86))
+                p.addLine(to: pt(0.33, 0.60))
+            }
+            .stroke(ghost, style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
+            Circle()
+                .strokeBorder(Theme.yellow, lineWidth: 2.5)
+                .frame(width: 0.045 * w, height: 0.045 * w)
+                .position(pt(0.33, 0.575))
+
+            // Where the ball goes — the whole reason the frame is composed
+            // this way, and the thing the old guide never said.
+            Path { p in
+                p.move(to: pt(0.38, 0.55))
+                p.addQuadCurve(to: pt(0.92, 0.28), control: pt(0.66, 0.34))
+            }
+            .stroke(Theme.yellow.opacity(0.75),
+                    style: StrokeStyle(lineWidth: 2.5, dash: [9, 6]))
+            Path { p in
+                p.move(to: pt(0.855, 0.255))
+                p.addLine(to: pt(0.92, 0.28))
+                p.addLine(to: pt(0.862, 0.318))
+            }
+            .stroke(Theme.yellow, style: stroke)
+
+            guideLabel("STAND HERE", at: pt(0.20, 0.92))
+            guideLabel("FACING THE CAMERA", at: pt(0.20, 0.955), small: true)
+            guideLabel("TEE", at: pt(0.33, 0.92))
+            guideLabel("BALL FLIES THIS WAY", at: pt(0.68, 0.20))
+        }
     }
 
     private func guideLabel(_ text: String, at point: CGPoint,
