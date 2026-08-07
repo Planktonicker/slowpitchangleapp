@@ -3,6 +3,7 @@
 // Full terms in LICENSE at the repository root. No warranty.
 
 import Foundation
+import ImageIO
 
 /// The capture settings from `docs/CAPTURE_PROTOCOL.md`. Raw values are the
 /// clip-name prefixes `spike/batch_run.py` expects, so clips pulled off the
@@ -126,6 +127,25 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     /// use the optics it was actually filmed with, not whatever lens the phone
     /// happens to be on today.
     var cameraFovDeg: Double?
+    /// Sagittal-plane body measurements. Nil when the body pass was off or the
+    /// pose model never found the hitter. Deliberately no rotation and no
+    /// torque — see `BodyMetrics` and `docs/BIOMECHANICS.md`.
+    var body: BodyMetrics?
+    /// Pose track file, alongside the ball track CSV. Kept for the same reason:
+    /// when a body number looks wrong, the frames it came from are the only way
+    /// to find out why.
+    var poseFilename: String?
+    /// Which way was up in the recorded frames. Stored because re-analysis has
+    /// to show Vision the same scene the capture did; guessing `.up` on a
+    /// sideways clip finds no hitter at all.
+    /// `Int`, not `CGImagePropertyOrientation.RawValue` (`UInt32`): this is
+    /// what actually lands in the database and the CSV, and every other integer
+    /// column is an Int. 1 is `.up`.
+    var visionOrientationRaw: Int = 1
+    var visionOrientation: CGImagePropertyOrientation {
+        get { CGImagePropertyOrientation(rawValue: UInt32(max(0, visionOrientationRaw))) ?? .up }
+        set { visionOrientationRaw = Int(newValue.rawValue) }
+    }
     /// Conditions the camera was in, kept beside the measurement `flags`.
     /// Level no longer blocks arming, so this is what keeps a reading taken on
     /// an off-level tripod honest instead of merely absent.
@@ -171,6 +191,9 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
         self.flags = m.flags
         self.batAttackAngleDeg = analysis.bat?.attackAngleDeg
         self.batFrames = analysis.bat?.nFrames
+        // Only kept when it actually says something: a BodyMetrics with every
+        // field nil is a row of dashes pretending to be a measurement.
+        self.body = (analysis.body?.hasAnything ?? false) ? analysis.body : nil
 
         // Bat speed + smash factor need both the bat velocity (px/s at contact)
         // and the ball-size scale (m/px). Only compute when the bat was tracked

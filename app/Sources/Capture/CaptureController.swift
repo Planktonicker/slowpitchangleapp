@@ -36,6 +36,22 @@ final class CaptureController: NSObject, ObservableObject {
     @Published private(set) var exposureLocked = false
     /// A person is currently detected in frame (pose gate, ~10 Hz).
     @Published private(set) var hitterPresent = false
+    /// The hitter's skeleton in capture-device coordinates, for the setup
+    /// overlay to draw. Populated only while `wantsSkeleton` is set — the pose
+    /// request runs regardless (it is the hitter gate), but converting and
+    /// publishing its joints is pure cost when nothing is drawing them.
+    @Published private(set) var skeleton: [PoseJoint: CGPoint]?
+
+    /// Set while the setup overlay is on screen. See `skeleton`.
+    var wantsSkeleton = false {
+        didSet {
+            guard wantsSkeleton != oldValue else { return }
+            presenceGate.onPose = wantsSkeleton
+                ? { [weak self] joints in self?.skeleton = joints }
+                : nil
+            if !wantsSkeleton { skeleton = nil }
+        }
+    }
     /// Audio impulses that fired with nobody in frame and were ignored.
     @Published private(set) var suppressedTriggerCount = 0
     /// Non-nil while the system holds the camera (phone call, another app).

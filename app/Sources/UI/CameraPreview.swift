@@ -33,11 +33,21 @@ struct CameraPreview: UIViewRepresentable {
     /// screen point (so a marker can be drawn exactly where the finger was —
     /// under a fill crop the two are not a simple scale of each other).
     var onTap: ((_ devicePoint: CGPoint, _ viewPoint: CGPoint) -> Void)?
+    /// Live skeleton in capture-device coordinates, or `nil` to draw nothing.
+    ///
+    /// Drawn inside the preview view rather than as a SwiftUI overlay, because
+    /// the conversion from camera space to screen space is
+    /// `layerPointConverted(fromCaptureDevicePoint:)` — a method on the preview
+    /// layer, which SwiftUI never sees. Hand-rolling that mapping means getting
+    /// the fill crop, the rotation and the mirroring right in two places
+    /// instead of none.
+    var skeleton: [PoseJoint: CGPoint]?
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.controller = controller
         view.onTap = onTap
+        view.skeleton = skeleton
         // Note what is NOT done here: `layer.session = session`. That
         // assignment synchronously mutates a running session's graph on the
         // main thread, and against a 240fps session feeding VideoToolbox it
@@ -49,6 +59,7 @@ struct CameraPreview: UIViewRepresentable {
     func updateUIView(_ view: PreviewView, context: Context) {
         view.controller = controller
         view.onTap = onTap
+        view.skeleton = skeleton
         // A connection that has gone away is a condition that can actually
         // become true, unlike the old identity check against a `let` session.
         if view.videoPreviewLayer.connection == nil {
@@ -64,6 +75,32 @@ struct CameraPreview: UIViewRepresentable {
         weak var controller: CaptureController?
         var onTap: ((CGPoint, CGPoint) -> Void)?
 
+        var skeleton: [PoseJoint: CGPoint]? {
+            didSet { redrawSkeleton() }
+        }
+
+        private let skeletonLayer: CAShapeLayer = {
+            let l = CAShapeLayer()
+            l.fillColor = nil
+            l.strokeColor = Theme.yellowUI.withAlphaComponent(0.95).cgColor
+            l.lineWidth = 3
+            l.lineCap = .round
+            l.lineJoin = .round
+            l.shadowColor = UIColor.black.cgColor
+            l.shadowOpacity = 0.8
+            l.shadowRadius = 3
+            l.shadowOffset = .zero
+            return l
+        }()
+
+        private let jointLayer: CAShapeLayer = {
+            let l = CAShapeLayer()
+            l.fillColor = Theme.yellowUI.cgColor
+            l.strokeColor = UIColor.black.withAlphaComponent(0.6).cgColor
+            l.lineWidth = 1
+            return l
+        }()
+
         override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
 
         var videoPreviewLayer: AVCaptureVideoPreviewLayer {
@@ -78,6 +115,55 @@ struct CameraPreview: UIViewRepresentable {
             // coordinates, and SwiftUI never sees the layer.
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
             addGestureRecognizer(tap)
+            layer.addSublayer(skeletonLayer)
+            layer.addSublayer(jointLayer)
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            skeletonLayer.frame = bounds
+            jointLayer.frame = bounds
+            redrawSkeleton()
+        }
+
+        /// Stroke the segments `PoseJoint.segments` names, skipping any whose
+        /// endpoints the model was not confident about — a skeleton with a
+        /// missing shin is honest; one drawn through a guessed ankle is not.
+        private func redrawSkeleton() {
+            guard let skeleton, !skeleton.isEmpty, bounds.width > 1 else {
+                skeletonLayer.path = nil
+                jointLayer.path = nil
+                return
+            }
+            let layerPoint = { [videoPreviewLayer] (j: PoseJoint) -> CGPoint? in
+                guard let p = skeleton[j] else { return nil }
+                return videoPreviewLayer.layerPointConverted(fromCaptureDevicePoint: p)
+            }
+
+            let bones = CGMutablePath()
+            for chain in PoseJoint.segments {
+                var pending: CGPoint?
+                for joint in chain {
+                    guard let here = layerPoint(joint) else { pending = nil; continue }
+                    if let from = pending {
+                        bones.move(to: from)
+                        bones.addLine(to: here)
+                    }
+                    pending = here
+                }
+            }
+            let dots = CGMutablePath()
+            for joint in PoseJoint.allCases {
+                guard let p = layerPoint(joint) else { continue }
+                dots.addEllipse(in: CGRect(x: p.x - 3.5, y: p.y - 3.5, width: 7, height: 7))
+            }
+            // No implicit animation: at 10 Hz a default 0.25 s position tween
+            // makes every joint lag the body it belongs to.
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            skeletonLayer.path = bones
+            jointLayer.path = dots
+            CATransaction.commit()
         }
 
         @available(*, unavailable)

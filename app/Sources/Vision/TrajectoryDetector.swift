@@ -74,6 +74,9 @@ final class TrajectoryDetector {
 
     private let request: VNDetectTrajectoriesRequest
     private var best: VNTrajectoryObservation?
+    /// The orientation the last frame was submitted with. Vision reports
+    /// results in that oriented space, so `hint()` needs it to map them back.
+    private var lastOrientation: CGImagePropertyOrientation = .up
     private let imageWidth: Int
     private let imageHeight: Int
 
@@ -114,6 +117,9 @@ final class TrajectoryDetector {
         } catch {
             return
         }
+        // Kept for hint(): Vision returns points in the ORIENTED image, so
+        // un-normalizing them needs the same orientation that went in.
+        lastOrientation = orientation
         guard let results = request.results else { return }
         for obs in results {
             if let current = best {
@@ -129,11 +135,15 @@ final class TrajectoryDetector {
     /// The most-supported trajectory seen across the clip, if any.
     func hint() -> TrajectoryHint? {
         guard let obs = best, obs.detectedPoints.count >= 3 else { return nil }
-        // Vision's normalized coordinates put the origin bottom-left; image
-        // space is y-down.
+        // Vision's normalized coordinates are measured on the ORIENTED image,
+        // origin bottom-left. Mapping them back onto the buffer therefore has
+        // to undo the orientation as well as the y flip — assuming `.up` here
+        // put the corridor in the wrong half of a sideways frame, which reads
+        // downstream as a hint that admits nothing.
         let pts = obs.detectedPoints.map { p in
-            CGPoint(x: p.x * CGFloat(imageWidth),
-                    y: (1 - p.y) * CGFloat(imageHeight))
+            VisionGeometry.imagePoint(fromVision: p.location,
+                                      orientation: lastOrientation,
+                                      width: imageWidth, height: imageHeight)
         }
         let range = obs.timeRange
         let start = range.start.isNumeric ? range.start.seconds : 0

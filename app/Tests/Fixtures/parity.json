@@ -38,7 +38,9 @@
   "UNDERCUT_TOPPED_BELOW_M": -0.006,
   "UNDERCUT_CENTERED_MAX_M": 0.01,
   "UNDERCUT_CARRY_MAX_M": 0.03,
-  "TILT_CORRECTABLE_MAX_DEG": 20.0
+  "TILT_CORRECTABLE_MAX_DEG": 20.0,
+  "JOINT_CONFIDENCE_MIN": 0.3,
+  "HEAD_DRIFT_IMPLAUSIBLE_M": 0.4
  },
  "fit_quadratic": [
   {
@@ -7899,6 +7901,164 @@
    "expected_y": 180.0,
    "expected_magnification": 1.0,
    "expected_diameter_px": 36.0
+  }
+ ],
+ "body_angles": [
+  {
+   "name": "straight_leg",
+   "ax": 500.0,
+   "ay": 400.0,
+   "bx": 500.0,
+   "by": 550.0,
+   "cx": 500.0,
+   "cy": 700.0,
+   "expected": 180.0
+  },
+  {
+   "name": "right_angle",
+   "ax": 400.0,
+   "ay": 550.0,
+   "bx": 500.0,
+   "by": 550.0,
+   "cx": 500.0,
+   "cy": 650.0,
+   "expected": 90.0
+  },
+  {
+   "name": "flexed_knee",
+   "ax": 470.0,
+   "ay": 410.0,
+   "bx": 500.0,
+   "by": 550.0,
+   "cx": 560.0,
+   "cy": 690.0,
+   "expected": 168.89616656336392
+  },
+  {
+   "name": "coincident",
+   "ax": 470.0,
+   "ay": 410.0,
+   "bx": 500.0,
+   "by": 550.0,
+   "cx": 500.0,
+   "cy": 550.0,
+   "expected": null
+  }
+ ],
+ "body_tilts": [
+  {
+   "name": "upright",
+   "hip_x": 500.0,
+   "hip_y": 500.0,
+   "shoulder_x": 500.0,
+   "shoulder_y": 350.0,
+   "expected": 0.0
+  },
+  {
+   "name": "leaning_forward",
+   "hip_x": 500.0,
+   "hip_y": 500.0,
+   "shoulder_x": 560.0,
+   "shoulder_y": 350.0,
+   "expected": 21.80140948635181
+  },
+  {
+   "name": "leaning_back",
+   "hip_x": 500.0,
+   "hip_y": 500.0,
+   "shoulder_x": 440.0,
+   "shoulder_y": 350.0,
+   "expected": -21.80140948635181
+  },
+  {
+   "name": "degenerate",
+   "hip_x": 500.0,
+   "hip_y": 500.0,
+   "shoulder_x": 500.0,
+   "shoulder_y": 500.0,
+   "expected": null
+  }
+ ],
+ "body_distances": [
+  {
+   "name": "head_still",
+   "x0": 500.0,
+   "y0": 300.0,
+   "x1": 506.0,
+   "y1": 303.0,
+   "scale_m_per_px": 0.004166666666666667,
+   "expected": 0.02795084971874737
+  },
+  {
+   "name": "head_lunge",
+   "x0": 500.0,
+   "y0": 300.0,
+   "x1": 560.0,
+   "y1": 320.0,
+   "scale_m_per_px": 0.004166666666666667,
+   "expected": 0.26352313834736496
+  },
+  {
+   "name": "no_movement",
+   "x0": 500.0,
+   "y0": 300.0,
+   "x1": 500.0,
+   "y1": 300.0,
+   "scale_m_per_px": 0.004166666666666667,
+   "expected": 0.0
+  }
+ ],
+ "body_strides": [
+  {
+   "name": "normal_stride",
+   "load_x": 520.0,
+   "contact_x": 400.0,
+   "scale_m_per_px": 0.004166666666666667,
+   "expected": 0.5
+  },
+  {
+   "name": "no_stride",
+   "load_x": 520.0,
+   "contact_x": 520.0,
+   "scale_m_per_px": 0.004166666666666667,
+   "expected": 0.0
+  },
+  {
+   "name": "mirrored_stride",
+   "load_x": 400.0,
+   "contact_x": 520.0,
+   "scale_m_per_px": 0.004166666666666667,
+   "expected": 0.5
+  }
+ ],
+ "body_drift_gate": [
+  {
+   "drift_m": null,
+   "expected": false
+  },
+  {
+   "drift_m": 0.0,
+   "expected": true
+  },
+  {
+   "drift_m": 0.05,
+   "expected": true
+  },
+  {
+   "drift_m": 0.39,
+   "expected": true
+  },
+  {
+   "drift_m": 0.4,
+   "expected": true
+  },
+  {
+   "drift_m": 0.41,
+   "expected": false
+  },
+  {
+   "drift_m": 1.2,
+   "expected": false
   }
  ]
 }

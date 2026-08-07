@@ -330,6 +330,71 @@ def focal_cases():
     ]
 
 
+def _json_number(v):
+    """NaN is not JSON. It is also a real, meaningful result here — a degenerate
+    joint must produce NaN and not a plausible angle — so it is encoded as null
+    and the Swift test asserts NaN for a null expectation. Writing a bare NaN
+    would produce a file Foundation's JSONDecoder refuses outright, taking every
+    other parity assertion down with it."""
+    return None if v != v else v
+
+
+def body_cases():
+    """Sagittal-plane body geometry, covering every branch.
+
+    Points are image pixels (y down) at 240 px/m — the scale the ball pipeline
+    produces at the protocol distance. The degenerate cases matter as much as
+    the ordinary ones: a pose model that loses a joint hands back two coincident
+    points, and the port must return NaN there rather than a plausible angle.
+    """
+    s = 1.0 / 240.0
+    return {
+        "angles": [
+            # Straight leg: hip, knee, ankle collinear -> 180.
+            {"name": "straight_leg", "ax": 500.0, "ay": 400.0,
+             "bx": 500.0, "by": 550.0, "cx": 500.0, "cy": 700.0},
+            {"name": "right_angle", "ax": 400.0, "ay": 550.0,
+             "bx": 500.0, "by": 550.0, "cx": 500.0, "cy": 650.0},
+            # Typical flexed front knee at contact.
+            {"name": "flexed_knee", "ax": 470.0, "ay": 410.0,
+             "bx": 500.0, "by": 550.0, "cx": 560.0, "cy": 690.0},
+            # Degenerate: knee and ankle on the same pixel -> NaN.
+            {"name": "coincident", "ax": 470.0, "ay": 410.0,
+             "bx": 500.0, "by": 550.0, "cx": 500.0, "cy": 550.0},
+        ],
+        "tilts": [
+            {"name": "upright", "hip_x": 500.0, "hip_y": 500.0,
+             "shoulder_x": 500.0, "shoulder_y": 350.0},
+            {"name": "leaning_forward", "hip_x": 500.0, "hip_y": 500.0,
+             "shoulder_x": 560.0, "shoulder_y": 350.0},
+            {"name": "leaning_back", "hip_x": 500.0, "hip_y": 500.0,
+             "shoulder_x": 440.0, "shoulder_y": 350.0},
+            {"name": "degenerate", "hip_x": 500.0, "hip_y": 500.0,
+             "shoulder_x": 500.0, "shoulder_y": 500.0},
+        ],
+        "distances": [
+            {"name": "head_still", "x0": 500.0, "y0": 300.0,
+             "x1": 506.0, "y1": 303.0, "scale_m_per_px": s},
+            {"name": "head_lunge", "x0": 500.0, "y0": 300.0,
+             "x1": 560.0, "y1": 320.0, "scale_m_per_px": s},
+            {"name": "no_movement", "x0": 500.0, "y0": 300.0,
+             "x1": 500.0, "y1": 300.0, "scale_m_per_px": s},
+        ],
+        "strides": [
+            {"name": "normal_stride", "load_x": 520.0, "contact_x": 400.0,
+             "scale_m_per_px": s},
+            {"name": "no_stride", "load_x": 520.0, "contact_x": 520.0,
+             "scale_m_per_px": s},
+            # Mirrored hitter: the foot travels the other way, same length.
+            {"name": "mirrored_stride", "load_x": 400.0, "contact_x": 520.0,
+             "scale_m_per_px": s},
+        ],
+        # Head-drift plausibility gate, both sides of the limit and the
+        # no-reading case.
+        "drift_gate": [None, 0.0, 0.05, 0.39, 0.40, 0.41, 1.2],
+    }
+
+
 def flight_cases():
     return [
         {"name": "synth_test_reference", "ev_mps": 65.0 / sla.MPH_PER_MPS,
@@ -395,6 +460,8 @@ def main():
             "UNDERCUT_CENTERED_MAX_M": sla.UNDERCUT_CENTERED_MAX_M,
             "UNDERCUT_CARRY_MAX_M": sla.UNDERCUT_CARRY_MAX_M,
             "TILT_CORRECTABLE_MAX_DEG": sla.TILT_CORRECTABLE_MAX_DEG,
+            "JOINT_CONFIDENCE_MIN": sla.JOINT_CONFIDENCE_MIN,
+            "HEAD_DRIFT_IMPLAUSIBLE_M": sla.HEAD_DRIFT_IMPLAUSIBLE_M,
         },
         "fit_quadratic": [],
         "solve_gravity_scale": [],
@@ -405,6 +472,11 @@ def main():
         "contact_offset": [],
         "focal_px_from_fov": [],
         "rectify_tilt": [],
+        "body_angles": [],
+        "body_tilts": [],
+        "body_distances": [],
+        "body_strides": [],
+        "body_drift_gate": [],
     }
 
     for c in fit_cases():
@@ -478,12 +550,38 @@ def main():
             "expected_diameter_px": c["diameter_px"] * mag,
         })
 
+    body = body_cases()
+    for c in body["angles"]:
+        out["body_angles"].append({
+            **c, "expected": _json_number(sla.sagittal_angle_deg(
+                c["ax"], c["ay"], c["bx"], c["by"], c["cx"], c["cy"])),
+        })
+    for c in body["tilts"]:
+        out["body_tilts"].append({
+            **c, "expected": _json_number(sla.spine_tilt_deg(
+                c["hip_x"], c["hip_y"], c["shoulder_x"], c["shoulder_y"])),
+        })
+    for c in body["distances"]:
+        out["body_distances"].append({
+            **c, "expected": sla.planar_distance_m(
+                c["x0"], c["y0"], c["x1"], c["y1"], c["scale_m_per_px"]),
+        })
+    for c in body["strides"]:
+        out["body_strides"].append({
+            **c, "expected": sla.stride_length_m(
+                c["load_x"], c["contact_x"], c["scale_m_per_px"]),
+        })
+    for d in body["drift_gate"]:
+        out["body_drift_gate"].append({
+            "drift_m": d, "expected": sla.head_drift_plausible(d),
+        })
+
     dst = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "..", "app", "Tests", "Fixtures", "parity.json")
     dst = os.path.normpath(dst)
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     with open(dst, "w") as f:
-        json.dump(out, f, indent=1, sort_keys=False)
+        json.dump(out, f, indent=1, sort_keys=False, allow_nan=False)
         f.write("\n")
 
     n_obs = sum(len(c["track"]) for c in out["analyze_track"])
@@ -494,7 +592,8 @@ def main():
           f"{len(out['simulate_flight'])} flight cases, "
           f"{len(out['bat_metrics'])} bat cases, "
           f"{len(out['contact_offset'])} contact-offset cases, "
-          f"{len(out['rectify_tilt'])} tilt-rectify cases")
+          f"{len(out['rectify_tilt'])} tilt-rectify cases, "
+          f"{len(out['body_angles']) + len(out['body_tilts']) + len(out['body_distances']) + len(out['body_strides'])} body cases")
 
 
 if __name__ == "__main__":

@@ -60,6 +60,20 @@ enum SLA {
     static let diameterDriftTol = 0.10     // depth-motion (cosine error) flag threshold
     static let residualTolPx = 3.0
 
+    // MARK: - Body pose
+
+    /// Below this Vision confidence a joint is treated as absent rather than as
+    /// a guess. Apple's pose model reports low-confidence joints at
+    /// plausible-looking positions, so using them silently would produce a body
+    /// metric with no body behind it.
+    static let jointConfidenceMin = 0.30
+
+    /// Head movement beyond this is almost certainly the pose model losing the
+    /// hitter rather than the hitter moving. A swing that really moved the head
+    /// 40 cm toward the pitcher would be a lunge past any coaching reference;
+    /// the far likelier explanation is a joint jumping to the umpire.
+    static let headDriftImplausibleM = 0.40
+
     /// Beyond this much camera tilt the rectification is still applied, but the
     /// reading stays flagged: the homography is exact for a pinhole and lens
     /// distortion is not, and a big tilt is exactly what pushes the flight into

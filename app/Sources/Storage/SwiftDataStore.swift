@@ -50,6 +50,13 @@ final class SwingEntity {
     var cameraRollDeg: Double?
     var cameraTiltDeg: Double?
     var cameraFovDeg: Double?
+    var poseFilename: String?
+    var visionOrientationRaw: Int = 1
+    /// `BodyMetrics` as JSON. A blob rather than five nullable columns: they
+    /// are one measurement that is meaningful together, and the set will grow
+    /// as more sagittal metrics are added — each of which would otherwise be a
+    /// schema migration.
+    var bodyJSON: String?
     /// Pipe-separated `CaptureFlag` raw values, same encoding as `flagsRaw`.
     var captureFlagsRaw: String = ""
 
@@ -88,6 +95,9 @@ final class SwingEntity {
         cameraRollDeg = dto.cameraRollDeg
         cameraTiltDeg = dto.cameraTiltDeg
         cameraFovDeg = dto.cameraFovDeg
+        poseFilename = dto.poseFilename
+        visionOrientationRaw = dto.visionOrientationRaw
+        bodyJSON = SwingRecord.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
         notes = dto.notes
     }
@@ -124,6 +134,9 @@ final class SwingEntity {
         cameraRollDeg = dto.cameraRollDeg
         cameraTiltDeg = dto.cameraTiltDeg
         cameraFovDeg = dto.cameraFovDeg
+        poseFilename = dto.poseFilename
+        visionOrientationRaw = dto.visionOrientationRaw
+        bodyJSON = SwingRecord.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
         notes = dto.notes
     }
@@ -162,10 +175,26 @@ final class SwingEntity {
         d.cameraRollDeg = cameraRollDeg
         d.cameraTiltDeg = cameraTiltDeg
         d.cameraFovDeg = cameraFovDeg
+        d.poseFilename = poseFilename
+        d.visionOrientationRaw = visionOrientationRaw
+        d.body = SwingRecord.decodeBody(bodyJSON)
         d.captureFlags = captureFlagsRaw.split(separator: "|")
             .compactMap { CaptureFlag(rawValue: String($0)) }
         d.notes = notes
         return d
+    }
+
+    /// `BodyMetrics` <-> JSON. Failure is silent and lossy on purpose: a body
+    /// measurement is supplementary, and a swing whose exit velocity is intact
+    /// must not fail to load because a body blob could not be read.
+    static func encodeBody(_ body: BodyMetrics?) -> String? {
+        guard let body, let data = try? JSONEncoder().encode(body) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decodeBody(_ json: String?) -> BodyMetrics? {
+        guard let json, let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(BodyMetrics.self, from: data)
     }
 }
 

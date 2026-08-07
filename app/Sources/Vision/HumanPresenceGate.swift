@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Full terms in LICENSE at the repository root. No warranty.
 
+import CoreGraphics
 import CoreVideo
 import Foundation
 import ImageIO
@@ -24,10 +25,16 @@ import Vision
 /// only when several joints are confident, which filters the occasional
 /// phantom the raw request produces on busy backgrounds.
 ///
-/// This gate is presence-only by design. Swing *classification* (is that
-/// motion actually a swing?) belongs to Phase 3 alongside bat tracking; for
-/// eliminating no-human false triggers, presence is sufficient and far more
-/// robust.
+/// Since the pose request is being run anyway, the joints it finds are also
+/// published — in capture-device coordinates, ready for
+/// `layerPointConverted(fromCaptureDevicePoint:)` — so the setup screen can
+/// draw the skeleton it is judging. That costs nothing: `recognizedPoints` was
+/// already being called and its output thrown away.
+///
+/// The gate still makes no claim about whether the motion is a swing. Swing
+/// classification, and the sagittal body metrics, are computed offline from the
+/// recorded clip by `BodyAnalyzer` — for eliminating no-human false triggers,
+/// presence is sufficient and far more robust.
 final class HumanPresenceGate {
 
     /// Seconds a detection stays valid. The hitter crouches, shifts, and
@@ -42,6 +49,14 @@ final class HumanPresenceGate {
 
     /// Called on the main queue whenever detection flips.
     var onPresenceChange: ((Bool) -> Void)?
+
+    /// Called on the main queue with the latest skeleton, in capture-device
+    /// coordinates (normalized, top-left origin) — the space
+    /// `AVCaptureVideoPreviewLayer` converts from. `nil` when nobody was found.
+    ///
+    /// Set to `nil` when nothing is drawing it: the conversion and the main-queue
+    /// hop are pure cost otherwise.
+    var onPose: (([PoseJoint: CGPoint]?) -> Void)?
 
     /// Seconds the gate may go without ever seeing anyone before the caller is
     /// told to stop trusting it. Pose detection can fail for reasons we cannot
@@ -110,6 +125,7 @@ final class HumanPresenceGate {
                                                 orientation: orientation,
                                                 options: [:])
             var detected = false
+            var skeleton: [PoseJoint: CGPoint]?
 
             let pose = VNDetectHumanBodyPoseRequest()
             if (try? handler.perform([pose])) != nil,
@@ -119,6 +135,11 @@ final class HumanPresenceGate {
                     let confident = points.values.filter { $0.confidence >= self.jointConfidence }
                     if confident.count >= self.minimumJoints {
                         detected = true
+                        if self.onPose != nil {
+                            skeleton = Self.deviceSkeleton(from: points,
+                                                           orientation: orientation,
+                                                           minConfidence: self.jointConfidence)
+                        }
                         break
                     }
                 }
@@ -141,10 +162,46 @@ final class HumanPresenceGate {
             if detected { self._lastSeenAt = CACurrentMediaTime() }
             self.lock.unlock()
 
+            if let handoff = self.onPose {
+                DispatchQueue.main.async { handoff(skeleton) }
+            }
+
             if changed {
                 let value = detected
                 DispatchQueue.main.async { self.onPresenceChange?(value) }
             }
         }
+    }
+
+    /// Apple's joint names -> ours, and Vision's normalized coordinates ->
+    /// capture-device coordinates.
+    ///
+    /// Shared with the offline pass in `ClipAnalyzer` so the live skeleton and
+    /// the recorded one can never disagree about which joint is which — the
+    /// kind of divergence that shows up as a body metric that does not match
+    /// the picture the user was looking at.
+    static let jointMap: [VNHumanBodyPoseObservation.JointName: PoseJoint] = [
+        .nose: .nose,
+        .neck: .neck,
+        .leftShoulder: .leftShoulder,
+        .rightShoulder: .rightShoulder,
+        .leftHip: .leftHip,
+        .rightHip: .rightHip,
+        .leftKnee: .leftKnee,
+        .rightKnee: .rightKnee,
+        .leftAnkle: .leftAnkle,
+        .rightAnkle: .rightAnkle,
+    ]
+
+    static func deviceSkeleton(from points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint],
+                               orientation: CGImagePropertyOrientation,
+                               minConfidence: Float) -> [PoseJoint: CGPoint] {
+        var out: [PoseJoint: CGPoint] = [:]
+        for (name, joint) in jointMap {
+            guard let p = points[name], p.confidence >= minConfidence else { continue }
+            out[joint] = VisionGeometry.devicePoint(fromVision: p.location,
+                                                    orientation: orientation)
+        }
+        return out
     }
 }

@@ -836,6 +836,141 @@ def contact_quality(u_m: float | None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Body metrics (sagittal plane only)
+# ---------------------------------------------------------------------------
+#
+# What a single side-on camera may and may not say about the hitter's body.
+# docs/BIOMECHANICS.md is the long argument; this is the rule it produces.
+#
+# A side-on camera looks at the SAGITTAL plane. Angles and displacements that
+# live in that plane — stride, head movement, weight shift, knee flexion, spine
+# tilt — land within a few degrees of marker-based motion capture, so they are
+# honest. Rotation ABOUT the vertical axis — hip-shoulder separation, X-factor,
+# the kinematic sequence — is viewed nearly edge-on from the side, is the
+# worst-measured quantity in every markerless system (hip RMSD ~21 deg,
+# off-axis errors 15-37 deg), and is NOT computed here at any confidence.
+#
+# Neither is torque. Joint torque comes from inverse dynamics: segment masses,
+# segment inertias and ground reaction forces. A camera measures none of those.
+# No amount of pose quality turns a video into a torque measurement, and a
+# number presented as one would be invented.
+#
+# There are also no published slow-pitch adult swing-kinematics norms, so
+# nothing here is scored against a population band the way smash factor is.
+# These functions return metres and degrees; comparison is against the hitter's
+# OWN baseline over time, which is the only reference that exists.
+
+# Joint names, matching Apple's VNHumanBodyPoseObservation.JointName raw values
+# so the Swift side needs no translation table.
+JOINT_NOSE = "nose"
+JOINT_NECK = "neck"
+JOINT_LEFT_SHOULDER = "left_shoulder"
+JOINT_RIGHT_SHOULDER = "right_shoulder"
+JOINT_LEFT_HIP = "left_hip"
+JOINT_RIGHT_HIP = "right_hip"
+JOINT_LEFT_KNEE = "left_knee"
+JOINT_RIGHT_KNEE = "right_knee"
+JOINT_LEFT_ANKLE = "left_ankle"
+JOINT_RIGHT_ANKLE = "right_ankle"
+
+# A joint below this Vision confidence is treated as absent rather than as a
+# guess. Apple's pose model reports low-confidence joints at plausible-looking
+# positions, so using them silently would produce a body metric with no body
+# behind it.
+JOINT_CONFIDENCE_MIN = 0.30
+
+# Metres of head drift beyond which the reading is almost certainly the pose
+# model losing the hitter rather than the hitter moving. A swing that actually
+# moved the head 40 cm toward the pitcher would be a lunge past any coaching
+# reference; the far likelier explanation is a joint jumping to the umpire.
+HEAD_DRIFT_IMPLAUSIBLE_M = 0.40
+
+
+@dataclass
+class BodyMetrics:
+    """Sagittal-plane swing measurements. Every field is optional because a
+    joint the pose model could not see honestly produces no number."""
+    stride_m: float | None = None
+    head_drift_m: float | None = None
+    weight_shift_m: float | None = None
+    front_knee_deg: float | None = None
+    spine_tilt_deg: float | None = None
+    # How many of the frames between load and contact had every joint a metric
+    # needed. Low coverage means the numbers rest on a handful of frames.
+    coverage: float = 0.0
+
+
+def sagittal_angle_deg(ax: float, ay: float,
+                       bx: float, by: float,
+                       cx: float, cy: float) -> float:
+    """Interior angle at b, in degrees, between the segments b->a and b->c.
+
+    Pure image geometry, so the y-down convention does not matter: flipping y
+    reflects both vectors and leaves the angle between them unchanged. Used for
+    knee flexion (hip-knee-ankle), where 180 degrees is a straight leg.
+    """
+    v1x, v1y = ax - bx, ay - by
+    v2x, v2y = cx - bx, cy - by
+    n1 = math.hypot(v1x, v1y)
+    n2 = math.hypot(v2x, v2y)
+    if n1 < 1e-9 or n2 < 1e-9:
+        return float("nan")
+    cos = (v1x * v2x + v1y * v2y) / (n1 * n2)
+    return math.degrees(math.acos(max(-1.0, min(1.0, cos))))
+
+
+def spine_tilt_deg(hip_x: float, hip_y: float,
+                   shoulder_x: float, shoulder_y: float) -> float:
+    """Lean of the hip-to-shoulder line away from vertical, in degrees.
+
+    Zero is upright. Sign follows the image: positive means the shoulders are
+    displaced toward increasing x from the hips, so it flips with which way the
+    hitter faces — the app reports the magnitude and lets the hitter's own
+    baseline carry the direction.
+    """
+    dx = shoulder_x - hip_x
+    dy = shoulder_y - hip_y          # negative: shoulders are above the hips
+    if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+        return float("nan")
+    return math.degrees(math.atan2(dx, -dy))
+
+
+def planar_distance_m(x0: float, y0: float, x1: float, y1: float,
+                      scale_m_per_px: float) -> float:
+    """Straight-line displacement between two image points, in metres.
+
+    The same metres-per-pixel the ball measurement produced. That matters: it
+    means body distances inherit the ball's calibration rather than introducing
+    a second one, and they are wrong in exactly the same way if it is wrong —
+    which is far better than being wrong independently.
+    """
+    return math.hypot(x1 - x0, y1 - y0) * scale_m_per_px
+
+
+def stride_length_m(front_ankle_x_load: float, front_ankle_x_contact: float,
+                    scale_m_per_px: float) -> float:
+    """How far the front foot travelled toward the pitcher, in metres.
+
+    Horizontal only, and unsigned. Vertical ankle motion during a stride is the
+    foot lifting, not stride length, and including it would inflate the number
+    for a hitter with a big leg kick.
+    """
+    return abs(front_ankle_x_contact - front_ankle_x_load) * scale_m_per_px
+
+
+def head_drift_plausible(drift_m: float | None) -> bool:
+    """False when a head-movement reading is too large to be a swing.
+
+    Not a coaching judgement — a sanity gate. Beyond this the pose model has
+    almost certainly jumped the head joint to another person or a background
+    shape, and the number should be withheld rather than shown.
+    """
+    if drift_m is None:
+        return False
+    return drift_m <= HEAD_DRIFT_IMPLAUSIBLE_M
+
+
+# ---------------------------------------------------------------------------
 # Video + CSV I/O
 # ---------------------------------------------------------------------------
 

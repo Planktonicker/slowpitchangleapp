@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Full terms in LICENSE at the repository root. No warranty.
 
+import CoreGraphics
+import ImageIO
 import XCTest
 @testable import SwingLab
 
@@ -195,6 +197,165 @@ final class PipelineTests: XCTestCase {
         let board = ValidationScoreboard.build(from: swings)
         XCTAssertEqual(board.g5AutoTriggered, 8)
         XCTAssertEqual(board.g5Passes, false, "80% is under the 90% G5 bar")
+    }
+
+    // MARK: - Vision coordinate mapping
+
+    /// Vision reports normalized points on the ORIENTED image with the origin
+    /// bottom-left; the buffer — and AVFoundation's capture-device point — is
+    /// top-left with y down. Getting this backwards does not crash or warn: the
+    /// skeleton simply lands somewhere plausible-looking and every body metric
+    /// is quietly measured off the wrong pixels.
+    func testVisionUpMappingIsAYFlipOnly() {
+        let bottomLeft = VisionGeometry.devicePoint(fromVision: CGPoint(x: 0, y: 0),
+                                                    orientation: .up)
+        XCTAssertEqual(bottomLeft.x, 0, accuracy: 1e-12)
+        XCTAssertEqual(bottomLeft.y, 1, accuracy: 1e-12, "Vision y=0 is the BOTTOM of the image")
+        let topRight = VisionGeometry.devicePoint(fromVision: CGPoint(x: 1, y: 1),
+                                                  orientation: .up)
+        XCTAssertEqual(topRight.x, 1, accuracy: 1e-12)
+        XCTAssertEqual(topRight.y, 0, accuracy: 1e-12)
+    }
+
+    /// One corner, through every orientation the capture path can produce.
+    ///
+    /// The hitter's head in the top-left of the upright picture is Vision
+    /// (0, 1). Where that pixel lives in the buffer depends entirely on how the
+    /// phone was lying on the tripod.
+    func testVisionRotationsLandTheHeadInTheRightCorner() {
+        let headTopLeftOfUprightImage = CGPoint(x: 0, y: 1)
+        // .up — the buffer is already upright.
+        var p = VisionGeometry.devicePoint(fromVision: headTopLeftOfUprightImage, orientation: .up)
+        XCTAssertEqual(p.x, 0, accuracy: 1e-12); XCTAssertEqual(p.y, 0, accuracy: 1e-12)
+        // .down — the buffer is upside down, so it is the buffer's bottom-right.
+        p = VisionGeometry.devicePoint(fromVision: headTopLeftOfUprightImage, orientation: .down)
+        XCTAssertEqual(p.x, 1, accuracy: 1e-12); XCTAssertEqual(p.y, 1, accuracy: 1e-12)
+        // .right — the buffer's 0th row displays on the right, 0th column at
+        // the top, so the upright top-left is the buffer's top-right.
+        p = VisionGeometry.devicePoint(fromVision: headTopLeftOfUprightImage, orientation: .right)
+        XCTAssertEqual(p.x, 0, accuracy: 1e-12); XCTAssertEqual(p.y, 1, accuracy: 1e-12)
+        // .left — the mirror of that.
+        p = VisionGeometry.devicePoint(fromVision: headTopLeftOfUprightImage, orientation: .left)
+        XCTAssertEqual(p.x, 1, accuracy: 1e-12); XCTAssertEqual(p.y, 0, accuracy: 1e-12)
+    }
+
+    /// Every rotation must be a bijection of the unit square onto itself: no
+    /// orientation may fold, squash or push a point outside the frame.
+    func testVisionMappingIsARigidRemapForEveryOrientation() {
+        let samples = [CGPoint(x: 0, y: 0), CGPoint(x: 1, y: 0),
+                       CGPoint(x: 0, y: 1), CGPoint(x: 1, y: 1),
+                       CGPoint(x: 0.25, y: 0.6), CGPoint(x: 0.9, y: 0.1)]
+        for orientation in [CGImagePropertyOrientation.up, .down, .left, .right] {
+            var seen = Set<String>()
+            for s in samples {
+                let p = VisionGeometry.devicePoint(fromVision: s, orientation: orientation)
+                XCTAssertTrue((0...1).contains(p.x) && (0...1).contains(p.y),
+                              "\(orientation) sent \(s) to \(p)")
+                seen.insert("\(p.x),\(p.y)")
+            }
+            XCTAssertEqual(seen.count, samples.count, "\(orientation) collapsed distinct points")
+        }
+    }
+
+    func testVisionImagePointUsesBufferDimensions() {
+        // A landscape buffer read as a portrait upright image: the helper must
+        // scale by the BUFFER's width and height, not the oriented image's.
+        let p = VisionGeometry.imagePoint(fromVision: CGPoint(x: 0.5, y: 0.5),
+                                          orientation: .right,
+                                          width: 1920, height: 1080)
+        XCTAssertEqual(p.x, 960, accuracy: 1e-9)
+        XCTAssertEqual(p.y, 540, accuracy: 1e-9)
+    }
+
+    // MARK: - Body metrics
+
+    /// The front leg is picked from the ball's direction, so a hitter who bats
+    /// the other way round is handled without asking them anything.
+    func testFrontLegFollowsTheBallDirection() {
+        let joints: [PoseJoint: PosePoint] = [
+            .leftAnkle: PosePoint(x: 400, y: 900, confidence: 0.9),
+            .rightAnkle: PosePoint(x: 600, y: 900, confidence: 0.9),
+            .leftHip: PosePoint(x: 470, y: 560, confidence: 0.9),
+            .rightHip: PosePoint(x: 560, y: 560, confidence: 0.9),
+            .leftKnee: PosePoint(x: 440, y: 730, confidence: 0.9),
+            .rightKnee: PosePoint(x: 590, y: 730, confidence: 0.9),
+            .leftShoulder: PosePoint(x: 480, y: 330, confidence: 0.9),
+            .rightShoulder: PosePoint(x: 570, y: 330, confidence: 0.9),
+            .nose: PosePoint(x: 525, y: 250, confidence: 0.9),
+        ]
+        let track = [PoseObservation(frame: 0, t: 0.0, joints: joints),
+                     PoseObservation(frame: 60, t: 0.25, joints: joints)]
+
+        // Ball leaving toward decreasing x: the LEFT ankle (x 400) is in front.
+        let left = BodyAnalyzer.analyze(track: track, contactTime: 0.25,
+                                        scaleMPerPx: 1.0 / 240, ballDirectionX: -1)
+        XCTAssertNotNil(left.frontKneeDeg)
+        // Ball leaving toward increasing x: the RIGHT leg leads, and its knee
+        // is bent differently, so the reading must change.
+        let right = BodyAnalyzer.analyze(track: track, contactTime: 0.25,
+                                         scaleMPerPx: 1.0 / 240, ballDirectionX: 1)
+        XCTAssertNotNil(right.frontKneeDeg)
+        XCTAssertNotEqual(left.frontKneeDeg!, right.frontKneeDeg!, accuracy: 0.0,
+                          "the two legs are not mirror images here, so the readings must differ")
+    }
+
+    /// A joint below the confidence floor is absent, not a guess — otherwise a
+    /// body metric gets computed off a position the model did not believe.
+    func testLowConfidenceJointsAreTreatedAsMissing() {
+        let obs = PoseObservation(frame: 0, t: 0, joints: [
+            .leftHip: PosePoint(x: 100, y: 100, confidence: 0.9),
+            .rightHip: PosePoint(x: 140, y: 100, confidence: 0.05),
+        ])
+        XCTAssertNotNil(obs.point(.leftHip))
+        XCTAssertNil(obs.point(.rightHip), "below SLA.jointConfidenceMin")
+        XCTAssertNil(obs.midpoint(.leftHip, .rightHip),
+                     "a hip centre from one hip would move half a body width between frames")
+    }
+
+    /// Angles survive a missing scale; distances do not, and must not be
+    /// invented from one.
+    func testAnglesSurviveAMissingScaleButDistancesDoNot() {
+        let joints: [PoseJoint: PosePoint] = [
+            .leftAnkle: PosePoint(x: 400, y: 900, confidence: 0.9),
+            .rightAnkle: PosePoint(x: 600, y: 900, confidence: 0.9),
+            .leftHip: PosePoint(x: 470, y: 560, confidence: 0.9),
+            .rightHip: PosePoint(x: 560, y: 560, confidence: 0.9),
+            .leftKnee: PosePoint(x: 440, y: 730, confidence: 0.9),
+            .leftShoulder: PosePoint(x: 480, y: 330, confidence: 0.9),
+            .rightShoulder: PosePoint(x: 570, y: 330, confidence: 0.9),
+            .nose: PosePoint(x: 525, y: 250, confidence: 0.9),
+        ]
+        let track = [PoseObservation(frame: 0, t: 0.0, joints: joints),
+                     PoseObservation(frame: 60, t: 0.25, joints: joints)]
+        let m = BodyAnalyzer.analyze(track: track, contactTime: 0.25,
+                                     scaleMPerPx: nil, ballDirectionX: -1)
+        XCTAssertNotNil(m.frontKneeDeg)
+        XCTAssertNotNil(m.spineTiltDeg)
+        XCTAssertNil(m.strideM)
+        XCTAssertNil(m.headDriftM)
+        XCTAssertNil(m.weightShiftM)
+    }
+
+    /// An implausible head reading is withheld, not shown: the hitter has no
+    /// way to tell it is the pose model's mistake rather than their swing.
+    func testImplausibleHeadDriftIsWithheld() {
+        func obs(_ t: Double, headX: Double) -> PoseObservation {
+            PoseObservation(frame: Int(t * 240), t: t, joints: [
+                .nose: PosePoint(x: headX, y: 250, confidence: 0.9),
+                .leftHip: PosePoint(x: 470, y: 560, confidence: 0.9),
+                .rightHip: PosePoint(x: 560, y: 560, confidence: 0.9),
+            ])
+        }
+        // 300 px at 1/240 m/px is 1.25 m of "head movement".
+        let m = BodyAnalyzer.analyze(track: [obs(0, headX: 200), obs(0.25, headX: 500)],
+                                     contactTime: 0.25,
+                                     scaleMPerPx: 1.0 / 240, ballDirectionX: -1)
+        XCTAssertNil(m.headDriftM)
+        // ...but an ordinary one survives.
+        let ok = BodyAnalyzer.analyze(track: [obs(0, headX: 500), obs(0.25, headX: 520)],
+                                      contactTime: 0.25,
+                                      scaleMPerPx: 1.0 / 240, ballDirectionX: -1)
+        XCTAssertNotNil(ok.headDriftM)
     }
 
     // MARK: - Camera tilt sign convention

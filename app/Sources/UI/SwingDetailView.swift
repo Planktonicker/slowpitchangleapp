@@ -33,6 +33,9 @@ struct SwingDetailView: View {
             if let attack = swing.batAttackAngleDeg {
                 Section("Bat") { batSection(attack) }
             }
+            if let body = swing.body, body.hasAnything {
+                Section("Body") { bodySection(body) }
+            }
             Section("Ground truth (gate G3)") { groundTruth }
             Section("Placement") { placement }
             Section { actions }
@@ -139,6 +142,47 @@ struct SwingDetailView: View {
                 .font(.callout)
             }
             Text("Two independent estimates of how many metres a pixel is worth. Agreement is what makes a number trustworthy without a radar gun; disagreement is why a reading gets flagged instead of quietly reported.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Sagittal-plane measurements only.
+    ///
+    /// The closing note is not decoration. Every swing app in this space shows
+    /// hip-shoulder separation, and a user who does not see it here will assume
+    /// it was forgotten rather than deliberately withheld — so the screen says
+    /// which questions this camera can answer and which it cannot.
+    private func bodySection(_ body: BodyMetrics) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                if let stride = body.strideM {
+                    MetricTile(label: "Stride", value: String(format: "%.0f", stride * 100),
+                               unit: "cm", tint: .white)
+                }
+                if let head = body.headDriftM {
+                    MetricTile(label: "Head move", value: String(format: "%.0f", head * 100),
+                               unit: "cm", tint: .white)
+                }
+            }
+            HStack {
+                if let shift = body.weightShiftM {
+                    MetricTile(label: "Weight shift", value: String(format: "%.0f", shift * 100),
+                               unit: "cm", tint: .white)
+                }
+                if let knee = body.frontKneeDeg {
+                    MetricTile(label: "Front knee", value: String(format: "%.0f", knee),
+                               unit: "°", tint: .white)
+                }
+            }
+            if let tilt = body.spineTiltDeg {
+                detail("Spine tilt at contact", String(format: "%.0f°", tilt))
+            }
+            if body.coverage < 0.8 {
+                StatChip(text: String(format: "Hitter seen in %.0f%% of frames",
+                                      body.coverage * 100),
+                         color: Theme.warn)
+            }
+            Text("Sagittal-plane only — what a side-on camera measures within a few degrees of a motion-capture lab. No hip–shoulder separation, X-factor or torque: rotation about the vertical axis is viewed nearly edge-on from here, and torque needs segment masses and ground forces no camera can see. Compare these to your own numbers over time; there are no published slow-pitch norms to score them against.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

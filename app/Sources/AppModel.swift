@@ -185,6 +185,8 @@ final class AppModel: ObservableObject {
         options.rollDeg = placement.rollDeg
         options.tiltDeg = placement.tiltDeg
         options.fieldOfViewDeg = placement.fovDeg
+        options.visionOrientation = capture.visionOrientationForFrames
+        options.trackBody = settings.trackBody
 
         analysisProgress = 0
 
@@ -252,6 +254,19 @@ final class AppModel: ObservableObject {
                     try? data.write(to: ClipStore.trackURL(named: trackName), options: .atomic)
                     dto.trackCSVFilename = trackName
                 }
+
+                // The pose track, beside it. Same reason the ball track is
+                // kept: when a body number looks wrong, the frames it came
+                // from are the only way to find out why. JSON rather than the
+                // CSV the Python reads — sla_common has no pose stage, so
+                // there is nothing on the Mac to feed a CSV to yet.
+                if !analysis.pose.isEmpty {
+                    let poseName = (clipName as NSString).deletingPathExtension + ".pose.json"
+                    if let data = try? JSONEncoder().encode(analysis.pose) {
+                        try? data.write(to: ClipStore.trackURL(named: poseName), options: .atomic)
+                        dto.poseFilename = poseName
+                    }
+                }
             }
         } else {
             // A clip where tracking failed still counts — it is a G1 miss, and
@@ -269,6 +284,7 @@ final class AppModel: ObservableObject {
         dto.cameraRollDeg = placement.rollDeg
         dto.cameraTiltDeg = placement.tiltDeg
         dto.cameraFovDeg = placement.fovDeg > 0 ? placement.fovDeg : nil
+        dto.visionOrientation = capture.visionOrientationForFrames
         dto.captureFlags = placement.captureFlags
             + (hitterGateDisabledForSession ? [.hitterGateDisabled] : [])
             + (droppedFrames ? [.framesDropped] : [])
@@ -300,6 +316,7 @@ final class AppModel: ObservableObject {
     func delete(_ swing: SwingDTO) {
         ClipStore.delete(clipNamed: swing.clipFilename)
         ClipStore.delete(trackNamed: swing.trackCSVFilename)
+        ClipStore.delete(trackNamed: swing.poseFilename)
         try? store.delete(id: swing.id)
         reload()
     }
@@ -318,6 +335,8 @@ final class AppModel: ObservableObject {
         // not whatever the phone is pointing at now.
         options.tiltDeg = swing.cameraTiltDeg ?? 0
         options.fieldOfViewDeg = swing.cameraFovDeg ?? 0
+        options.visionOrientation = swing.visionOrientation
+        options.trackBody = settings.trackBody
         options.forceFallbackDetector = forceFallback
         analysisProgress = 0
 
@@ -346,6 +365,9 @@ final class AppModel: ObservableObject {
                     updated.lensHeightM = swing.lensHeightM
                     updated.cameraRollDeg = swing.cameraRollDeg
                     updated.cameraTiltDeg = swing.cameraTiltDeg
+                    updated.cameraFovDeg = swing.cameraFovDeg
+                    updated.poseFilename = swing.poseFilename
+                    updated.visionOrientationRaw = swing.visionOrientationRaw
                     updated.captureFlags = swing.captureFlags
                     updated.notes = swing.notes
                     self.analysisProgress = nil

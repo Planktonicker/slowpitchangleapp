@@ -75,6 +75,77 @@ Reference math is in `spike/sla_common.py` (`bat_speed_mps`, `smash_factor`,
 computes when the bat was tracked with acceptable confidence and the ball scale
 is sound; otherwise it shows "—".
 
+## Shipped now: sagittal body metrics
+
+The pose model was already running as the hitter gate — `HumanPresenceGate`
+asked it "is anybody there?" and threw the joints away. It now keeps them.
+
+**Live:** the skeleton is drawn over the preview during setup, in the app's
+yellow, from exactly the joints the metrics use. That makes the overlay the
+diagnostic as well as the reassurance: if a stride number looks wrong, the ankle
+in the picture is where to look. It is drawn only during setup — the question
+"is the detector seeing this hitter, in this light?" is what setup exists to
+answer, and a skeleton over a live swing you are watching is the last thing
+wanted.
+
+**Recorded:** `ClipAnalyzer` runs a third pass over each clip at ~60 Hz (a swing
+is ~180 ms, so that is ~11 samples across it; 240 Hz would cost four times as
+much for no more information) and stores the track beside the ball track.
+`BodyAnalyzer` then measures, between a load frame 0.25 s before contact and
+contact itself:
+
+| Metric | What it is |
+|---|---|
+| Stride | horizontal travel of the front ankle, unsigned |
+| Head movement | straight-line drift of nose (or neck) |
+| Weight shift | drift of the hip centre |
+| Front knee | interior hip–knee–ankle angle at contact; 180° is straight |
+| Spine tilt | lean of the hip-to-shoulder line from vertical, magnitude |
+
+Distances use the ball's own metres-per-pixel, so body and ball distances mean
+the same thing and are wrong in the same way if the scale is wrong — far better
+than being wrong independently. The pose track goes through the same tilt
+rectification as the flight.
+
+Which leg is the front leg comes from the ball's horizontal velocity: the hitter
+strides toward the pitcher and the ball leaves that way, so a left-handed hitter
+is handled without being asked.
+
+Three rules the code enforces rather than documents:
+
+- A joint below `JOINT_CONFIDENCE_MIN` is **absent**, not a guess. Apple's model
+  reports low-confidence joints at plausible-looking positions.
+- A hip or shoulder *centre* needs **both** sides. From a side view the near and
+  far joints of a pair sit at noticeably different image positions, so falling
+  back to whichever was visible would move the centre half a body width between
+  frames and read as weight shift that never happened.
+- A head-movement reading over `HEAD_DRIFT_IMPLAUSIBLE_M` is **withheld**. Past
+  that it is the model jumping the joint to another person, and the hitter has
+  no way to tell that apart from their own swing.
+
+Coverage — the fraction of load-to-contact frames in which the hitter was found
+— is shown whenever it drops below 80%, because these numbers resting on three
+frames and on thirty are different claims.
+
+Reference math is in `sla_common.py` (`sagittal_angle_deg`, `spine_tilt_deg`,
+`planar_distance_m`, `stride_length_m`, `head_drift_plausible`), pinned by
+`ParityTests.testBodyGeometryMatchesReference`.
+
+### Still not measured, deliberately
+
+Not "not yet" — **not from this camera**:
+
+- **Hip–shoulder separation / X-factor / kinematic sequence.** Axial rotation,
+  viewed nearly edge-on from the side. See the boundary rule above.
+- **Torque.** Joint torque comes from inverse dynamics: segment masses, segment
+  inertias and ground reaction forces. A camera measures none of the three. No
+  amount of pose quality turns video into a torque measurement, and a number
+  presented as one would be invented outright.
+
+The swing-detail screen says this on the screen, not only here. Every competitor
+shows rotation numbers, so a user who does not see them will assume they were
+forgotten rather than withheld.
+
 ## Shipped now: contact offset ("undercut")
 
 The side-view-honest half of b4-app's Bat Contact Point. At contact the bat

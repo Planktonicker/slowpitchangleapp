@@ -77,7 +77,13 @@ struct CaptureScreen: View {
         NavigationStack {
             ZStack {
                 Color.black.ignoresSafeArea()
-                CameraPreview(controller: capture, onTap: handleTap)
+                // The skeleton is drawn only while setup is open. It is proof
+                // the hitter detector is working on THIS hitter in THIS light,
+                // which is exactly the question setup exists to answer — and
+                // the last thing wanted over a live swing you are watching.
+                CameraPreview(controller: capture,
+                              onTap: handleTap,
+                              skeleton: showSetup ? capture.skeleton : nil)
                     .ignoresSafeArea()
 
                 tapMarker
@@ -551,11 +557,13 @@ struct CaptureScreen: View {
 
     private func openSetup() {
         showSetup = true
+        capture.wantsSkeleton = true
         syncLiveMeasurement()
     }
 
     private func closeSetup() {
         showSetup = false
+        capture.wantsSkeleton = false
         syncLiveMeasurement()
     }
 

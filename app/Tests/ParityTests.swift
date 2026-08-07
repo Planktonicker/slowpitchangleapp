@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Full terms in LICENSE at the repository root. No warranty.
 
+import CoreGraphics
 import XCTest
 @testable import SwingLab
 
@@ -30,6 +31,45 @@ final class ParityTests: XCTestCase {
         var contact_offset: [ContactCase]
         var focal_px_from_fov: [FocalCase]
         var rectify_tilt: [TiltCase]
+        var body_angles: [BodyAngleCase]
+        var body_tilts: [BodyTiltCase]
+        var body_distances: [BodyDistanceCase]
+        var body_strides: [BodyStrideCase]
+        var body_drift_gate: [BodyDriftCase]
+    }
+
+    /// `expected: nil` means the reference returned NaN. JSON has no NaN, and
+    /// NaN is a meaningful result here — a degenerate joint must produce it
+    /// rather than a plausible-looking angle — so null carries it.
+    struct BodyAngleCase: Decodable {
+        var name: String
+        var ax: Double, ay: Double, bx: Double, by: Double, cx: Double, cy: Double
+        var expected: Double?
+    }
+
+    struct BodyTiltCase: Decodable {
+        var name: String
+        var hip_x: Double, hip_y: Double, shoulder_x: Double, shoulder_y: Double
+        var expected: Double?
+    }
+
+    struct BodyDistanceCase: Decodable {
+        var name: String
+        var x0: Double, y0: Double, x1: Double, y1: Double
+        var scale_m_per_px: Double
+        var expected: Double
+    }
+
+    struct BodyStrideCase: Decodable {
+        var name: String
+        var load_x: Double, contact_x: Double
+        var scale_m_per_px: Double
+        var expected: Double
+    }
+
+    struct BodyDriftCase: Decodable {
+        var drift_m: Double?
+        var expected: Bool
     }
 
     struct FitCase: Decodable {
@@ -448,6 +488,51 @@ final class ParityTests: XCTestCase {
             assertClose(back.x, level.x, rel: 1e-9, abs: 1e-7, "round trip x")
             assertClose(back.y, level.y, rel: 1e-9, abs: 1e-7, "round trip y")
         }
+    }
+
+    // MARK: - Body metrics (sagittal plane only)
+
+    func testBodyGeometryMatchesReference() {
+        for c in Self.fixtures.body_angles {
+            let a = BodyAnalyzer.sagittalAngleDeg(a: CGPoint(x: c.ax, y: c.ay),
+                                                  b: CGPoint(x: c.bx, y: c.by),
+                                                  c: CGPoint(x: c.cx, y: c.cy))
+            guard let expected = c.expected else {
+                XCTAssertTrue(a.isNaN, "\(c.name): expected NaN for a degenerate joint")
+                continue
+            }
+            assertClose(a, expected, rel: 1e-9, "\(c.name) angle")
+        }
+        for c in Self.fixtures.body_tilts {
+            let t = BodyAnalyzer.spineTiltDeg(hip: CGPoint(x: c.hip_x, y: c.hip_y),
+                                              shoulder: CGPoint(x: c.shoulder_x, y: c.shoulder_y))
+            guard let expected = c.expected else {
+                XCTAssertTrue(t.isNaN, "\(c.name): expected NaN")
+                continue
+            }
+            assertClose(t, expected, rel: 1e-9, "\(c.name) tilt")
+        }
+        for c in Self.fixtures.body_distances {
+            let d = BodyAnalyzer.planarDistanceM(CGPoint(x: c.x0, y: c.y0),
+                                                 CGPoint(x: c.x1, y: c.y1),
+                                                 scaleMPerPx: c.scale_m_per_px)
+            assertClose(d, c.expected, rel: 1e-9, "\(c.name) distance")
+        }
+        for c in Self.fixtures.body_strides {
+            let d = BodyAnalyzer.strideLengthM(loadX: c.load_x, contactX: c.contact_x,
+                                               scaleMPerPx: c.scale_m_per_px)
+            assertClose(d, c.expected, rel: 1e-9, "\(c.name) stride")
+        }
+        for c in Self.fixtures.body_drift_gate {
+            XCTAssertEqual(BodyAnalyzer.headDriftPlausible(c.drift_m), c.expected,
+                           "drift gate at \(String(describing: c.drift_m))")
+        }
+    }
+
+    func testBodyConstantsMatchReference() {
+        let c = Self.fixtures.constants
+        assertClose(SLA.jointConfidenceMin, c["JOINT_CONFIDENCE_MIN"]!, "joint confidence")
+        assertClose(SLA.headDriftImplausibleM, c["HEAD_DRIFT_IMPLAUSIBLE_M"]!, "head drift limit")
     }
 
     func testContactConstantsMatchReference() {

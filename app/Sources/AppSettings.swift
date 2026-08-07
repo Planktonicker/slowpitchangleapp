@@ -44,6 +44,10 @@ struct AppSettings: Codable, Equatable {
     var detector = DetectorSettings()
     var bat = BatTracker.Settings()
     var trackBat = true
+    /// Run the body-pose pass over each clip. On by default — the sagittal
+    /// metrics are the point of it — but a switch, because it is a third decode
+    /// pass and a phone already at 240fps is the phone most likely to be hot.
+    var trackBody = true
     var triggerDb = SLA.triggerDb
     var preRollS = SLA.preRollS
     var postRollS = SLA.postRollS
@@ -88,6 +92,7 @@ struct AppSettings: Codable, Equatable {
         o.detector = detector
         o.bat = bat
         o.trackBat = trackBat
+        o.trackBody = trackBody
         o.direction = direction
         o.forceFallbackDetector = forceFallbackDetector
         o.fpsOverride = fpsOverride

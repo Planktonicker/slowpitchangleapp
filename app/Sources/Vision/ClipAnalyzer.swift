@@ -5,11 +5,17 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import ImageIO
+import Vision
 
 struct ClipAnalysis: Sendable {
     var metrics: SwingMetrics
     var track: [BallObservation]
     var bat: BatMetrics?
+    /// Sagittal-plane body measurements, and the pose track they came from.
+    /// Empty when body tracking was off or the hitter was never found.
+    var body: BodyMetrics?
+    var pose: [PoseObservation]
     var fps: Double
     var frameWidth: Int
     var frameHeight: Int
@@ -50,6 +56,15 @@ enum ClipAnalyzer {
         var detector = DetectorSettings()
         var bat = BatTracker.Settings()
         var trackBat = true
+        /// Run the body-pose pass. Off makes analysis meaningfully faster on a
+        /// hot phone, which is why it is a switch and not always-on.
+        var trackBody = true
+        /// How often to run pose over the clip, in Hz. Body motion is nowhere
+        /// near 240fps content — a swing takes ~180 ms, so 30 Hz gives ~6
+        /// samples across it and 60 Hz gives ~11, which is plenty for
+        /// load-versus-contact displacements. Running it per frame would cost
+        /// roughly eight times as much for no more information.
+        var poseSampleHz: Double = 60
         var direction: TrackBuilder.Direction = .auto
         var rollDeg: Double = 0
         /// Camera pitch at capture time, positive when the lens aims **down**.
@@ -70,6 +85,11 @@ enum ClipAnalyzer {
         var corridorPx: Double = 90
         /// Skip Vision and go straight to full-frame detection.
         var forceFallbackDetector = false
+        /// Which way was up in the recorded frames. The phone films sideways on
+        /// a tripod, so handing Vision `.up` shows it a rotated human and it
+        /// finds nobody — the same failure that silently suppressed every audio
+        /// trigger before the live path started deriving this.
+        var visionOrientation: CGImagePropertyOrientation = .up
     }
 
     /// - Parameters:
@@ -187,16 +207,108 @@ enum ClipAnalyzer {
                                             rollDeg: options.rollDeg)
         let bat = options.trackBat ? BatTracker.analyze(observations: measuredTape,
                                                         contactTime: effectiveContact) : nil
+
+        // --- pass 3: the hitter's body ---
+        //
+        // A third decode pass rather than folding pose into pass 2. Vision's
+        // request handler wants the pixel buffer, `BallDetector` wants a locked
+        // `PixelImage` of the same buffer, and pose runs at a fraction of the
+        // frame rate — interleaving them would hold every frame hostage to the
+        // slowest consumer for no gain, since this pass reads roughly one frame
+        // in four.
+        var pose: [PoseObservation] = []
+        var body: BodyMetrics?
+        if options.trackBody {
+            pose = try detectPose(asset: asset, track: videoTrack,
+                                  fps: fps, sampleHz: options.poseSampleHz,
+                                  orientation: options.visionOrientation,
+                                  width: width, height: height,
+                                  tiltDeg: options.tiltDeg, focalPx: focalPx,
+                                  cx: cx, cy: cy)
+            body = BodyAnalyzer.analyze(track: pose,
+                                        contactTime: effectiveContact,
+                                        scaleMPerPx: metrics.scaleBallMPerPx,
+                                        ballDirectionX: metrics.vxPxS)
+        }
         progress?(1.0)
 
         return ClipAnalysis(metrics: metrics,
                             track: track,
                             bat: bat,
+                            body: body,
+                            pose: pose,
                             fps: fps,
                             frameWidth: width,
                             frameHeight: height,
                             contactTime: effectiveContact,
                             usedVisionHint: hint != nil)
+    }
+
+    /// Run body pose over the clip, sub-sampled.
+    ///
+    /// Coordinates come back in the same buffer pixels the ball and bat are
+    /// measured in, and go through the same tilt rectification, so a body
+    /// distance and a ball distance mean the same thing and a tilted camera is
+    /// corrected for the hitter exactly as it is for the flight.
+    private static func detectPose(asset: AVAsset,
+                                   track: AVAssetTrack,
+                                   fps: Double,
+                                   sampleHz: Double,
+                                   orientation: CGImagePropertyOrientation,
+                                   width: Int, height: Int,
+                                   tiltDeg: Double, focalPx: Double,
+                                   cx: Double, cy: Double) throws -> [PoseObservation] {
+        let stride = max(1, Int((fps / max(1, sampleHz)).rounded()))
+        var out: [PoseObservation] = []
+        // One request object reused across frames: allocating a fresh
+        // VNDetectHumanBodyPoseRequest per frame is a measurable share of the
+        // cost at these rates.
+        let request = VNDetectHumanBodyPoseRequest()
+
+        try forEachSampleBuffer(asset: asset, track: track) { sb, index, t in
+            guard index % stride == 0,
+                  let pb = CMSampleBufferGetImageBuffer(sb) else { return }
+            let handler = VNImageRequestHandler(cvPixelBuffer: pb,
+                                                orientation: orientation,
+                                                options: [:])
+            guard (try? handler.perform([request])) != nil,
+                  let observations = request.results, !observations.isEmpty else { return }
+
+            // The largest skeleton, by the spread of its confident joints.
+            // A coach, an on-deck hitter or a passer-by is farther from the
+            // camera and therefore smaller; picking the biggest is the cheap
+            // version of "the one we are filming", and it agrees with the
+            // framing guide, which puts the hitter close and alone.
+            var best: [PoseJoint: PosePoint]?
+            var bestSpan = -1.0
+            for obs in observations {
+                guard let points = try? obs.recognizedPoints(.all) else { continue }
+                var joints: [PoseJoint: PosePoint] = [:]
+                for (name, joint) in HumanPresenceGate.jointMap {
+                    guard let p = points[name],
+                          Double(p.confidence) >= SLA.jointConfidenceMin else { continue }
+                    let px = VisionGeometry.imagePoint(fromVision: p.location,
+                                                       orientation: orientation,
+                                                       width: width, height: height)
+                    let r = TiltRectifier.rectify(x: Double(px.x), y: Double(px.y),
+                                                  tiltDeg: tiltDeg, focalPx: focalPx,
+                                                  cx: cx, cy: cy)
+                    joints[joint] = PosePoint(x: r.x, y: r.y,
+                                              confidence: Double(p.confidence))
+                }
+                guard joints.count >= 4 else { continue }
+                let ys = joints.values.map(\.y)
+                let span = (ys.max() ?? 0) - (ys.min() ?? 0)
+                if span > bestSpan {
+                    bestSpan = span
+                    best = joints
+                }
+            }
+            if let best {
+                out.append(PoseObservation(frame: index, t: t, joints: best))
+            }
+        }
+        return out
     }
 
     /// Decode every frame once, handing back (sampleBuffer, frameIndex,

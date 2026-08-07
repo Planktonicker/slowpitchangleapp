@@ -45,6 +45,9 @@ struct SettingsView: View {
 
                 Section("Analysis") {
                     Toggle("Track the bat", isOn: $model.settings.trackBat)
+                    Toggle("Track the hitter's body", isOn: $model.settings.trackBody)
+                    Text("Adds stride, head movement, weight shift, front-knee angle and spine tilt — the sagittal-plane measurements a side-on camera makes honestly. It is a third pass over each clip, so turn it off if the phone is running hot.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Toggle("Skip Vision, use the reference detector only",
                            isOn: $model.settings.forceFallbackDetector)
                     Picker("Hit direction", selection: $model.settings.direction) {
