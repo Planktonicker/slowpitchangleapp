@@ -258,7 +258,7 @@ enum ClipAnalyzer {
                                    width: Int, height: Int,
                                    tiltDeg: Double, focalPx: Double,
                                    cx: Double, cy: Double) throws -> [PoseObservation] {
-        let stride = max(1, Int((fps / max(1, sampleHz)).rounded()))
+        let frameStride = max(1, Int((fps / max(1, sampleHz)).rounded()))
         var out: [PoseObservation] = []
         // One request object reused across frames: allocating a fresh
         // VNDetectHumanBodyPoseRequest per frame is a measurable share of the
@@ -266,7 +266,7 @@ enum ClipAnalyzer {
         let request = VNDetectHumanBodyPoseRequest()
 
         try forEachSampleBuffer(asset: asset, track: track) { sb, index, t in
-            guard index % stride == 0,
+            guard index % frameStride == 0,
                   let pb = CMSampleBufferGetImageBuffer(sb) else { return }
             let handler = VNImageRequestHandler(cvPixelBuffer: pb,
                                                 orientation: orientation,

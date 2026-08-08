@@ -97,7 +97,7 @@ final class SwingEntity {
         cameraFovDeg = dto.cameraFovDeg
         poseFilename = dto.poseFilename
         visionOrientationRaw = dto.visionOrientationRaw
-        bodyJSON = SwingRecord.encodeBody(dto.body)
+        bodyJSON = Self.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
         notes = dto.notes
     }
@@ -136,7 +136,7 @@ final class SwingEntity {
         cameraFovDeg = dto.cameraFovDeg
         poseFilename = dto.poseFilename
         visionOrientationRaw = dto.visionOrientationRaw
-        bodyJSON = SwingRecord.encodeBody(dto.body)
+        bodyJSON = Self.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
         notes = dto.notes
     }
@@ -177,7 +177,7 @@ final class SwingEntity {
         d.cameraFovDeg = cameraFovDeg
         d.poseFilename = poseFilename
         d.visionOrientationRaw = visionOrientationRaw
-        d.body = SwingRecord.decodeBody(bodyJSON)
+        d.body = Self.decodeBody(bodyJSON)
         d.captureFlags = captureFlagsRaw.split(separator: "|")
             .compactMap { CaptureFlag(rawValue: String($0)) }
         d.notes = notes

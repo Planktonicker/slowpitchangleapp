@@ -295,7 +295,7 @@ final class PipelineTests: XCTestCase {
         let right = BodyAnalyzer.analyze(track: track, contactTime: 0.25,
                                          scaleMPerPx: 1.0 / 240, ballDirectionX: 1)
         XCTAssertNotNil(right.frontKneeDeg)
-        XCTAssertNotEqual(left.frontKneeDeg!, right.frontKneeDeg!, accuracy: 0.0,
+        XCTAssertNotEqual(left.frontKneeDeg!, right.frontKneeDeg!,
                           "the two legs are not mirror images here, so the readings must differ")
     }
 
