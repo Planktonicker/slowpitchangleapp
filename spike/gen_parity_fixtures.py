@@ -395,6 +395,30 @@ def body_cases():
     }
 
 
+def trigger_cal_cases():
+    """Venue calibrations, covering every verdict and the degenerate ones.
+
+    Numbers are dB over the rolling noise floor, the quantity check_audio_trigger.py
+    plots and ContactTrigger reports live.
+    """
+    return [
+        # Quiet garden: near-silent background, solid contact. Easy.
+        {"name": "quiet_garden", "background_peak_db": 4.0, "quietest_hit_db": 28.0},
+        # Outdoor field with wind and traffic.
+        {"name": "outdoor_field", "background_peak_db": 10.0, "quietest_hit_db": 24.0},
+        # Batting cage: high floor, ricochets, contact barely stands out.
+        {"name": "busy_cage", "background_peak_db": 18.0, "quietest_hit_db": 24.0},
+        # Exactly on the marginal/good boundary (2x MIN_SEPARATION).
+        {"name": "boundary_good", "background_peak_db": 10.0, "quietest_hit_db": 22.0},
+        # Exactly on the unusable/marginal boundary.
+        {"name": "boundary_marginal", "background_peak_db": 10.0, "quietest_hit_db": 16.0},
+        # Hits quieter than the background — a microphone problem, or the user
+        # tapped the wrong button. Must not produce a threshold below the floor.
+        {"name": "inverted", "background_peak_db": 20.0, "quietest_hit_db": 19.0},
+        {"name": "no_separation", "background_peak_db": 12.0, "quietest_hit_db": 12.0},
+    ]
+
+
 def flight_cases():
     return [
         {"name": "synth_test_reference", "ev_mps": 65.0 / sla.MPH_PER_MPS,
@@ -462,6 +486,8 @@ def main():
             "TILT_CORRECTABLE_MAX_DEG": sla.TILT_CORRECTABLE_MAX_DEG,
             "JOINT_CONFIDENCE_MIN": sla.JOINT_CONFIDENCE_MIN,
             "HEAD_DRIFT_IMPLAUSIBLE_M": sla.HEAD_DRIFT_IMPLAUSIBLE_M,
+            "TRIGGER_MARGIN_FRACTION": sla.TRIGGER_MARGIN_FRACTION,
+            "TRIGGER_MIN_SEPARATION_DB": sla.TRIGGER_MIN_SEPARATION_DB,
         },
         "fit_quadratic": [],
         "solve_gravity_scale": [],
@@ -477,6 +503,7 @@ def main():
         "body_distances": [],
         "body_strides": [],
         "body_drift_gate": [],
+        "trigger_calibration": [],
     }
 
     for c in fit_cases():
@@ -576,6 +603,14 @@ def main():
             "drift_m": d, "expected": sla.head_drift_plausible(d),
         })
 
+    for c in trigger_cal_cases():
+        th, sep, verdict = sla.suggest_trigger_db(
+            c["background_peak_db"], c["quietest_hit_db"])
+        out["trigger_calibration"].append({
+            **c, "expected_threshold_db": th,
+            "expected_separation_db": sep, "expected_verdict": verdict,
+        })
+
     dst = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "..", "app", "Tests", "Fixtures", "parity.json")
     dst = os.path.normpath(dst)
@@ -593,7 +628,8 @@ def main():
           f"{len(out['bat_metrics'])} bat cases, "
           f"{len(out['contact_offset'])} contact-offset cases, "
           f"{len(out['rectify_tilt'])} tilt-rectify cases, "
-          f"{len(out['body_angles']) + len(out['body_tilts']) + len(out['body_distances']) + len(out['body_strides'])} body cases")
+          f"{len(out['body_angles']) + len(out['body_tilts']) + len(out['body_distances']) + len(out['body_strides'])} body cases, "
+          f"{len(out['trigger_calibration'])} trigger-calibration cases")
 
 
 if __name__ == "__main__":

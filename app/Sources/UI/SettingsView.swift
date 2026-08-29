@@ -6,6 +6,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showTriggerCalibration = false
     @State private var showDeleteConfirm = false
 
     var body: some View {
@@ -35,6 +36,9 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                     stepper("Threshold over noise floor", value: $model.settings.triggerDb,
                             range: 6...30, step: 1, unit: "dB")
+                    Button("Calibrate at this venue") { showTriggerCalibration = true }
+                    Text("15 dB is the pass/fail gate the validation uses, not a good working threshold for any particular place — too high for a quiet garden, too low for a cage. Calibrating listens to the background, records a few real hits, and puts the number between them. It also says when no threshold can work here, which is worth knowing before a session rather than after.")
+                        .font(.caption).foregroundStyle(.secondary)
                     stepper("Pre-roll", value: $model.settings.preRollS,
                             range: 0.25...2.0, step: 0.25, unit: "s")
                     stepper("Post-roll", value: $model.settings.postRollS,
@@ -111,6 +115,9 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .sheet(isPresented: $showTriggerCalibration) {
+                TriggerCalibrationView(capture: model.capture).environmentObject(model)
+            }
             .scrollContentBackground(.hidden)
             .background(Theme.black)
             .confirmationDialog("Delete every stored swing and clip?",

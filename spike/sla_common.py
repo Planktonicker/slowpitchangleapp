@@ -836,6 +836,78 @@ def contact_quality(u_m: float | None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Contact-trigger calibration
+# ---------------------------------------------------------------------------
+#
+# The trigger fires when a 5 ms RMS impulse stands TRIGGER_DB above the rolling
+# noise floor. PASS_DB = 15 is the validation gate: a venue where real contact
+# does not clear 15 dB is a venue where the auto-trigger cannot work.
+#
+# 15 is a gate, not a good working threshold. It is a single number chosen to
+# decide go/no-go, and it is simultaneously too high for a quiet garden — where
+# a solid hit might peak at 12 dB over near-silence and never fire — and too low
+# for a batting cage, where the floor is high, ricochets are constant and 15 dB
+# fires on everything that is not the ball.
+#
+# So: measure both ends at the venue and put the threshold between them. Record
+# the background for a few seconds, then hit a few times, and the separation
+# between the two decides both the number and whether a number is worth having
+# at all. A venue where the loudest background overlaps the quietest hit cannot
+# be fixed by choosing a cleverer threshold, and saying so is more useful than
+# picking one anyway.
+
+# Where between floor and hit to sit. Below the midpoint on purpose: a missed
+# swing is lost data, while a false trigger is a clip that gets discarded in
+# review — so the asymmetry favours firing. Not so low that ordinary background
+# variance reaches it.
+TRIGGER_MARGIN_FRACTION = 0.35
+
+# Separation below which no threshold is trustworthy: the loudest background
+# and the quietest hit are close enough that any line drawn between them will
+# both miss swings and fire on noise.
+TRIGGER_MIN_SEPARATION_DB = 6.0
+
+TRIGGER_CAL_GOOD = "good"
+TRIGGER_CAL_MARGINAL = "marginal"
+TRIGGER_CAL_UNUSABLE = "unusable"
+
+
+def suggest_trigger_db(background_peak_db: float,
+                       quietest_hit_db: float) -> tuple[float, float, str]:
+    """Pick a contact threshold from a venue measurement.
+
+    Args:
+        background_peak_db: the LOUDEST the background reached while listening,
+            not its average. The threshold has to clear the worst moment, not
+            the typical one — a single passing car is what produces a false
+            trigger, and averages hide it.
+        quietest_hit_db: the WEAKEST of the recorded hits. Same reasoning
+            inverted: the threshold has to catch the softest swing, not the
+            best one.
+
+    Returns (threshold_db, separation_db, verdict).
+
+    The threshold is returned even when the verdict is "unusable", because the
+    caller still has to put something in the field; what changes is what the
+    app tells the user about trusting it.
+    """
+    separation = quietest_hit_db - background_peak_db
+    threshold = background_peak_db + TRIGGER_MARGIN_FRACTION * separation
+    # Never below the floor it is meant to sit above, however the inputs came
+    # out — a negative separation would otherwise produce a threshold under the
+    # background and fire continuously.
+    threshold = max(threshold, background_peak_db + 1.0)
+
+    if separation < TRIGGER_MIN_SEPARATION_DB:
+        verdict = TRIGGER_CAL_UNUSABLE
+    elif separation < 2 * TRIGGER_MIN_SEPARATION_DB:
+        verdict = TRIGGER_CAL_MARGINAL
+    else:
+        verdict = TRIGGER_CAL_GOOD
+    return threshold, separation, verdict
+
+
+# ---------------------------------------------------------------------------
 # Body metrics (sagittal plane only)
 # ---------------------------------------------------------------------------
 #

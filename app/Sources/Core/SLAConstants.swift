@@ -60,6 +60,48 @@ enum SLA {
     static let diameterDriftTol = 0.10     // depth-motion (cosine error) flag threshold
     static let residualTolPx = 3.0
 
+    // MARK: - Contact-trigger calibration
+
+    /// Where between the venue's noise floor and its quietest hit to put the
+    /// threshold. Below the midpoint on purpose: a missed swing is lost data,
+    /// while a false trigger is a clip discarded in review, so the asymmetry
+    /// favours firing.
+    static let triggerMarginFraction = 0.35
+
+    /// Separation below which no threshold is trustworthy — the loudest
+    /// background and the quietest hit overlap closely enough that any line
+    /// between them will both miss swings and fire on noise.
+    static let triggerMinSeparationDb = 6.0
+
+    /// Threshold, separation and verdict from one venue measurement. Port of
+    /// `suggest_trigger_db`.
+    ///
+    /// `backgroundPeakDb` is the LOUDEST the background reached, not its
+    /// average: the threshold has to clear the worst moment, because a single
+    /// passing car is what produces a false trigger and an average hides it.
+    /// `quietestHitDb` is the same reasoning inverted — the threshold has to
+    /// catch the softest swing, not the best one.
+    static func suggestTriggerDb(backgroundPeakDb: Double,
+                                 quietestHitDb: Double)
+        -> (thresholdDb: Double, separationDb: Double, verdict: TriggerCalibrationVerdict) {
+        let separation = quietestHitDb - backgroundPeakDb
+        var threshold = backgroundPeakDb + triggerMarginFraction * separation
+        // Never below the floor it is meant to sit above: a negative separation
+        // would otherwise put the threshold under the background and fire
+        // continuously.
+        threshold = max(threshold, backgroundPeakDb + 1.0)
+
+        let verdict: TriggerCalibrationVerdict
+        if separation < triggerMinSeparationDb {
+            verdict = .unusable
+        } else if separation < 2 * triggerMinSeparationDb {
+            verdict = .marginal
+        } else {
+            verdict = .good
+        }
+        return (threshold, separation, verdict)
+    }
+
     // MARK: - Body pose
 
     /// Below this Vision confidence a joint is treated as absent rather than as
@@ -236,6 +278,33 @@ enum SwingFlag: String, Codable, CaseIterable, Sendable {
             return "The ball changed size through the track, so it flew toward or away from the camera. Stand more square to the line of play."
         case .highResidual:
             return "The tracked path was jittery. Likely a busy background or a partly hidden ball."
+        }
+    }
+}
+
+/// How well a venue separates contact from its own noise. Raw values match the
+/// strings `suggest_trigger_db` returns, so fixtures compare directly.
+enum TriggerCalibrationVerdict: String, Codable, Sendable {
+    case good, marginal, unusable
+
+    var label: String {
+        switch self {
+        case .good: return "Clear"
+        case .marginal: return "Workable"
+        case .unusable: return "Too noisy"
+        }
+    }
+
+    /// Said plainly, because the honest answer for `unusable` is "use the
+    /// manual button", not a threshold dressed up as a solution.
+    var advice: String {
+        switch self {
+        case .good:
+            return "Contact stands well clear of the background here. The trigger should be reliable."
+        case .marginal:
+            return "Contact is only just above the background. Expect the odd missed swing or false start — keep an eye on the ignored count."
+        case .unusable:
+            return "Contact is not louder than this venue's own noise, so no threshold can separate them. Use the manual button, or move somewhere quieter. Turning the threshold down would only fire on everything."
         }
     }
 }

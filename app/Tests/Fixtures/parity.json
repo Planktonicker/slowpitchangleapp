@@ -40,7 +40,9 @@
   "UNDERCUT_CARRY_MAX_M": 0.03,
   "TILT_CORRECTABLE_MAX_DEG": 20.0,
   "JOINT_CONFIDENCE_MIN": 0.3,
-  "HEAD_DRIFT_IMPLAUSIBLE_M": 0.4
+  "HEAD_DRIFT_IMPLAUSIBLE_M": 0.4,
+  "TRIGGER_MARGIN_FRACTION": 0.35,
+  "TRIGGER_MIN_SEPARATION_DB": 6.0
  },
  "fit_quadratic": [
   {
@@ -8059,6 +8061,64 @@
   {
    "drift_m": 1.2,
    "expected": false
+  }
+ ],
+ "trigger_calibration": [
+  {
+   "name": "quiet_garden",
+   "background_peak_db": 4.0,
+   "quietest_hit_db": 28.0,
+   "expected_threshold_db": 12.399999999999999,
+   "expected_separation_db": 24.0,
+   "expected_verdict": "good"
+  },
+  {
+   "name": "outdoor_field",
+   "background_peak_db": 10.0,
+   "quietest_hit_db": 24.0,
+   "expected_threshold_db": 14.899999999999999,
+   "expected_separation_db": 14.0,
+   "expected_verdict": "good"
+  },
+  {
+   "name": "busy_cage",
+   "background_peak_db": 18.0,
+   "quietest_hit_db": 24.0,
+   "expected_threshold_db": 20.1,
+   "expected_separation_db": 6.0,
+   "expected_verdict": "marginal"
+  },
+  {
+   "name": "boundary_good",
+   "background_peak_db": 10.0,
+   "quietest_hit_db": 22.0,
+   "expected_threshold_db": 14.2,
+   "expected_separation_db": 12.0,
+   "expected_verdict": "good"
+  },
+  {
+   "name": "boundary_marginal",
+   "background_peak_db": 10.0,
+   "quietest_hit_db": 16.0,
+   "expected_threshold_db": 12.1,
+   "expected_separation_db": 6.0,
+   "expected_verdict": "marginal"
+  },
+  {
+   "name": "inverted",
+   "background_peak_db": 20.0,
+   "quietest_hit_db": 19.0,
+   "expected_threshold_db": 21.0,
+   "expected_separation_db": -1.0,
+   "expected_verdict": "unusable"
+  },
+  {
+   "name": "no_separation",
+   "background_peak_db": 12.0,
+   "quietest_hit_db": 12.0,
+   "expected_threshold_db": 13.0,
+   "expected_separation_db": 0.0,
+   "expected_verdict": "unusable"
   }
  ]
 }

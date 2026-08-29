@@ -36,6 +36,16 @@ final class ParityTests: XCTestCase {
         var body_distances: [BodyDistanceCase]
         var body_strides: [BodyStrideCase]
         var body_drift_gate: [BodyDriftCase]
+        var trigger_calibration: [TriggerCalCase]
+    }
+
+    struct TriggerCalCase: Decodable {
+        var name: String
+        var background_peak_db: Double
+        var quietest_hit_db: Double
+        var expected_threshold_db: Double
+        var expected_separation_db: Double
+        var expected_verdict: String
     }
 
     /// `expected: nil` means the reference returned NaN. JSON has no NaN, and
@@ -527,6 +537,32 @@ final class ParityTests: XCTestCase {
             XCTAssertEqual(BodyAnalyzer.headDriftPlausible(c.drift_m), c.expected,
                            "drift gate at \(String(describing: c.drift_m))")
         }
+    }
+
+    // MARK: - Trigger calibration
+
+    func testTriggerCalibrationMatchesReference() {
+        for c in Self.fixtures.trigger_calibration {
+            let r = SLA.suggestTriggerDb(backgroundPeakDb: c.background_peak_db,
+                                         quietestHitDb: c.quietest_hit_db)
+            assertClose(r.thresholdDb, c.expected_threshold_db, rel: 1e-9,
+                        "\(c.name) threshold")
+            assertClose(r.separationDb, c.expected_separation_db, rel: 1e-9,
+                        "\(c.name) separation")
+            XCTAssertEqual(r.verdict.rawValue, c.expected_verdict, "\(c.name) verdict")
+            // The property the arithmetic exists to guarantee: whatever the
+            // inputs, the threshold sits above the background it must clear.
+            // Without the floor clamp an inverted measurement would put it
+            // underneath and the trigger would fire continuously.
+            XCTAssertGreaterThan(r.thresholdDb, c.background_peak_db,
+                                 "\(c.name): threshold must clear the background")
+        }
+    }
+
+    func testTriggerCalibrationConstantsMatchReference() {
+        let c = Self.fixtures.constants
+        assertClose(SLA.triggerMarginFraction, c["TRIGGER_MARGIN_FRACTION"]!, "margin fraction")
+        assertClose(SLA.triggerMinSeparationDb, c["TRIGGER_MIN_SEPARATION_DB"]!, "min separation")
     }
 
     func testBodyConstantsMatchReference() {
