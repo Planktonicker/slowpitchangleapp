@@ -13,15 +13,25 @@ One-time pairing, over a cable:
 2. On the phone: **Settings → Privacy & Security → Developer Mode → on**, then
    restart when it asks. (iOS 16+. It only appears once the phone has been
    plugged into Xcode at least once.)
-3. In Xcode: **Window → Devices and Simulators → Devices**, select the iPhone,
-   tick **Connect via network**.
-4. Unplug. A globe appears next to the phone in the run-destination menu.
+3. Unplug, and check **Window → Devices and Simulators → Devices**. If the phone
+   is still listed, wireless is already working — recent Xcode dropped the
+   opt-in and connects automatically once the device is paired, trusted, has
+   Developer Mode on, and is on the same network as the Mac.
+
+   Older Xcode (roughly 11 through 14) had a **Connect via network** checkbox
+   directly under the device's Identifier line. It is not in that pane any more.
+   If the phone does *not* survive being unplugged, control-click it in the
+   left-hand device list — the network option lives in that context menu, beside
+   *Unpair Device*.
 
 From then on ⌘R installs over Wi-Fi. Both machines have to be on the same
 network — a phone on cellular, or a Mac on a different VLAN, will not be found.
 
-If it stops appearing: unpair (right-click the device → Unpair) and redo the
+If it stops appearing: unpair (control-click the device → Unpair) and redo the
 cable step. That is the usual fix and it is quicker than diagnosing it.
+
+The run-destination menu lists the phone by **its device name**, not its model,
+so a phone named something unlike "iPhone" is easy to scroll straight past.
 
 ## 2. How long the app survives
 
