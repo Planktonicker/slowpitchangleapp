@@ -212,6 +212,16 @@ final class AppModel: ObservableObject {
             return
         }
 
+        // Stop the camera first. This is not tidiness — the capture session
+        // holds the hardware video decoder, and an AVAssetReader that cannot
+        // get one fails with "Operation Interrupted" after decoding zero
+        // frames while still reporting the clip's metadata perfectly, because
+        // metadata needs no decoder. Switching tabs deliberately leaves the
+        // session running so the preview survives, which is exactly why this
+        // has to be explicit here.
+        let wasRunning = capture.status == .running
+        if wasRunning { stopCapture() }
+
         let setting = currentSetting
         let detector = settings.detector
         var options = settings.analyzerOptions
@@ -227,6 +237,11 @@ final class AppModel: ObservableObject {
 
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
+            // Wait for the camera to have actually let go. stopCapture() only
+            // enqueues the stop; starting to decode before it lands is the
+            // race this closes.
+            await self.capture.quiesce()
+
             let diagnostics = ClipDiagnostics()
             var analysis: ClipAnalysis?
             var failure: String?
@@ -248,6 +263,9 @@ final class AppModel: ObservableObject {
                 self.lastDiagnostics = report
                 self.finishImport(stored: stored, setting: setting,
                                   analysis: finalAnalysis, failure: finalFailure)
+                // Back on, so returning to the Capture tab does not find a dead
+                // preview and no explanation for it.
+                if wasRunning { self.startCapture() }
             }
         }
     }

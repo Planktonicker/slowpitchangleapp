@@ -123,6 +123,8 @@ final class ClipDiagnostics {
             out.append("6 body     not run")
         }
 
+        for note in notes() { out.append("note       " + note) }
+
         out.append("")
         if let failure {
             out.append("result     FAILED — \(failure)")
@@ -135,11 +137,42 @@ final class ClipDiagnostics {
         return out.joined(separator: "\n")
     }
 
+    /// Things the clip's own numbers say about the footage, separate from
+    /// whether the pipeline worked. Both of these have cost a field trip
+    /// before: footage that turned out not to be 240 fps, and a whole session
+    /// in one file where a swing was expected.
+    private func notes() -> [String] {
+        var out: [String] = []
+        if fps > 0 && fps < 100 {
+            out.append(String(format:
+                "%.0f fps, not 240. Exit velocity scales directly with frame rate, so if this is really slow-motion footage the rate is being read wrong — set an override in Settings. If it is genuinely %.0f fps, the ball moves too far between frames to track.",
+                fps, fps))
+        }
+        if durationS > 20 {
+            out.append(String(format:
+                "%.0fs long — a whole session rather than one swing. Only the single best track in the file is measured, so the other swings in it are discarded silently. Trim to the swing you care about.",
+                durationS))
+        }
+        if width > 0 && width < 1900 {
+            out.append(String(format:
+                "%d px wide, not 1920. The ball is correspondingly smaller, so the minimum-radius gate may reject it — and a re-encoded share from Photos is the usual reason a clip arrives smaller than it was filmed.",
+                width))
+        }
+        return out
+    }
+
     /// Name the stage that failed. The numbers above already contain this, but
     /// stating it means the report is useful to somebody who has not memorised
     /// the pipeline — which includes whoever reads it in six months.
     private func verdict() -> String {
-        if framesDecoded == 0 { return "clip could not be decoded at all" }
+        if framesDecoded == 0 {
+            // Metadata reads need no decoder, so knowing the size and duration
+            // while decoding nothing points at the decoder rather than the file.
+            let readMetadata = width > 0 && durationS > 0
+            return readMetadata
+                ? "the file's metadata read fine but not one frame decoded — that is the hardware video decoder being unavailable, not a bad file. Close anything else using the camera and retry."
+                : "clip could not be decoded at all"
+        }
         if probedFrames > 0, (inWindowPixels.max() ?? 0) < 20 {
             return "the ball's colour is outside the HSV window — almost nothing in any frame matched. Widen it, or the ball is not optic yellow under this light."
         }

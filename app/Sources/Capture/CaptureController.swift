@@ -441,6 +441,19 @@ final class CaptureController: NSObject, ObservableObject {
         }
     }
 
+    /// Resolves once every operation already queued on the session queue has
+    /// run — including a `stop()` enqueued a moment earlier.
+    ///
+    /// `stop()` is asynchronous, so "I stopped the camera, now decode a file"
+    /// is a race: the reader can start while the session is still holding the
+    /// hardware decoder, which is the failure this exists to close. The queue
+    /// is serial, so simply getting to the back of it is the whole mechanism.
+    func quiesce() async {
+        await withCheckedContinuation { continuation in
+            sessionQueue.async { continuation.resume() }
+        }
+    }
+
     func stop() {
         sessionQueue.async { [weak self] in
             guard let self else { return }
