@@ -57,6 +57,12 @@ targets:
         CFBundleDisplayName: SwingLab
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # Declared up front so TestFlight stops asking on every single upload.
+        # It is also simply true: the app makes no network requests at all —
+        # every frame, clip and measurement stays on the device — so it uses no
+        # encryption beyond what the OS does for its own storage, which is
+        # exempt. Revisit this the day any upload or sync feature is added.
+        ITSAppUsesNonExemptEncryption: false
         UILaunchScreen:
           UIColorName: ""
         NSCameraUsageDescription: >-
