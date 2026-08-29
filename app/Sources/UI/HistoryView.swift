@@ -11,6 +11,7 @@ struct HistoryView: View {
     @State private var shareURLs: [URL] = []
     @State private var showShare = false
     @State private var showImporter = false
+    @State private var showDiagnostics = false
 
     private var visible: [SwingDTO] {
         guard let filter else { return model.swings }
@@ -71,6 +72,15 @@ struct HistoryView: View {
                 }
             }
             .overlay(alignment: .bottom) { importProgress }
+            .onChange(of: model.lastDiagnostics) { _, report in
+                // Opened automatically. A report nobody looks at is the same as
+                // no report, and the moment it is worth reading is the moment
+                // the import just finished — especially when it found nothing.
+                showDiagnostics = report != nil
+            }
+            .sheet(isPresented: $showDiagnostics) {
+                DiagnosticsView(report: model.lastDiagnostics ?? "")
+            }
         }
     }
 

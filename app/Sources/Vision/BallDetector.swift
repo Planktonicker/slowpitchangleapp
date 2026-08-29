@@ -79,6 +79,36 @@ struct ROI: Equatable, Sendable {
 /// by the same sub-pixel method as the reference.
 enum BallDetector {
 
+    /// How many pixels in the whole frame pass the colour window, before any
+    /// morphology, size or shape test.
+    ///
+    /// Diagnostics only. It is the one measurement that separates "the ball is
+    /// not the colour we are looking for" from "the colour matched and
+    /// something later threw it away" — and those two failures look identical
+    /// from outside, which is what has made every field failure so far a
+    /// guessing exercise.
+    ///
+    /// Subsampled 2x in each axis: at 1080p that is a quarter of the work for
+    /// an answer that only has to distinguish "almost nothing" from "plenty".
+    /// The returned count is scaled back up so it reads as whole-frame pixels.
+    static func countInWindow(image: PixelImage, settings: DetectorSettings) -> Int {
+        var count = 0
+        var y = 0
+        while y < image.height {
+            var x = 0
+            while x < image.width {
+                let p = image.pixel(x: x, y: y)
+                if HSVConvert.inRange(b: p.b, g: p.g, r: p.r,
+                                      lo: settings.hsvLo, hi: settings.hsvHi) {
+                    count += 1
+                }
+                x += 2
+            }
+            y += 2
+        }
+        return count * 4
+    }
+
     static func detect(image: PixelImage,
                        frame: Int,
                        t: Double,

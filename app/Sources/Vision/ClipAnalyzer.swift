@@ -98,9 +98,13 @@ enum ClipAnalyzer {
     ///   - progress: 0...1, called on an arbitrary thread.
     ///
     /// Does blocking I/O; call from a detached task.
+    /// - Parameter diagnostics: filled in stage by stage when supplied. Owned by
+    ///   the caller so it survives this throwing — a clip that produced nothing
+    ///   is exactly the one worth a report.
     static func analyze(url: URL,
                         contactTime: Double?,
                         options: Options = Options(),
+                        diagnostics: ClipDiagnostics? = nil,
                         progress: (@Sendable (Double) -> Void)? = nil) async throws -> ClipAnalysis {
         let asset = AVURLAsset(url: url)
         guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else {
@@ -112,6 +116,11 @@ enum ClipAnalyzer {
         let height = Int(abs(naturalSize.height).rounded())
         let fps = options.fpsOverride ?? (nominalFPS > 1 ? Double(nominalFPS) : SLA.targetFPS)
         let duration = try await asset.load(.duration).seconds
+        diagnostics?.fps = fps
+        diagnostics?.width = width
+        diagnostics?.height = height
+        diagnostics?.durationS = duration
+        diagnostics?.fpsWasOverridden = options.fpsOverride != nil
 
         // --- pass 1: Vision locates the flight ---
         var hint: TrajectoryHint?
@@ -122,6 +131,7 @@ enum ClipAnalyzer {
                 if duration > 0 { progress?(min(0.45, 0.45 * t / duration)) }
             }
             hint = detector.hint()
+            diagnostics?.hintPoints = hint.map { $0.pointsPx.count }
         }
 
         // --- pass 2: measure ---
@@ -135,9 +145,22 @@ enum ClipAnalyzer {
             ($0 - options.bat.windowS)...($0 + 0.005)
         }
 
+        // A handful of frames, spread through the clip, get their raw in-window
+        // pixel count measured. Counting on every frame would double the cost
+        // of a pass that already walks every pixel, and the question it answers
+        // — does anything in this footage match the colour window at all —
+        // needs samples, not a census.
+        let probeStride = max(1, Int((duration * fps / 8).rounded()))
+
         try forEachSampleBuffer(asset: asset, track: videoTrack) { sb, index, t in
             guard let pb = CMSampleBufferGetImageBuffer(sb) else { return }
+            diagnostics?.framesDecoded += 1
             _ = PixelImage.withImage(pb) { img in
+                if let diagnostics, index % probeStride == 0 {
+                    diagnostics.probedFrames += 1
+                    diagnostics.inWindowPixels.append(
+                        BallDetector.countInWindow(image: img, settings: options.detector))
+                }
                 var cands = BallDetector.detect(image: img,
                                                 frame: index,
                                                 t: t,
@@ -146,11 +169,17 @@ enum ClipAnalyzer {
                 if let h = hint {
                     cands = cands.filter { h.admits(x: $0.x, y: $0.y, corridorPx: options.corridorPx) }
                 }
-                if !cands.isEmpty { perFrame[index] = cands }
+                if !cands.isEmpty {
+                    perFrame[index] = cands
+                    diagnostics?.framesWithCandidates += 1
+                    diagnostics?.totalCandidates += cands.count
+                    diagnostics?.candidateDiametersPx.append(contentsOf: cands.map(\.diameterPx))
+                }
 
                 if options.trackBat, let w = batWindow, w.contains(t),
                    let p = BatTracker.detectTape(image: img, settings: options.bat) {
                     tape.append(BatTracker.TapeObservation(t: t, x: p.x, y: p.y))
+                    diagnostics?.batTapeFrames += 1
                 }
             }
             if duration > 0 { progress?(0.45 + min(0.5, 0.5 * t / duration)) }
@@ -158,6 +187,8 @@ enum ClipAnalyzer {
 
         // --- build the track ---
         var tracks = TrackBuilder.buildTracks(perFrame: perFrame, fps: fps)
+        diagnostics?.tracksBuilt = tracks.count
+        diagnostics?.bestTrackFrames = tracks.map(\.count).max() ?? 0
         var selected = TrackBuilder.selectOutboundTrack(tracks, direction: options.direction)
 
         // Vision saw a flight but the corridor filter starved the tracker:
@@ -166,7 +197,8 @@ enum ClipAnalyzer {
             var retry = options
             retry.forceFallbackDetector = true
             return try await analyze(url: url, contactTime: contactTime,
-                                     options: retry, progress: progress)
+                                     options: retry, diagnostics: diagnostics,
+                                     progress: progress)
         }
         if selected == nil, !tracks.isEmpty {
             tracks.sort { $0.count > $1.count }
@@ -224,12 +256,16 @@ enum ClipAnalyzer {
                                   orientation: options.visionOrientation,
                                   width: width, height: height,
                                   tiltDeg: options.tiltDeg, focalPx: focalPx,
-                                  cx: cx, cy: cy)
+                                  cx: cx, cy: cy, diagnostics: diagnostics)
             body = BodyAnalyzer.analyze(track: pose,
                                         contactTime: effectiveContact,
                                         scaleMPerPx: metrics.scaleBallMPerPx,
                                         ballDirectionX: metrics.vxPxS)
         }
+        diagnostics?.launchAngleDeg = metrics.launchAngleDeg
+        diagnostics?.exitVeloMph = metrics.exitVeloMph
+        diagnostics?.scaleMPerPx = metrics.scaleBallMPerPx
+        diagnostics?.flags = metrics.flags.map(\.rawValue)
         progress?(1.0)
 
         return ClipAnalysis(metrics: metrics,
@@ -257,7 +293,8 @@ enum ClipAnalyzer {
                                    orientation: CGImagePropertyOrientation,
                                    width: Int, height: Int,
                                    tiltDeg: Double, focalPx: Double,
-                                   cx: Double, cy: Double) throws -> [PoseObservation] {
+                                   cx: Double, cy: Double,
+                                   diagnostics: ClipDiagnostics? = nil) throws -> [PoseObservation] {
         let frameStride = max(1, Int((fps / max(1, sampleHz)).rounded()))
         var out: [PoseObservation] = []
         // One request object reused across frames: allocating a fresh
@@ -268,6 +305,7 @@ enum ClipAnalyzer {
         try forEachSampleBuffer(asset: asset, track: track) { sb, index, t in
             guard index % frameStride == 0,
                   let pb = CMSampleBufferGetImageBuffer(sb) else { return }
+            diagnostics?.poseFramesSampled += 1
             let handler = VNImageRequestHandler(cvPixelBuffer: pb,
                                                 orientation: orientation,
                                                 options: [:])
@@ -306,6 +344,8 @@ enum ClipAnalyzer {
             }
             if let best {
                 out.append(PoseObservation(frame: index, t: t, joints: best))
+                diagnostics?.poseFramesWithPerson += 1
+                for (joint, p) in best { diagnostics?.noteJoint(joint, confidence: p.confidence) }
             }
         }
         return out

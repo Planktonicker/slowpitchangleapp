@@ -23,6 +23,11 @@ final class AppModel: ObservableObject {
     /// see the session is progressing without walking back to the phone.
     @Published private(set) var sessionSwingCount = 0
     @Published var banner: Banner?
+    /// Stage-by-stage report from the last imported clip, kept whether the
+    /// analysis succeeded or failed. The failures are the ones worth reading,
+    /// which is why it is not attached to the swing record — a clip that
+    /// produced no swing produces no record to attach it to.
+    @Published var lastDiagnostics: String?
     @Published var settings = AppSettings.load() {
         didSet {
             settings.save()
@@ -208,6 +213,7 @@ final class AppModel: ObservableObject {
         }
 
         let setting = currentSetting
+        let detector = settings.detector
         var options = settings.analyzerOptions
         // Deliberately not seeded from the live camera: this clip was filmed by
         // something else, at some other angle, through some other lens. Using
@@ -217,23 +223,29 @@ final class AppModel: ObservableObject {
         options.tiltDeg = 0
         options.fieldOfViewDeg = 0
         analysisProgress = 0
+        lastDiagnostics = nil
 
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
+            let diagnostics = ClipDiagnostics()
             var analysis: ClipAnalysis?
             var failure: String?
             do {
                 analysis = try await ClipAnalyzer.analyze(
                     url: stored, contactTime: nil, options: options,
+                    diagnostics: diagnostics,
                     progress: { p in
                         Task { @MainActor [weak self] in self?.analysisProgress = p }
                     })
             } catch {
                 failure = error.localizedDescription
+                diagnostics.failure = failure
             }
             let finalAnalysis = analysis
             let finalFailure = failure
+            let report = diagnostics.report(detector: detector)
             await MainActor.run {
+                self.lastDiagnostics = report
                 self.finishImport(stored: stored, setting: setting,
                                   analysis: finalAnalysis, failure: finalFailure)
             }
