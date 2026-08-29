@@ -172,6 +172,108 @@ final class AppModel: ObservableObject {
     /// drops during THIS clip rather than the whole session.
     private var dropsAtClipStart = 0
 
+    // MARK: - Import
+
+    /// Analyse a clip the app did not film.
+    ///
+    /// Worth having for a reason beyond convenience: it turns footage already
+    /// on the phone into a **repeatable** test. Every detector change can be
+    /// re-run against the same swings instead of requiring another trip to a
+    /// field, and the diagnostic the analyser produces is the same one the live
+    /// path produces, so a failure here explains a failure there.
+    ///
+    /// What survives the trip and what does not:
+    ///  * Launch angle and exit velocity **do**. Both rest on the ball's own
+    ///    apparent size, which travels with the footage.
+    ///  * Camera distance, roll, tilt and the level reading **do not** — they
+    ///    were never in the file. So no tilt correction is applied and no roll
+    ///    is taken out.
+    ///  * Contact time **does not**. There was no audio trigger, so the first
+    ///    tracked point is treated as contact; the bat window is derived from
+    ///    it rather than from the crack of the bat.
+    ///
+    /// All three absences arrive as `.importedClip` on the swing, rather than
+    /// as numbers that look like every other swing's.
+    func importClip(from picked: URL) {
+        let needsScope = picked.startAccessingSecurityScopedResource()
+        defer { if needsScope { picked.stopAccessingSecurityScopedResource() } }
+
+        let stored: URL
+        do {
+            stored = try ClipStore.importClip(from: picked)
+        } catch {
+            banner = Banner(kind: .error,
+                            text: "Could not read that file: \(error.localizedDescription)")
+            return
+        }
+
+        let setting = currentSetting
+        var options = settings.analyzerOptions
+        // Deliberately not seeded from the live camera: this clip was filmed by
+        // something else, at some other angle, through some other lens. Using
+        // the tripod's current tilt would correct a projection the footage
+        // never had.
+        options.rollDeg = 0
+        options.tiltDeg = 0
+        options.fieldOfViewDeg = 0
+        analysisProgress = 0
+
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            var analysis: ClipAnalysis?
+            var failure: String?
+            do {
+                analysis = try await ClipAnalyzer.analyze(
+                    url: stored, contactTime: nil, options: options,
+                    progress: { p in
+                        Task { @MainActor [weak self] in self?.analysisProgress = p }
+                    })
+            } catch {
+                failure = error.localizedDescription
+            }
+            let finalAnalysis = analysis
+            let finalFailure = failure
+            await MainActor.run {
+                self.finishImport(stored: stored, setting: setting,
+                                  analysis: finalAnalysis, failure: finalFailure)
+            }
+        }
+    }
+
+    private func finishImport(stored: URL, setting: SwingSetting,
+                              analysis: ClipAnalysis?, failure: String?) {
+        analysisProgress = nil
+        guard let analysis else {
+            // The clip is deleted on failure. Keeping it would leave a file in
+            // the store that no swing points at, which is how a phone quietly
+            // fills up with footage nothing can find.
+            try? FileManager.default.removeItem(at: stored)
+            banner = Banner(kind: .warning,
+                            text: failure ?? "Nothing measurable in that clip.")
+            return
+        }
+        let name = ClipStore.fileUnderConvention(clip: stored, setting: setting)
+        var dto = SwingDTO(analysis: analysis, setting: setting,
+                           clipFilename: name, autoTriggered: false)
+        dto.captureFlags = [.importedClip]
+        do {
+            try store.save(dto)
+            reload()
+            lastSwing = dto
+            // The frame rate is in the banner on purpose. Exit velocity scales
+            // linearly with it, so a clip that says 30 fps when it holds 240 is
+            // an eight-fold error — obvious the moment the number is on screen,
+            // invisible if it is not. Settings has an fps override for exactly
+            // that case.
+            banner = Banner(kind: .info, text: String(
+                format: "Imported at %.0f fps — %.1f° at %.0f mph, %d frames tracked.",
+                dto.fps, dto.launchAngleDeg, dto.exitVeloMph, dto.trackedFrames))
+        } catch {
+            banner = Banner(kind: .error,
+                            text: "Measured it, but could not save: \(error.localizedDescription)")
+        }
+    }
+
     // MARK: - Clip handling
 
     func handleClip(_ output: ClipRecorder.Output, autoTriggered: Bool) {

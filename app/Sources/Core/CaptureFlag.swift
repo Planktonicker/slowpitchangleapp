@@ -34,6 +34,9 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
     /// this the fact evaporates when the counter clears, leaving a swing in
     /// history that looks clean but was measured on a broken frame interval.
     case framesDropped = "FRAMES_DROPPED"
+    /// The clip came from a file rather than from this app's own capture, so
+    /// there is no placement, no level reading and no audio trigger behind it.
+    case importedClip = "IMPORTED_CLIP"
 
     var explanation: String {
         switch self {
@@ -51,6 +54,8 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
             return "Scale came from a typed distance rather than a measured object, so it inherits whatever error is in that number."
         case .hitterGateDisabled:
             return "The requirement for a person in frame was switched off for this session, so a loud noise alone could have started this clip."
+        case .importedClip:
+            return "This clip was imported, not filmed by the app. Launch angle and exit velocity still hold — both come from the ball's own size in the picture, which travels with the footage. What is missing is everything the app measures at capture time: no camera distance, no level or tilt reading to correct with, and no audio trigger, so contact is taken to be the first frame the ball was tracked in rather than the crack of the bat."
         case .framesDropped:
             return "The camera dropped frames while this clip was recorded. Every measurement here assumes a constant frame interval, so timing — and therefore exit velocity — may be off. Close other apps and let the phone cool down."
         }
@@ -66,6 +71,7 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
         case .distanceOutsideProtocol: return "distance"
         case .scaleFromManualDistance: return "typed distance"
         case .hitterGateDisabled: return "no hitter check"
+        case .importedClip: return "imported"
         case .framesDropped: return "dropped frames"
         }
     }

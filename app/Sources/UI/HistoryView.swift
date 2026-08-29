@@ -3,12 +3,14 @@
 // Full terms in LICENSE at the repository root. No warranty.
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct HistoryView: View {
     @EnvironmentObject private var model: AppModel
     @State private var filter: SwingSetting?
     @State private var shareURLs: [URL] = []
     @State private var showShare = false
+    @State private var showImporter = false
 
     private var visible: [SwingDTO] {
         guard let filter else { return model.swings }
@@ -19,11 +21,14 @@ struct HistoryView: View {
         NavigationStack {
             Group {
                 if model.swings.isEmpty {
-                    ContentUnavailableView(
-                        "No swings yet",
-                        systemImage: "figure.baseball",
-                        description: Text("Set the camera up on the Capture tab, arm it, and hit. Clips are kept so anything that looks wrong can be re-run later.")
-                    )
+                    ContentUnavailableView {
+                        Label("No swings yet", systemImage: "figure.baseball")
+                    } description: {
+                        Text("Set the camera up on the Capture tab, arm it, and hit. Clips are kept so anything that looks wrong can be re-run later.")
+                    } actions: {
+                        Button("Import a clip") { showImporter = true }
+                            .buttonStyle(.borderedProminent)
+                    }
                 } else {
                     list
                 }
@@ -35,6 +40,14 @@ struct HistoryView: View {
                 ToolbarItem(placement: .topBarLeading) { filterMenu }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        showImporter = true
+                    } label: {
+                        Image(systemName: "square.and.arrow.down")
+                    }
+                    .disabled(model.analysisProgress != nil)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
                         shareURLs = model.exportAll()
                         showShare = !shareURLs.isEmpty
                     } label: {
@@ -44,6 +57,38 @@ struct HistoryView: View {
                 }
             }
             .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }
+            // `.movie` rather than `.video`: `.video` also matches things with
+            // no video track worth reading, and every failure here costs a
+            // whole analysis pass to discover.
+            .fileImporter(isPresented: $showImporter,
+                          allowedContentTypes: [.movie, .quickTimeMovie, .mpeg4Movie],
+                          allowsMultipleSelection: false) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first { model.importClip(from: url) }
+                case .failure(let error):
+                    model.banner = AppModel.Banner(kind: .error, text: error.localizedDescription)
+                }
+            }
+            .overlay(alignment: .bottom) { importProgress }
+        }
+    }
+
+    /// Import is slow — three decode passes over a 240fps clip — and it happens
+    /// on a screen with nothing else moving, so without this the app looks
+    /// frozen and the user picks a second file on top of the first.
+    @ViewBuilder private var importProgress: some View {
+        if let progress = model.analysisProgress {
+            VStack(spacing: 6) {
+                Text("Measuring the clip…")
+                    .font(.system(size: 13, weight: .bold))
+                ProgressView(value: progress).tint(Theme.yellow)
+                Text("Three passes at 240 fps. A few seconds per second of footage.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+            .padding()
         }
     }
 

@@ -65,6 +65,26 @@ enum ClipStore {
         }
     }
 
+    /// Copy an imported file into the clip store, keeping its extension.
+    ///
+    /// Copied rather than analysed in place, for two reasons: a file picked
+    /// from Files or iCloud Drive lives behind a security-scoped URL that is
+    /// only valid for the length of the picker callback, and a swing record
+    /// that points at somebody else's document would break the moment they
+    /// moved it. The store owns every clip it references.
+    static func importClip(from source: URL) throws -> URL {
+        let ext = source.pathExtension.isEmpty ? "mov" : source.pathExtension
+        let stamp = Int(Date().timeIntervalSince1970)
+        let base = source.deletingPathExtension().lastPathComponent
+            .replacingOccurrences(of: "/", with: "_")
+        let dst = clipsDirectory.appendingPathComponent("import_\(stamp)_\(base).\(ext)")
+        if FileManager.default.fileExists(atPath: dst.path) {
+            try FileManager.default.removeItem(at: dst)
+        }
+        try FileManager.default.copyItem(at: source, to: dst)
+        return dst
+    }
+
     static func delete(clipNamed name: String?) {
         guard let name else { return }
         try? FileManager.default.removeItem(at: clipURL(named: name))
