@@ -79,7 +79,8 @@ struct HistoryView: View {
                 showDiagnostics = report != nil
             }
             .sheet(isPresented: $showDiagnostics) {
-                DiagnosticsView(report: model.lastDiagnostics ?? "")
+                DiagnosticsView(report: model.lastDiagnostics ?? "",
+                                clipURL: model.lastImportedClip)
             }
         }
     }

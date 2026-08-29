@@ -14,8 +14,13 @@ import UIKit
 /// not an afterthought at the bottom.
 struct DiagnosticsView: View {
     let report: String
+    /// The clip this report came from, when it is still around. Offered here
+    /// because this sheet is where somebody is already looking at a failure and
+    /// wondering what the camera actually saw.
+    var clipURL: URL?
     @Environment(\.dismiss) private var dismiss
     @State private var copied = false
+    @State private var showFrames = false
 
     var body: some View {
         NavigationStack {
@@ -45,6 +50,13 @@ struct DiagnosticsView: View {
                         Label("Share", systemImage: "square.and.arrow.up")
                     }
                     .buttonStyle(OutlineButtonStyle())
+
+                    if clipURL != nil {
+                        Button { showFrames = true } label: {
+                            Label("Frames", systemImage: "photo.stack")
+                        }
+                        .buttonStyle(OutlineButtonStyle())
+                    }
                 }
                 .padding()
                 .background(.ultraThinMaterial)
@@ -53,6 +65,9 @@ struct DiagnosticsView: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }.fontWeight(.bold)
                 }
+            }
+            .sheet(isPresented: $showFrames) {
+                if let clipURL { FramePickerView(clipURL: clipURL) }
             }
         }
         .preferredColorScheme(.dark)

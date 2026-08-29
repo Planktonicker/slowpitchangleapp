@@ -28,6 +28,12 @@ final class AppModel: ObservableObject {
     /// which is why it is not attached to the swing record — a clip that
     /// produced no swing produces no record to attach it to.
     @Published var lastDiagnostics: String?
+    /// The clip the last import ran on, kept whether it measured or not.
+    ///
+    /// Kept *especially* when it did not: a clip the pipeline could make
+    /// nothing of is the one whose frames are worth looking at. Replaced on the
+    /// next import, so at most one unreferenced file exists at a time.
+    @Published var lastImportedClip: URL?
     @Published var settings = AppSettings.load() {
         didSet {
             settings.save()
@@ -232,8 +238,15 @@ final class AppModel: ObservableObject {
         options.rollDeg = 0
         options.tiltDeg = 0
         options.fieldOfViewDeg = 0
+        // Whatever the previous failed import left behind goes now, before this
+        // one takes its place — otherwise the store grows a file per failure.
+        if let previous = lastImportedClip,
+           !swings.contains(where: { $0.clipFilename == previous.lastPathComponent }) {
+            try? FileManager.default.removeItem(at: previous)
+        }
         analysisProgress = 0
         lastDiagnostics = nil
+        lastImportedClip = stored
 
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
@@ -274,15 +287,17 @@ final class AppModel: ObservableObject {
                               analysis: ClipAnalysis?, failure: String?) {
         analysisProgress = nil
         guard let analysis else {
-            // The clip is deleted on failure. Keeping it would leave a file in
-            // the store that no swing points at, which is how a phone quietly
-            // fills up with footage nothing can find.
-            try? FileManager.default.removeItem(at: stored)
+            // Kept, not deleted. A clip the pipeline made nothing of is exactly
+            // the one whose frames are worth exporting, and deleting it here
+            // would throw away the evidence at the moment it became useful.
+            // The next import clears it.
             banner = Banner(kind: .warning,
                             text: failure ?? "Nothing measurable in that clip.")
             return
         }
         let name = ClipStore.fileUnderConvention(clip: stored, setting: setting)
+        // Renamed into the store's convention, so point at where it now lives.
+        lastImportedClip = name.map { ClipStore.clipURL(named: $0) } ?? stored
         var dto = SwingDTO(analysis: analysis, setting: setting,
                            clipFilename: name, autoTriggered: false)
         dto.captureFlags = [.importedClip]
