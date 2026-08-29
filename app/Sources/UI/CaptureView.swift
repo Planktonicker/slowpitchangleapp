@@ -107,14 +107,30 @@ struct CaptureScreen: View {
                 case .background:
                     model.stopCapture()
                     wizard.stopSensors()
+                    UIApplication.shared.isIdleTimerDisabled = false
                 case .active:
                     if capture.status != .running { model.startCapture() }
                     wizard.startSensors()
+                    // Locking the phone rotates the window to portrait for the
+                    // lock screen. The rotation coordinator publishes that, the
+                    // session is stopped and restarted around the same moment,
+                    // and the angle can land when there is no connection to
+                    // take it — after which nothing republishes it, because the
+                    // phone never moved. The preview then comes back sideways.
+                    capture.refreshPreviewRotation()
                 default:
                     break
                 }
             }
             .onChange(of: wizard.scaleSource) { _, _ in syncLiveMeasurement() }
+            .onChange(of: capture.isArmed) { _, _ in syncIdleTimer() }
+            .onChange(of: capture.isRecordingClip) { _, _ in syncIdleTimer() }
+            .onChange(of: showSetup) { _, _ in syncIdleTimer() }
+            .onDisappear {
+                // Never leave it disabled behind us — a stuck idle timer is a
+                // flat battery in a pocket, and nothing on screen would say why.
+                UIApplication.shared.isIdleTimerDisabled = false
+            }
             .sheet(isPresented: $showStatus) {
                 StatusSheet(capture: capture, wizard: wizard).environmentObject(model)
             }
@@ -565,6 +581,22 @@ struct CaptureScreen: View {
         showSetup = false
         capture.wantsSkeleton = false
         syncLiveMeasurement()
+    }
+
+    /// Keep the screen awake while the app is doing something that would be
+    /// ruined by it going out.
+    ///
+    /// This is a tripod app: you set it up, walk to the plate, and swing. The
+    /// default auto-lock is a minute or two, which is roughly the time that
+    /// takes — so the phone slept, the session stopped, and the swing was
+    /// missed. That is the real failure, and it looks like "the app keeps
+    /// locking out" rather than like a settings default.
+    ///
+    /// Scoped rather than global: armed, or standing in setup framing the shot.
+    /// Not while browsing swings, where the phone should behave like a phone.
+    private func syncIdleTimer() {
+        let keepAwake = capture.isArmed || capture.isRecordingClip || showSetup
+        UIApplication.shared.isIdleTimerDisabled = keepAwake
     }
 
     /// Keep frame conversion on exactly while a tap could mean "measure the

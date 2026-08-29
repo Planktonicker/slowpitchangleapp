@@ -146,6 +146,17 @@ final class CaptureController: NSObject, ObservableObject {
     private var previewConnection: AVCaptureConnection?
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private var rotationObservations: [NSKeyValueObservation] = []
+    /// The last angle the coordinator published. `sessionQueue` only.
+    ///
+    /// Needed because the angle and the connection do not have to exist at the
+    /// same moment. Locking the phone rotates the window to portrait, which
+    /// makes the coordinator publish; the session is stopped and restarted
+    /// around the same transition, so the connection can be nil exactly then
+    /// and the angle was simply dropped. It was never published again — the
+    /// device had not moved, so there was nothing new to report — and the
+    /// preview came back rotated wrong. Remembering it lets any connection made
+    /// afterwards be brought up to date.
+    private var lastPreviewRotationAngle: CGFloat?
 
     /// Queue-safe mirror of `visionOrientation`. The video delegate cannot read
     /// the `@Published` copy, which belongs to the main queue.
@@ -312,8 +323,30 @@ final class CaptureController: NSObject, ObservableObject {
         guard session.canAddConnection(connection) else { return }
         session.addConnection(connection)
         previewConnection = connection
+        // A brand-new connection starts at the default angle, so bring it up to
+        // whatever the last known one was before anything is drawn through it.
+        if let angle = lastPreviewRotationAngle { applyPreviewRotation(angle) }
 
         installRotationCoordinator(device: input.device, layer: layer)
+    }
+
+    /// Re-apply the current rotation to whatever connection exists now.
+    ///
+    /// Called when the app comes back to the foreground. Nothing about the
+    /// phone changed while it was locked, so the coordinator has no reason to
+    /// publish again — but the connection it last published to may be gone.
+    func refreshPreviewRotation() {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            if let angle = self.rotationCoordinator?.videoRotationAngleForHorizonLevelPreview {
+                self.applyPreviewRotation(angle)
+            } else if let angle = self.lastPreviewRotationAngle {
+                self.applyPreviewRotation(angle)
+            }
+            if let capture = self.rotationCoordinator?.videoRotationAngleForHorizonLevelCapture {
+                self.setVisionOrientation(Self.orientation(forCaptureAngle: capture))
+            }
+        }
     }
 
     /// One source of truth for "which way is up" — feeding both the preview
@@ -346,6 +379,9 @@ final class CaptureController: NSObject, ObservableObject {
     }
 
     private func applyPreviewRotation(_ angle: CGFloat) {
+        // Recorded before the guard, not after. The whole point is to keep the
+        // angle when there is nothing to apply it to yet.
+        lastPreviewRotationAngle = angle
         guard let connection = previewConnection,
               connection.isVideoRotationAngleSupported(angle) else { return }
         CATransaction.begin()
