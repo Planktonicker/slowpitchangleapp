@@ -299,8 +299,14 @@ final class AppModel: ObservableObject {
         // the tripod's current tilt would correct a projection the footage
         // never had.
         options.rollDeg = 0
+        // Tilt starts at zero because nothing in the file records it — but the
+        // OPTICS are now assumed rather than zeroed. Zero field of view meant
+        // zero focal length, which meant the tilt correction could not run at
+        // all even once somebody supplied an angle. The horizon tool in "Play
+        // with tracking overlaid" is how that angle gets supplied, and this is
+        // what lets it do anything.
         options.tiltDeg = 0
-        options.fieldOfViewDeg = 0
+        options.fieldOfViewDeg = settings.importFovDeg
         // The radius gates are pixel counts chosen for 1080p. A 720p slow-motion
         // clip — a real iPhone mode — shows the same ball at two thirds the
         // size, which walks it toward the minimum and can push it out entirely.
@@ -428,6 +434,10 @@ final class AppModel: ObservableObject {
         var dto = SwingDTO(analysis: analysis, setting: setting,
                            clipFilename: name, autoTriggered: false)
         dto.captureFlags = [.importedClip]
+        // Carried on the record so re-analysis uses the same lens the first
+        // pass assumed, and so the horizon tool has a focal length to work
+        // with. Assumed, not measured — hence the flag above.
+        dto.cameraFovDeg = settings.importFovDeg
         writeTracks(for: analysis, clipName: name, setting: setting, into: &dto)
         do {
             try store.save(dto)

@@ -57,6 +57,19 @@ enum VideoOverlayGeometry {
         return rect.width / display.width
     }
 
+    /// Whether the transform turns the picture a quarter turn, so the
+    /// displayed VERTICAL spans the buffer's width rather than its height.
+    ///
+    /// A lens's field of view is quoted horizontally for the sensor's own
+    /// landscape frame. Working out what vertical angle a viewer is seeing
+    /// therefore depends on which way the picture was turned, and getting it
+    /// backwards on a portrait clip scales every angle read off the screen by
+    /// the frame's aspect ratio — nearly a factor of two on 16:9.
+    static func isQuarterTurned(natural: CGSize, transform: CGAffineTransform) -> Bool {
+        let d = displaySize(natural: natural, transform: transform)
+        return abs(d.width - natural.height) < 1 && abs(d.height - natural.width) < 1
+    }
+
     /// The whole job: an encoded buffer pixel, as a point in the view.
     ///
     /// The transform already carries the translation that keeps the rotated

@@ -62,6 +62,22 @@ struct AppSettings: Codable, Equatable {
     /// wrong — so this defaults on and warns about space instead.
     var keepClips = true
     var fpsOverride: Double?
+
+    /// Horizontal field of view assumed for imported clips, in degrees.
+    ///
+    /// A clip this app filmed carries its own optics. One from the stock
+    /// Camera app carries none — and without a field of view there is no focal
+    /// length, and without a focal length camera tilt cannot be undone at all,
+    /// because the correction is a homography in the tilt angle AND the focal
+    /// length. Imports were therefore given zero and got no tilt correction
+    /// whatsoever, which is the one thing they need most: nobody levels a
+    /// phone they are holding.
+    ///
+    /// 68 degrees is the main wide camera on every recent iPhone. It is an
+    /// assumption, so it is a setting rather than a constant, and swings
+    /// measured with it are flagged.
+    var importFovDeg: Double = 68
+
     var visionOrientation: VisionOrientationSetting = .auto
     /// Everything else in the app is metric; ball and bat speed are the one
     /// exception, because the sport's published reference numbers are in mph.

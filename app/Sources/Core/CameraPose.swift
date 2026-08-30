@@ -84,6 +84,28 @@ enum CameraPose {
         return 0.5 - tan(t) / (2 * tan(vHalf * .pi / 180))
     }
 
+    /// The tilt implied by a horizon at this height in the frame — the inverse
+    /// of `horizonFraction`.
+    ///
+    /// This is how a clip the app did not film can still be corrected. Tilt
+    /// normally comes from the IMU at capture time, and an imported clip has
+    /// none: it was filmed by the stock Camera app, which records no such
+    /// thing. But the horizon is *in the picture*, and where it sits is a
+    /// direct reading of where the lens was pointing. Somebody dragging a line
+    /// onto the tree line is measuring the same angle the accelerometer would
+    /// have, by hand.
+    ///
+    /// Roughly right is worth a great deal here. The rectification degrades
+    /// smoothly — it is a homography in the tilt angle, with no cliff — so a
+    /// horizon placed a few degrees out leaves a reading far closer to the
+    /// truth than assuming a level camera that was never level.
+    static func tiltDeg(forHorizonFraction fraction: Double,
+                        visibleVerticalHalfAngleDeg vHalf: Double) -> Double? {
+        guard vHalf > 0.5, vHalf < 89, fraction.isFinite else { return nil }
+        let t = atan((0.5 - fraction) * 2 * tan(vHalf * .pi / 180))
+        return t * 180 / .pi
+    }
+
     /// How high the lens is above the ground, from where the hitter's feet
     /// land in the frame.
     ///

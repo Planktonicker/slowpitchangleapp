@@ -82,6 +82,10 @@ struct SettingsView: View {
                                 .frame(width: 96)
                         }
                     }
+                    stepper("Imported clip lens (FOV)", value: $model.settings.importFovDeg,
+                            range: 40...120, step: 1, unit: "°")
+                    Text("A clip this app filmed knows its own lens. One from the stock Camera app does not, and without a field of view there is no focal length — which means camera tilt cannot be undone at all, since the correction needs both. 68° is the main wide camera on recent iPhones; use about 100° for the 0.5× ultra-wide and about 40° for the 2× or 3×. Getting it roughly right is what matters.")
+                        .font(.caption).foregroundStyle(.secondary)
                     Text("Leave this OFF. The frame rate is measured from the clip's own frame timing, which is right for any rate — 240, 200, 198.94 — and does not care what the file's metadata claims. Turn it on only if a diagnostics report shows a measured rate you know to be wrong, which means the footage was re-timed after recording. Exit velocity scales directly with frame rate, so a wrong number here is a wrong speed by exactly the same factor.")
                         .font(.caption).foregroundStyle(.secondary)
                 }

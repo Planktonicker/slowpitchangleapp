@@ -23,6 +23,7 @@ import UIKit
 struct TrackReviewView: View {
     let swing: SwingDTO
 
+    @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var player: AVPlayer?
@@ -41,6 +42,10 @@ struct TrackReviewView: View {
     @State private var showTrail = true
     @State private var showSkeleton = true
     @State private var showRejects = true
+    /// Where the user says the true horizon is, as a fraction down the
+    /// picture. `nil` until the tool is opened.
+    @State private var horizonFraction: Double?
+    @State private var showHorizonTool = false
 
     var body: some View {
         NavigationStack {
@@ -76,6 +81,9 @@ struct TrackReviewView: View {
                     if naturalSize != .zero {
                         overlay(in: geo.size)
                             .allowsHitTesting(false)
+                        if showHorizonTool {
+                            horizonTool(in: geo.size)
+                        }
                     }
                 }
             }
@@ -210,6 +218,127 @@ struct TrackReviewView: View {
         .shadow(color: .black.opacity(0.7), radius: 2)
     }
 
+    // MARK: - Horizon
+
+    /// Half the vertical field of view of the picture as shown.
+    ///
+    /// The lens angle is quoted horizontally for the sensor's landscape frame,
+    /// so which way the clip was turned decides what vertical angle the screen
+    /// is showing. Getting that backwards would scale every tilt read off this
+    /// tool by the frame's aspect ratio.
+    private var displayedVerticalHalfDeg: Double? {
+        let fov = swing.cameraFovDeg ?? model.settings.importFovDeg
+        guard fov > 1, naturalSize.width > 0, naturalSize.height > 0 else { return nil }
+        if VideoOverlayGeometry.isQuarterTurned(natural: naturalSize, transform: transform) {
+            // The display's vertical spans the buffer's WIDTH, which is what
+            // the horizontal field of view describes.
+            return fov / 2
+        }
+        return CameraPose.verticalHalfAngleDeg(
+            horizontalFovDeg: fov,
+            frameAspect: Double(naturalSize.width / naturalSize.height))
+    }
+
+    /// The tilt implied by where the line has been dragged.
+    private var horizonTiltDeg: Double? {
+        guard let f = horizonFraction, let vHalf = displayedVerticalHalfDeg else { return nil }
+        return CameraPose.tiltDeg(forHorizonFraction: f, visibleVerticalHalfAngleDeg: vHalf)
+    }
+
+    /// A line to drag onto the real horizon.
+    ///
+    /// An imported clip carries no tilt reading — the stock Camera app records
+    /// none — so the correction that exists for filmed clips could never run on
+    /// one. The horizon is in the picture though, and where it sits IS the
+    /// angle: dragging a line onto the tree line measures by hand exactly what
+    /// the accelerometer would have. Roughly right is worth having, because the
+    /// rectification is smooth in the angle and has no cliff: a horizon a few
+    /// degrees out still lands far closer than pretending the camera was level.
+    private func horizonTool(in size: CGSize) -> some View {
+        let display = VideoOverlayGeometry.displaySize(natural: naturalSize, transform: transform)
+        let rect = VideoOverlayGeometry.videoRect(displaySize: display, in: size)
+        let fraction = horizonFraction ?? 0.5
+        let y = rect.minY + CGFloat(fraction) * rect.height
+
+        return ZStack {
+            Path { p in
+                p.move(to: CGPoint(x: rect.minX, y: y))
+                p.addLine(to: CGPoint(x: rect.maxX, y: y))
+            }
+            .stroke(Theme.pass, style: StrokeStyle(lineWidth: 2, dash: [10, 6]))
+
+            Text("DRAG ONTO THE HORIZON")
+                .font(Theme.label(10)).tracking(1.2)
+                .foregroundStyle(.black)
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Theme.pass, in: Capsule())
+                .position(x: rect.midX, y: y - 16)
+
+            // A wide invisible grab bar. The line itself is two points tall and
+            // would be nearly impossible to catch with a fingertip.
+            Rectangle()
+                .fill(.clear)
+                .contentShape(Rectangle())
+                .frame(width: max(1, rect.width), height: 60)
+                .position(x: rect.midX, y: y)
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            guard rect.height > 1 else { return }
+                            horizonFraction = min(1, max(0,
+                                Double((value.location.y - rect.minY) / rect.height)))
+                        }
+                )
+        }
+    }
+
+    /// The row that turns a dragged line into a re-measurement.
+    private var horizonBar: some View {
+        VStack(spacing: 8) {
+            if let tilt = horizonTiltDeg {
+                Text(abs(tilt) < 0.5
+                     ? "Camera was level"
+                     : String(format: "Camera was aiming %@ %.1f°",
+                              tilt > 0 ? "down" : "up", abs(tilt)))
+                    .font(Theme.numeral(15))
+                    .foregroundStyle(Theme.pass)
+            } else {
+                Text("Drag the green line onto the real horizon — the tree line, the far fence, where the ground meets the sky.")
+                    .font(.caption).foregroundStyle(Theme.steel)
+                    .multilineTextAlignment(.center)
+            }
+            HStack(spacing: 12) {
+                Button("Cancel") {
+                    showHorizonTool = false
+                    horizonFraction = nil
+                }
+                .buttonStyle(OutlineButtonStyle())
+                Button("Re-measure with this tilt") {
+                    applyHorizonTilt()
+                }
+                .buttonStyle(SlabButtonStyle(fill: Theme.yellow, verticalPadding: 12))
+                .disabled(horizonTiltDeg == nil)
+            }
+        }
+    }
+
+    /// Stamp the measured tilt onto the swing and run the clip again.
+    ///
+    /// The FOV goes on too. Without it there is no focal length, and the
+    /// rectification is a homography in the tilt angle AND the focal length —
+    /// an angle on its own corrects nothing.
+    private func applyHorizonTilt() {
+        guard let tilt = horizonTiltDeg else { return }
+        var updated = swing
+        updated.cameraTiltDeg = tilt
+        updated.cameraFovDeg = swing.cameraFovDeg ?? model.settings.importFovDeg
+        model.update(updated)
+        model.reanalyze(updated)
+        showHorizonTool = false
+        horizonFraction = nil
+        dismiss()
+    }
+
     // MARK: - Controls
 
     private var controls: some View {
@@ -241,11 +370,39 @@ struct TrackReviewView: View {
             }
             .foregroundStyle(Theme.yellow)
 
+            if showHorizonTool {
+                horizonBar
+            }
+
             HStack(spacing: 14) {
                 toggleChip("Ball", isOn: $showBall, colour: Theme.pass)
                 toggleChip("Path", isOn: $showTrail, colour: Theme.yellow)
                 toggleChip("Body", isOn: $showSkeleton, colour: Theme.yellow)
                 toggleChip("Rejected", isOn: $showRejects, colour: Theme.warn)
+            }
+
+            if !showHorizonTool {
+                Button {
+                    showHorizonTool = true
+                    // Seeded from whatever tilt the swing already carries, so
+                    // opening the tool on a corrected clip shows where the
+                    // current answer puts the horizon rather than resetting it.
+                    if let vHalf = displayedVerticalHalfDeg {
+                        horizonFraction = CameraPose.horizonFraction(
+                            tiltDeg: swing.cameraTiltDeg ?? 0,
+                            visibleVerticalHalfAngleDeg: vHalf) ?? 0.5
+                    } else {
+                        horizonFraction = 0.5
+                    }
+                } label: {
+                    Label(swing.cameraTiltDeg == nil
+                          ? "Camera wasn't level? Set the horizon"
+                          : String(format: "Tilt %.1f° — set the horizon again",
+                                   swing.cameraTiltDeg ?? 0),
+                          systemImage: "level")
+                        .font(.callout)
+                }
+                .foregroundStyle(Theme.pass)
             }
         }
         .padding(14)

@@ -208,6 +208,34 @@ plays full screen with everything the app measured drawn on it:
   never examined at all, so a ball out there is not a detection failure,
   it is a search that never went near it.
 
+### The camera wasn't level — fixing it after the fact
+
+A clip **this app filmed** records its own tilt from the phone's motion sensor
+and corrects for it automatically, at any angle. A clip from the stock Camera
+app records nothing of the sort, so an imported swing starts out assuming a
+level camera — and nobody hand-holding a phone is level.
+
+In **"Play with tracking overlaid"**, tap **"Camera wasn't level? Set the
+horizon"**. Drag the green line onto the real horizon — the tree line, the far
+fence, wherever the ground meets the sky — and it reads back the angle the
+phone was pointing at. Then **"Re-measure with this tilt"**.
+
+Roughly right is genuinely enough. The correction is smooth in the angle with
+no cliff, so a horizon placed a few degrees out lands far closer to the truth
+than pretending the camera was level. It is worth doing even for a clip that
+looks nearly level.
+
+Two things to know:
+
+- Set **Settings → Analysis → "Imported clip lens (FOV)"** to match what you
+  filmed on — 68° for the normal 1× camera, about 100° for 0.5×, about 40° for
+  2× or 3×. Without a lens angle there is no focal length, and the tilt
+  correction needs both.
+- **Camera height needs no correcting.** A level camera sees the same geometry
+  from the grass as from a tripod — the ball just rides higher in the picture.
+  Only *tilt* costs accuracy, which is why aiming a short tripod upward is
+  worse than leaving it low and level.
+
 Those three cases are what "it didn't detect the ball" splits into, and they
 need opposite fixes: nothing drawn at all means the colour or size gates
 rejected it (Settings → Ball colour / Ball size); an amber ring means the

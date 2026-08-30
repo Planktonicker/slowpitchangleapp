@@ -92,6 +92,39 @@ final class CameraPoseTests: XCTestCase {
         XCTAssertNil(CameraPose.horizonFraction(tiltDeg: 90, visibleVerticalHalfAngleDeg: 21))
     }
 
+    // MARK: - Tilt from a placed horizon
+
+    /// The round trip that makes the horizon tool trustworthy: a tilt drawn as
+    /// a line, read back off that line, has to be the tilt you started with.
+    func testTiltRoundTripsThroughTheHorizon() throws {
+        for tilt in [-30.0, -12.0, -3.0, 0.0, 4.5, 15.0, 33.0] {
+            let f = try XCTUnwrap(CameraPose.horizonFraction(
+                tiltDeg: tilt, visibleVerticalHalfAngleDeg: 21))
+            let back = try XCTUnwrap(CameraPose.tiltDeg(
+                forHorizonFraction: f, visibleVerticalHalfAngleDeg: 21))
+            XCTAssertEqual(back, tilt, accuracy: 1e-6)
+        }
+    }
+
+    func testHorizonAtFrameCentreIsLevel() throws {
+        let t = try XCTUnwrap(CameraPose.tiltDeg(forHorizonFraction: 0.5,
+                                                 visibleVerticalHalfAngleDeg: 21))
+        XCTAssertEqual(t, 0, accuracy: 1e-9)
+    }
+
+    /// A horizon low in the frame means the lens is pointed above it.
+    func testHorizonBelowCentreMeansAimingUp() throws {
+        let t = try XCTUnwrap(CameraPose.tiltDeg(forHorizonFraction: 0.8,
+                                                 visibleVerticalHalfAngleDeg: 21))
+        XCTAssertLessThan(t, 0)
+    }
+
+    func testHorizonAboveCentreMeansAimingDown() throws {
+        let t = try XCTUnwrap(CameraPose.tiltDeg(forHorizonFraction: 0.2,
+                                                 visibleVerticalHalfAngleDeg: 21))
+        XCTAssertGreaterThan(t, 0)
+    }
+
     // MARK: - Lens height
 
     /// A level camera lying on the ground sees the feet of anything standing on
