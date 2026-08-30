@@ -301,6 +301,34 @@ it ranks #21 of 430 either way, and the clip's actual maximum is elsewhere.
 Motion energy is dominated by the background — foliage, the crowd, the ramp
 frames — and contact is not the loudest thing in the picture even locally.
 
+**Body motion — including anything a skeleton could be built on — separates a
+SWING but not a HIT, and the app needs the second one.** IMG_6707 settles this
+by accident: the hitter takes a practice cut 1.1–1.5 s after the real one, and
+in a box drawn round the hitter alone (excluding the tree line, which is what
+swamped the whole-frame measurement) the practice cut is *stronger* than the
+swing that actually hit the ball —
+
+| measured in the hitter's box | real swing | practice cut, no ball |
+|---|---|---|
+| peak moved-pixel share | 23.7% | **24.9%** |
+| peak sweep of the motion centroid | 8.09 px/frame | **13.52 px/frame** |
+| frames over 18% | 7 | **10** |
+
+— and only 3 of the clip's top 12 motion frames belong to the real swing. The
+ball detector confirms there was no ball: two tracks in the whole clip, both
+inside 0.133–0.412 s, nothing at 1.35–1.90 s.
+
+This is not a tuning problem and a better skeleton does not fix it. A practice
+swing *is* a swing; it differs from a hit only in whether a ball was on the end
+of it, and the ball is not in the skeleton. Pose tracking on this footage is
+otherwise excellent material — the hitter is large, side-on and unobstructed —
+so the limit is the question being asked, not the tracker.
+
+Where pose is worth the compute is *after* the clip exists, not as the thing
+that decides it should: rejecting clips where nobody swung at all is the
+`HumanPresenceGate`'s existing job, and it is a different and much easier
+question than "was that swing a hit".
+
 The signal that *does* separate is the ball's own speed, and it is only
 available after detection has run. That is the useful conclusion and it is an
 architectural one: the phone records continuously into a ring buffer, so the
