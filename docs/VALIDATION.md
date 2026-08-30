@@ -60,7 +60,52 @@ Expect the app to also mark the clip **"No struck ball identified"**. That is
 correct and does not affect this test: a falling ball is not a swing, the
 plausibility gate says so, and the two scale numbers are computed either way.
 
-- Date: ______ Disagreement: ______ % -> Pass? ______
+### G0 result — 2026-08-30, tee_05.mov (FAIL, and it found something)
+
+First run of this test. Indoors, 1920x1080 at 240fps, 12-inch softball dropped
+from head height in front of the camera.
+
+The fall itself is textbook: 63 tracked points over 342 ms fitting a parabola
+with a **0.55 px** residual. That is what makes the rest of this trustworthy.
+
+| | apparent ball diameter | implied scale | vs gravity |
+|---|---|---|---|
+| what gravity requires | **~38 px** | ~2.55 mm/px | — |
+| raw colour mask | 35.0 px | 2.771 mm/px | +9% |
+| **what the app measured** | **32.8 px** | 2.958 mm/px | **+14%** |
+
+**Verdict: the app under-measures the ball, so every exit velocity it reports
+is roughly 14% too high.** The app flagged `SCALE_DISAGREE` on the clip, which
+is the gate working — it refused to stand behind the reading.
+
+Uncertainty on that 14% is a few percent, not tenths. Fitting `g` over sliding
+windows gives 3525-3997 px/s^2, converging near 3950 once the ball is moving
+fast enough for the quadratic term to be well conditioned; the early windows,
+where it has barely started falling, are ill-posed and should be ignored. The
+apparent diameter stayed 34-36 px for the whole fall, so the ball was not
+moving in depth and the two scales really are measuring the same thing.
+
+**Not acted on yet, deliberately.** One clip is not grounds for changing a
+number that `ParityTests` pins and every reading depends on. What would settle
+it, in order of value:
+
+1. **A second drop, framed better.** Keep the ball nearer the middle of the
+   frame and let it fall further before it leaves — the ill-conditioned early
+   windows are what widen the error bar. Two clips agreeing to a couple of
+   percent turns this from a finding into a correction.
+2. **A drop at a different distance.** If the bias is the same percentage at
+   4 m as at 2 m, it is the diameter measurement. If it changes with distance,
+   it is the optics.
+3. **Then, and only then, fix the mechanism** — `_subpixel_minor_diameter`,
+   which reads 32.8 px where the raw mask reads 35.0 and gravity wants 38.
+   Its alpha = 0.5 crossing lands inside the true silhouette. Fixing the
+   measurement is right; scaling its output by a number derived from one clip
+   is not.
+
+Readings taken before this is resolved should be treated as **~14% high in
+speed**. Launch angle is unaffected — it is an angle, and needs no scale.
+
+- Date: 2026-08-30  Disagreement: 14 % -> Pass? **NO** (tolerance 8%)
 
 ### G0b — The two-distance check (no truth needed at all)
 
