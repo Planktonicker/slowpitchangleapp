@@ -413,6 +413,17 @@ final class ParityTests: XCTestCase {
     /// lawn of stationary clutter blobs, dozens of which sit inside the
     /// association gate of its path.
     ///
+    /// ...and on a REAL clip's own frames, `real_clip_reversal_must_split`.
+    /// On tee_02 the ball arrived down-left at 10 px a frame and its very last
+    /// step before contact measured 4.98 — the step before contact is the
+    /// slowest one a ball takes — so a heading read from that single pair fell
+    /// two hundredths of a pixel under the floor, the guard switched itself
+    /// off for exactly the frame it exists to catch, and one 59-frame track
+    /// came out that was half incoming ball and half struck ball: straightness
+    /// 0.33, reported as a swing at -37.9 deg and 29.6 mph. Split, the
+    /// outbound half reads +18.4 deg and 80 mph. Pinned from the real numbers
+    /// because no invented case would have reproduced a margin that small.
+    ///
     /// ...and on the layout that made a mess of two real clips: a pitch
     /// arriving and a hit leaving, meeting at contact. There must be TWO
     /// tracks there. The ball is in nearly the same PLACE on both sides of the
@@ -433,6 +444,8 @@ final class ParityTests: XCTestCase {
                        Self.fixtures.constants["BUILD_MAX_TURN_DEG"]!, accuracy: 1e-12)
         XCTAssertEqual(SLA.buildTurnMinStepPx,
                        Self.fixtures.constants["BUILD_TURN_MIN_STEP_PX"]!, accuracy: 1e-12)
+        XCTAssertEqual(Double(SLA.buildHeadingWindow),
+                       Self.fixtures.constants["BUILD_HEADING_WINDOW"]!, accuracy: 1e-12)
 
         let cases = Self.fixtures.build_tracks
         XCTAssertFalse(cases.isEmpty)

@@ -41,6 +41,7 @@
   "STITCH_MAX_ANGLE_DEG": 40.0,
   "SELECT_CONTACT_TOL_S": 0.05,
   "BUILD_MAX_TURN_DEG": 60.0,
+  "BUILD_HEADING_WINDOW": 5.0,
   "SPEED_OF_SOUND_MPS": 343.0,
   "CONTACT_AUDIO_MAX_DISTANCE_M": 60.0,
   "BUILD_TURN_MIN_STEP_PX": 5.0,
@@ -24123,6 +24124,227 @@
    "expected_selected_len": 29,
    "expected_selected_first_x": 666.0,
    "expected_selected_last_x": 1394.0
+  },
+  {
+   "name": "real_clip_reversal_must_split",
+   "fps": 240.0,
+   "per_frame": {
+    "52": [
+     {
+      "frame": 52,
+      "t": 0.26625,
+      "x": 673.91,
+      "y": 205.26,
+      "diameter_px": 20.16,
+      "area_px": 366.0
+     }
+    ],
+    "53": [
+     {
+      "frame": 53,
+      "t": 0.270417,
+      "x": 665.94,
+      "y": 212.29,
+      "diameter_px": 16.56,
+      "area_px": 358.0
+     }
+    ],
+    "54": [
+     {
+      "frame": 54,
+      "t": 0.282917,
+      "x": 644.78,
+      "y": 233.59,
+      "diameter_px": 20.53,
+      "area_px": 357.0
+     }
+    ],
+    "55": [
+     {
+      "frame": 55,
+      "t": 0.287083,
+      "x": 636.36,
+      "y": 240.85,
+      "diameter_px": 19.92,
+      "area_px": 320.0
+     }
+    ],
+    "56": [
+     {
+      "frame": 56,
+      "t": 0.29125,
+      "x": 629.15,
+      "y": 248.25,
+      "diameter_px": 14.32,
+      "area_px": 312.0
+     }
+    ],
+    "57": [
+     {
+      "frame": 57,
+      "t": 0.295417,
+      "x": 621.7,
+      "y": 255.39,
+      "diameter_px": 20.26,
+      "area_px": 306.0
+     }
+    ],
+    "58": [
+     {
+      "frame": 58,
+      "t": 0.299583,
+      "x": 614.39,
+      "y": 261.82,
+      "diameter_px": 21.34,
+      "area_px": 335.0
+     }
+    ],
+    "59": [
+     {
+      "frame": 59,
+      "t": 0.30375,
+      "x": 606.75,
+      "y": 269.18,
+      "diameter_px": 18.4,
+      "area_px": 328.0
+     }
+    ],
+    "60": [
+     {
+      "frame": 60,
+      "t": 0.307917,
+      "x": 599.8,
+      "y": 276.44,
+      "diameter_px": 17.35,
+      "area_px": 334.0
+     }
+    ],
+    "61": [
+     {
+      "frame": 61,
+      "t": 0.312083,
+      "x": 598.77,
+      "y": 281.31,
+      "diameter_px": 17.05,
+      "area_px": 322.0
+     }
+    ],
+    "62": [
+     {
+      "frame": 62,
+      "t": 0.31625,
+      "x": 624.25,
+      "y": 272.8,
+      "diameter_px": 19.99,
+      "area_px": 403.0
+     }
+    ],
+    "63": [
+     {
+      "frame": 63,
+      "t": 0.320417,
+      "x": 649.49,
+      "y": 265.16,
+      "diameter_px": 17.07,
+      "area_px": 392.0
+     }
+    ],
+    "64": [
+     {
+      "frame": 64,
+      "t": 0.324583,
+      "x": 674.77,
+      "y": 258.54,
+      "diameter_px": 12.71,
+      "area_px": 422.0
+     }
+    ],
+    "65": [
+     {
+      "frame": 65,
+      "t": 0.32875,
+      "x": 697.51,
+      "y": 249.45,
+      "diameter_px": 12.46,
+      "area_px": 294.0
+     }
+    ],
+    "66": [
+     {
+      "frame": 66,
+      "t": 0.332917,
+      "x": 721.23,
+      "y": 242.88,
+      "diameter_px": 17.53,
+      "area_px": 381.0
+     }
+    ],
+    "67": [
+     {
+      "frame": 67,
+      "t": 0.345417,
+      "x": 796.68,
+      "y": 217.37,
+      "diameter_px": 17.82,
+      "area_px": 470.0
+     }
+    ],
+    "68": [
+     {
+      "frame": 68,
+      "t": 0.349583,
+      "x": 821.36,
+      "y": 208.22,
+      "diameter_px": 19.52,
+      "area_px": 445.0
+     }
+    ],
+    "69": [
+     {
+      "frame": 69,
+      "t": 0.35375,
+      "x": 845.13,
+      "y": 200.82,
+      "diameter_px": 16.59,
+      "area_px": 371.0
+     }
+    ],
+    "70": [
+     {
+      "frame": 70,
+      "t": 0.357917,
+      "x": 870.04,
+      "y": 193.68,
+      "diameter_px": 24.62,
+      "area_px": 403.0
+     }
+    ],
+    "71": [
+     {
+      "frame": 71,
+      "t": 0.362083,
+      "x": 896.27,
+      "y": 186.07,
+      "diameter_px": 24.77,
+      "area_px": 409.0
+     }
+    ],
+    "72": [
+     {
+      "frame": 72,
+      "t": 0.36625,
+      "x": 921.46,
+      "y": 177.94,
+      "diameter_px": 17.33,
+      "area_px": 383.0
+     }
+    ]
+   },
+   "expected_track_count": 2,
+   "expected_longest": 11,
+   "expected_selected_len": 11,
+   "expected_selected_first_x": 624.25,
+   "expected_selected_last_x": 921.46
   },
   {
    "name": "ball_through_clutter",

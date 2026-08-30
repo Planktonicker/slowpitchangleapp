@@ -486,6 +486,7 @@ def main():
         "STITCH_MAX_ANGLE_DEG": sla.STITCH_MAX_ANGLE_DEG,
         "SELECT_CONTACT_TOL_S": sla.SELECT_CONTACT_TOL_S,
         "BUILD_MAX_TURN_DEG": sla.BUILD_MAX_TURN_DEG,
+        "BUILD_HEADING_WINDOW": float(sla.BUILD_HEADING_WINDOW),
         "SPEED_OF_SOUND_MPS": sla.SPEED_OF_SOUND_MPS,
         "CONTACT_AUDIO_MAX_DISTANCE_M": sla.CONTACT_AUDIO_MAX_DISTANCE_M,
         "BUILD_TURN_MIN_STEP_PX": sla.BUILD_TURN_MIN_STEP_PX,
@@ -850,6 +851,66 @@ def main():
         "expected_selected_len": 0 if cpick is None else len(cpick),
         "expected_selected_first_x": None if cpick is None else cpick[0].x,
         "expected_selected_last_x": None if cpick is None else cpick[-1].x,
+    })
+
+    # The reversal from a real clip, frame for frame.
+    #
+    # tee_02.mov: the ball arrives down-left at about 10 px a frame, and on the
+    # very last step before contact it moves 4.98 — because the last step
+    # before contact is when the ball is slowest. Read from that one pair the
+    # heading fell 0.02 px under BUILD_TURN_MIN_STEP_PX, the turn guard
+    # switched itself off for exactly that frame, and association walked
+    # through the reversal. The result was one 59-frame "track", half incoming
+    # ball and half struck ball, straightness 0.33, reported as a swing at
+    # -37.9 degrees and 29.6 mph. Split, the outbound half reads +18.4 and 80.
+    #
+    # Pinned from the real numbers rather than a synthetic reconstruction,
+    # because the margin that failed was two hundredths of a pixel and no
+    # invented case would have reproduced it.
+    def real_reversal_case():
+        raw = [
+        (52, 0.26625, 673.91, 205.26, 20.16, 366.0),
+        (53, 0.270417, 665.94, 212.29, 16.56, 358.0),
+        (54, 0.282917, 644.78, 233.59, 20.53, 357.0),
+        (55, 0.287083, 636.36, 240.85, 19.92, 320.0),
+        (56, 0.29125, 629.15, 248.25, 14.32, 312.0),
+        (57, 0.295417, 621.7, 255.39, 20.26, 306.0),
+        (58, 0.299583, 614.39, 261.82, 21.34, 335.0),
+        (59, 0.30375, 606.75, 269.18, 18.4, 328.0),
+        (60, 0.307917, 599.8, 276.44, 17.35, 334.0),
+        (61, 0.312083, 598.77, 281.31, 17.05, 322.0),
+        (62, 0.31625, 624.25, 272.8, 19.99, 403.0),
+        (63, 0.320417, 649.49, 265.16, 17.07, 392.0),
+        (64, 0.324583, 674.77, 258.54, 12.71, 422.0),
+        (65, 0.32875, 697.51, 249.45, 12.46, 294.0),
+        (66, 0.332917, 721.23, 242.88, 17.53, 381.0),
+        (67, 0.345417, 796.68, 217.37, 17.82, 470.0),
+        (68, 0.349583, 821.36, 208.22, 19.52, 445.0),
+        (69, 0.35375, 845.13, 200.82, 16.59, 371.0),
+        (70, 0.357917, 870.04, 193.68, 24.62, 403.0),
+        (71, 0.362083, 896.27, 186.07, 24.77, 409.0),
+        (72, 0.36625, 921.46, 177.94, 17.33, 383.0)
+        ]
+        per_frame = {}
+        for fr, t, x, y, d, a in raw:
+            per_frame[fr] = [sla.BallObservation(frame=fr, t=t, x=x, y=y,
+                                                 diameter_px=d, area_px=a)]
+        return per_frame
+
+    rr = real_reversal_case()
+    rbuilt = sla.build_tracks(rr, fps=240.0)
+    rpick = sla.select_outbound_track(rbuilt, fps=240.0, direction="right")
+    out["build_tracks"].append({
+        "name": "real_clip_reversal_must_split",
+        "fps": 240.0,
+        "per_frame": {str(f): [{"frame": o.frame, "t": o.t, "x": o.x, "y": o.y,
+                                "diameter_px": o.diameter_px, "area_px": o.area_px}
+                               for o in obs] for f, obs in rr.items()},
+        "expected_track_count": len(rbuilt),
+        "expected_longest": max((len(t) for t in rbuilt), default=0),
+        "expected_selected_len": 0 if rpick is None else len(rpick),
+        "expected_selected_first_x": None if rpick is None else rpick[0].x,
+        "expected_selected_last_x": None if rpick is None else rpick[-1].x,
     })
 
     bc = build_case()

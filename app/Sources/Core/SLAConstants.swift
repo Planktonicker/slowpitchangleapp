@@ -158,6 +158,11 @@ enum SLA {
     /// Per FRAME, not per second: centroid noise is a fixed number of
     /// pixels between frames however fast the camera runs.
     static let buildTurnMinStepPx = 5.0
+    /// Observations the heading is fitted over — not the last pair. See
+    /// `TrackBuilder`: the last step before contact is the slowest one a ball
+    /// takes, and reading the heading from it switched the guard off at
+    /// exactly the frame it exists to catch.
+    static let buildHeadingWindow = 5
 
     /// Motion gating — see `MotionMask`. The largest single source of false
     /// candidates on real footage is stationary scenery that shares the ball's

@@ -352,6 +352,25 @@ BUILD_MAX_TURN_DEG = 60.0
 # pitch, which runs 11.
 BUILD_TURN_MIN_STEP_PX = 5.0
 
+# Observations the heading is fitted over.
+#
+# NOT the last pair, and this is the whole of a real failure. On a field clip
+# the ball arrived down-left at 10 px a frame, and on the very last step before
+# contact it moved 4.98 — because the last step before contact is exactly when
+# the ball is slowest. Read from that one pair the heading fell 0.02 px under
+# the floor, the guard switched itself off for that frame, and association
+# walked straight through the reversal: one 59-frame "track", half of it the
+# incoming ball and half the struck one, straightness 0.33, reported as a swing
+# at -37.9 degrees.
+#
+# A heading is a property of where a track has been going, not of its last two
+# points, and the noisiest single step is the one that matters most. Fitted
+# over five the same moment reads 8.98 px a frame and the reversal is refused
+# at 151 degrees. This also makes the floor stricter against clutter rather
+# than looser: jitter that alternates direction averages toward zero over a
+# window, where a single lucky pair can look like travel.
+BUILD_HEADING_WINDOW = 5
+
 
 def build_tracks(
     per_frame: dict[int, list[BallObservation]],
@@ -414,7 +433,16 @@ def build_tracks(
             speed = math.hypot(vx, vy)
             speed_px_fr = speed / fps
             gate = max(base_gate_px, 2.5 * speed_px_fr) * gap
-            heading = speed_px_fr >= BUILD_TURN_MIN_STEP_PX
+
+            # The GATE keeps the last-pair velocity: it is a prediction of
+            # where the object will be next, and the freshest estimate is the
+            # right one for that. The HEADING is fitted over a window, because
+            # it answers a different question — which way has this been going —
+            # and the last pair is the worst possible evidence for it right at
+            # a reversal. See BUILD_HEADING_WINDOW.
+            hvx, hvy = _segment_velocity(obs[-BUILD_HEADING_WINDOW:])
+            heading_speed = math.hypot(hvx, hvy)
+            heading = heading_speed / fps >= BUILD_TURN_MIN_STEP_PX
             cos_max = math.cos(math.radians(BUILD_MAX_TURN_DEG))
 
             in_gate: list[tuple[float, int]] = []
@@ -440,7 +468,7 @@ def build_tracks(
                 c0 = cands[ci0]
                 sx, sy = c0.x - obs[-1].x, c0.y - obs[-1].y
                 step = math.hypot(sx, sy)
-                if step > 1e-9 and (sx * vx + sy * vy) / (step * speed) < cos_max:
+                if step > 1e-9 and (sx * hvx + sy * hvy) / (step * heading_speed) < cos_max:
                     continue
 
             for d, ci in in_gate:
