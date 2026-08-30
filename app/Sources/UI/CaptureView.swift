@@ -288,20 +288,19 @@ struct CaptureScreen: View {
         return "\(n) swing\(n == 1 ? "" : "s") this round"
     }
 
-    /// Ending the round is deliberately not a big slab and deliberately not
-    /// hidden. It sits under the primary action, at text weight: nobody needs
-    /// to find it in a hurry, and nothing goes wrong if it is missed — but a
-    /// round that cannot be finished is a round that never gets collated, and
-    /// the collation is the point.
+    /// Ending the round has to be findable, and grey text under a yellow slab
+    /// was not: it read as a caption rather than a control, and on a landscape
+    /// phone it sat at the very bottom of a busy screen. An outlined button is
+    /// still clearly secondary to ARM and is unmistakably a button.
+    ///
+    /// It is not the only way out — "This round" carries the same action, which
+    /// is the one place that cannot be covered by the setup overlay.
     private var endSessionButton: some View {
-        Button {
-            model.endSession()
-        } label: {
-            Text("End session")
+        Button { model.endSession() } label: {
+            Label("End round", systemImage: "flag.checkered")
                 .font(Theme.label(12)).tracking(1)
         }
-        .foregroundStyle(Theme.steel)
-        .padding(.top, 2)
+        .buttonStyle(OutlineButtonStyle(verticalPadding: 7, cornerRadius: 10))
     }
 
     private var actionCluster: some View {

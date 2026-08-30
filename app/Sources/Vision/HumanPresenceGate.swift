@@ -47,6 +47,23 @@ final class HumanPresenceGate {
     var minimumJoints = 4
     var jointConfidence: Float = 0.3
 
+    /// What a whole-person box has to clear, and how much of the frame it has
+    /// to fill, for the fallback detector to count as a hitter.
+    ///
+    /// Emphatically NOT `jointConfidence`. Those are two different questions
+    /// sharing one number, and using 0.3 — a sensible bar for "is this wrist
+    /// reliable" — as the bar for "is this a person" is why the gate let a
+    /// trigger through with nobody at the plate. `VNDetectHumanRectanglesRequest`
+    /// returns low-confidence boxes readily, and it will return them for people
+    /// on a screen, on a poster, or on the far side of a field.
+    ///
+    /// The size test does most of the work and needs no tuning: the hitter is
+    /// the subject of the shot. Somebody a quarter of the frame tall is at the
+    /// plate; somebody a twentieth of it tall is a passer-by, a spectator, or
+    /// a picture of a person, and none of those are about to hit a ball.
+    var personBoxConfidence: Float = 0.7
+    var personBoxMinHeightFraction: CGFloat = 0.25
+
     /// Called on the main queue whenever detection flips.
     var onPresenceChange: ((Bool) -> Void)?
 
@@ -146,13 +163,19 @@ final class HumanPresenceGate {
             }
 
             // Pose is the strict test; a plain person-shaped box is far more
-            // robust to rotation, partial bodies and awkward stances. Presence
-            // is all this gate claims, so the looser answer is good enough.
+            // robust to rotation, partial bodies and awkward stances. But it is
+            // also far more willing to say yes, so it gets its own bar on both
+            // confidence and size — see `personBoxConfidence`. Sharing
+            // `jointConfidence` here is what let a trigger through with nobody
+            // at the plate.
             if !detected {
                 let rects = VNDetectHumanRectanglesRequest()
                 if (try? handler.perform([rects])) != nil,
                    let found = rects.results {
-                    detected = found.contains { $0.confidence >= self.jointConfidence }
+                    detected = found.contains {
+                        $0.confidence >= self.personBoxConfidence
+                            && $0.boundingBox.height >= self.personBoxMinHeightFraction
+                    }
                 }
             }
 

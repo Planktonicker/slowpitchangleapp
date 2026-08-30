@@ -61,6 +61,21 @@ struct HistoryView: View {
                 }
             }
             .navigationTitle(model.isInSession && !showEverything ? "This round" : "Swings")
+            // The one place ending a round is always reachable. On the capture
+            // screen the control can be covered by the setup overlay, and a
+            // round that cannot be finished is a round that never gets
+            // collated — which is the point of having rounds at all.
+            .safeAreaInset(edge: .bottom) {
+                if model.isInSession {
+                    Button { model.endSession() } label: {
+                        Label("End round and see the summary", systemImage: "flag.checkered")
+                    }
+                    .buttonStyle(SlabButtonStyle(size: 15))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+                    .background(.ultraThinMaterial)
+                }
+            }
             .scrollContentBackground(.hidden)
             .background(Theme.black)
             .toolbar {
