@@ -36,6 +36,8 @@ final class ClipDiagnostics {
     var durationS: Double = 0
     var framesDecoded = 0
     var fpsWasOverridden = false
+    /// Set when the radius gates were rescaled for a non-1080p clip.
+    var radiusScale: Double?
 
     // Stage 1 — Vision's trajectory hint
     var hintPoints: Int?
@@ -87,7 +89,11 @@ final class ClipDiagnostics {
         out.append(String(format: "hsv      lo %.0f/%.0f/%.0f  hi %.0f/%.0f/%.0f  radius %.0f-%.0f px",
                           detector.hsvLo.h, detector.hsvLo.s, detector.hsvLo.v,
                           detector.hsvHi.h, detector.hsvHi.s, detector.hsvHi.v,
-                          detector.minRadiusPx, detector.maxRadiusPx))
+                          detector.minRadiusPx * (radiusScale ?? 1),
+                          detector.maxRadiusPx * (radiusScale ?? 1)))
+        if let k = radiusScale {
+            out.append(String(format: "           radii scaled x%.2f for a %d px wide clip", k, width))
+        }
 
         out.append("")
         out.append("1 vision   " + (hintPoints.map { "flight found, \($0) points" }
@@ -153,9 +159,9 @@ final class ClipDiagnostics {
                 "%.0fs long — a whole session rather than one swing. Only the single best track in the file is measured, so the other swings in it are discarded silently. Trim to the swing you care about.",
                 durationS))
         }
-        if width > 0 && width < 1900 {
+        if width > 0 && width < 1900 && radiusScale == nil {
             out.append(String(format:
-                "%d px wide, not 1920. The ball is correspondingly smaller, so the minimum-radius gate may reject it — and a re-encoded share from Photos is the usual reason a clip arrives smaller than it was filmed.",
+                "%d px wide, not 1920. The ball is correspondingly smaller, so the minimum-radius gate may reject it.",
                 width))
         }
         return out

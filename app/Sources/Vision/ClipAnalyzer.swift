@@ -85,6 +85,13 @@ enum ClipAnalyzer {
         var corridorPx: Double = 90
         /// Skip Vision and go straight to full-frame detection.
         var forceFallbackDetector = false
+        /// Rescale the detector's radius gates from the 1080p they are written
+        /// for to whatever this clip actually is.
+        ///
+        /// Only for imported footage. Live capture is always the format the app
+        /// chose, and quietly moving a number the parity fixtures pin would be
+        /// a different kind of mistake from the one this avoids.
+        var scaleDetectorRadiiToFrameWidth = false
         /// Which way was up in the recorded frames. The phone films sideways on
         /// a tripod, so handing Vision `.up` shows it a rotated human and it
         /// finds nobody — the same failure that silently suppressed every audio
@@ -121,6 +128,15 @@ enum ClipAnalyzer {
         diagnostics?.height = height
         diagnostics?.durationS = duration
         diagnostics?.fpsWasOverridden = options.fpsOverride != nil
+
+        var options = options
+        if options.scaleDetectorRadiiToFrameWidth, width > 0,
+           width != SLA.targetWidth {
+            let k = Double(width) / Double(SLA.targetWidth)
+            options.detector.minRadiusPx *= k
+            options.detector.maxRadiusPx *= k
+            diagnostics?.radiusScale = k
+        }
 
         // --- pass 1: Vision locates the flight ---
         var hint: TrajectoryHint?

@@ -11,6 +11,7 @@ struct HistoryView: View {
     @State private var shareURLs: [URL] = []
     @State private var showShare = false
     @State private var showImporter = false
+    @State private var showPhotoPicker = false
     @State private var showDiagnostics = false
 
     private var visible: [SwingDTO] {
@@ -27,7 +28,7 @@ struct HistoryView: View {
                     } description: {
                         Text("Set the camera up on the Capture tab, arm it, and hit. Clips are kept so anything that looks wrong can be re-run later.")
                     } actions: {
-                        Button("Import a clip") { showImporter = true }
+                        Button("Import from Photos") { showPhotoPicker = true }
                             .buttonStyle(.borderedProminent)
                     }
                 } else {
@@ -40,8 +41,22 @@ struct HistoryView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { filterMenu }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showImporter = true
+                    Menu {
+                        // Photos first, and it is not a preference. The
+                        // document picker cannot reach the original recording:
+                        // it renders slow motion down to 30fps on the way out,
+                        // and a 240fps clip measured as 30fps is wrong by a
+                        // factor of eight with nothing downstream able to tell.
+                        Button {
+                            showPhotoPicker = true
+                        } label: {
+                            Label("From Photos (keeps 240fps)", systemImage: "photo.on.rectangle")
+                        }
+                        Button {
+                            showImporter = true
+                        } label: {
+                            Label("From Files", systemImage: "folder")
+                        }
                     } label: {
                         Image(systemName: "square.and.arrow.down")
                     }
@@ -70,6 +85,17 @@ struct HistoryView: View {
                 case .failure(let error):
                     model.banner = AppModel.Banner(kind: .error, text: error.localizedDescription)
                 }
+            }
+            .sheet(isPresented: $showPhotoPicker) {
+                PhotoClipPicker { result in
+                    switch result {
+                    case .success(let url): model.importCopiedClip(at: url)
+                    case .failure(let error):
+                        model.banner = AppModel.Banner(kind: .error,
+                                                       text: error.localizedDescription)
+                    }
+                }
+                .ignoresSafeArea()
             }
             .overlay(alignment: .bottom) { importProgress }
             .onChange(of: model.lastDiagnostics) { _, report in

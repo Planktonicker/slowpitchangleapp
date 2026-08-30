@@ -73,6 +73,11 @@ targets:
           swing without you touching the phone.
         NSPhotoLibraryAddUsageDescription: >-
           Save a swing clip to your photo library to share it.
+        NSPhotoLibraryUsageDescription: >-
+          Read a clip you already filmed so SwingLab can measure it. Reading the
+          library directly is the only way to get the ORIGINAL slow-motion
+          recording — every other route hands over a 30fps render of it, and a
+          240fps clip measured as 30fps is wrong by a factor of eight.
         # Filming is landscape; browsing results is comfortable in portrait.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

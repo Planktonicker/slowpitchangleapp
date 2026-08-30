@@ -209,15 +209,20 @@ final class AppModel: ObservableObject {
         let needsScope = picked.startAccessingSecurityScopedResource()
         defer { if needsScope { picked.stopAccessingSecurityScopedResource() } }
 
-        let stored: URL
         do {
-            stored = try ClipStore.importClip(from: picked)
+            importCopiedClip(at: try ClipStore.importClip(from: picked))
         } catch {
             banner = Banner(kind: .error,
                             text: "Could not read that file: \(error.localizedDescription)")
-            return
         }
+    }
 
+    /// Analyse a clip already sitting in the store.
+    ///
+    /// The Photos path writes the original recording out of the library itself,
+    /// so it arrives here already copied — there is nothing left to import,
+    /// only to measure.
+    func importCopiedClip(at stored: URL) {
         // Stop the camera first. This is not tidiness — the capture session
         // holds the hardware video decoder, and an AVAssetReader that cannot
         // get one fails with "Operation Interrupted" after decoding zero
@@ -238,6 +243,13 @@ final class AppModel: ObservableObject {
         options.rollDeg = 0
         options.tiltDeg = 0
         options.fieldOfViewDeg = 0
+        // The radius gates are pixel counts chosen for 1080p. A 720p slow-motion
+        // clip — a real iPhone mode — shows the same ball at two thirds the
+        // size, which walks it toward the minimum and can push it out entirely.
+        // Scaled to the clip rather than changed in Settings, so the live
+        // capture path keeps the values the reference implementation is pinned
+        // to and only the import is adjusted.
+        options.scaleDetectorRadiiToFrameWidth = true
         // Whatever the previous failed import left behind goes now, before this
         // one takes its place — otherwise the store grows a file per failure.
         if let previous = lastImportedClip,
