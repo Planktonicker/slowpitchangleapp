@@ -88,6 +88,9 @@ final class ClipDiagnostics {
     /// was not moving like a barrel. Distinguishes "no tape on the bat" from
     /// "something pink stood in for one", which look identical in the result.
     var batRejectedReason: String?
+    /// Quarter turns the container asks for. Reported because a clip filmed
+    /// the other way up used to invert every angle silently.
+    var videoQuarterTurns = 0
     var poseFramesSampled = 0
     var poseFramesWithPerson = 0
     var jointSeenCount: [PoseJoint: Int] = [:]
@@ -125,6 +128,9 @@ final class ClipDiagnostics {
         if let irregular = frameIntervalIrregularFraction, irregular > 0.05 {
             out.append(String(format: "         %.0f%% of frame intervals are irregular — variable frame rate, timing is unreliable",
                               irregular * 100))
+        }
+        if videoQuarterTurns != 0 {
+            out.append("         buffer is rotated \(videoQuarterTurns * 90)° for display — angles measured after rotating")
         }
         if let elapsed = elapsedS {
             out.append(String(format: "took     %.1fs (%.0f ms per decoded frame)",

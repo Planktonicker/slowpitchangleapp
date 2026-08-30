@@ -156,6 +156,10 @@ enum ClipAnalyzer {
         }
         let naturalSize = try await videoTrack.load(.naturalSize)
         let nominalFPS = try await videoTrack.load(.nominalFrameRate)
+        // How the container says the buffer should be turned for display. The
+        // measurement needs it because a launch angle is signed — see
+        // `VideoOrientation`.
+        let preferredTransform = (try? await videoTrack.load(.preferredTransform)) ?? .identity
         let width = Int(abs(naturalSize.width).rounded())
         let height = Int(abs(naturalSize.height).rounded())
         // Measured first, container second. See `measureFrameTiming`: the
@@ -369,22 +373,38 @@ enum ClipAnalyzer {
         // rectified copy. The bat tape goes through the same warp, or the
         // contact-offset reading would compare a rectified ball against an
         // un-rectified barrel.
-        let focalPx = TiltRectifier.focalPx(widthPx: Double(width),
+        //
+        // Rotation first, for the same reason and a more basic one: a launch
+        // angle is SIGNED. Measuring it in the encoded buffer is only
+        // orientation-independent for lengths; on a clip whose buffer is
+        // upside down a ball dropped from head height read +76.9 deg — going
+        // almost straight UP — and the pipeline then correctly refused it as
+        // impossible. The tracking was perfect. The frame it was measured in
+        // was not the frame anybody sees.
+        let turns = VideoOrientation.quarterTurns(preferredTransform)
+        let display = VideoOrientation.displaySize(width: width, height: height,
+                                                   quarterTurns: turns)
+        let upright = VideoOrientation.rotate(track: track, width: width, height: height,
+                                              quarterTurns: turns)
+        diagnostics?.videoQuarterTurns = turns
+
+        let focalPx = TiltRectifier.focalPx(widthPx: Double(display.width),
                                             fovDeg: options.fieldOfViewDeg)
-        let cx = Double(width) / 2, cy = Double(height) / 2
-        let measured = TiltRectifier.rectify(track: track,
+        let cx = Double(display.width) / 2, cy = Double(display.height) / 2
+        let measured = TiltRectifier.rectify(track: upright,
                                              tiltDeg: options.tiltDeg,
                                              focalPx: focalPx, cx: cx, cy: cy)
-        let measuredTape: [BatTracker.TapeObservation]
-        if options.tiltDeg != 0, focalPx > 0 {
-            measuredTape = tape.map { o in
-                let r = TiltRectifier.rectify(x: o.x, y: o.y,
-                                              tiltDeg: options.tiltDeg,
-                                              focalPx: focalPx, cx: cx, cy: cy)
-                return BatTracker.TapeObservation(t: o.t, x: r.x, y: r.y)
+        // The tape goes through both warps too, or the contact-offset reading
+        // would compare an upright, rectified ball against a raw barrel.
+        let measuredTape: [BatTracker.TapeObservation] = tape.map { o in
+            let u = VideoOrientation.point(x: o.x, y: o.y, width: width, height: height,
+                                           quarterTurns: turns)
+            guard options.tiltDeg != 0, focalPx > 0 else {
+                return BatTracker.TapeObservation(t: o.t, x: u.x, y: u.y)
             }
-        } else {
-            measuredTape = tape
+            let r = TiltRectifier.rectify(x: u.x, y: u.y, tiltDeg: options.tiltDeg,
+                                          focalPx: focalPx, cx: cx, cy: cy)
+            return BatTracker.TapeObservation(t: o.t, x: r.x, y: r.y)
         }
 
         let metrics = SwingAnalyzer.analyze(track: measured,
