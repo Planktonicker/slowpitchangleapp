@@ -157,7 +157,7 @@ struct SettingsView: View {
             .confirmationDialog("Delete every stored swing and clip?",
                                 isPresented: $showDeleteConfirm, titleVisibility: .visible) {
                 Button("Delete everything", role: .destructive) {
-                    for swing in model.swings { model.delete(swing) }
+                    model.deleteAll()
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {

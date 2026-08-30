@@ -970,6 +970,25 @@ final class AppModel: ObservableObject {
         reload()
     }
 
+    /// Delete every stored swing, reloading once at the end.
+    ///
+    /// The Settings button used to loop `delete(_:)` over `model.swings`, and
+    /// each of those re-fetched the whole store and rebuilt every derived
+    /// view of it — so clearing two hundred swings did two hundred full
+    /// fetches on the main thread while the confirmation sheet sat on screen
+    /// waiting to dismiss.
+    func deleteAll() {
+        for swing in swings {
+            ClipStore.delete(clipNamed: swing.clipFilename)
+            ClipStore.delete(trackNamed: swing.trackCSVFilename)
+            ClipStore.delete(trackNamed: swing.poseFilename)
+            ClipStore.delete(trackNamed: swing.traceFilename)
+            ClipStore.delete(trackNamed: swing.diagnosticsFilename)
+            try? store.delete(id: swing.id)
+        }
+        reload()
+    }
+
     /// Re-run the pipeline on a stored clip — after retuning colour ranges,
     /// or with the fallback detector forced.
     func reanalyze(_ swing: SwingDTO, forceFallback: Bool = false) {
