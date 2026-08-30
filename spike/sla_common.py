@@ -366,6 +366,100 @@ def build_tracks(
     return done
 
 
+# Stitching: re-joining fragments of one flight that detection gaps broke apart.
+#
+# A ball crossing a busy background — trees, buildings, its own motion blur —
+# drops out of detection for a few frames at a time. The builder only coasts
+# MAX_COAST_FRAMES, so each detected burst becomes its own short track, and on
+# real footage the hit arrived as 5-9 frame pieces that all died on the
+# MIN_TRACK_FRAMES gate while a slow landing bounce won selection. The pieces
+# individually said everything needed to join them: a fragment ending at
+# 7,200 px/s rightward, and another starting a few frames later on the same
+# line at the same speed, are one object.
+#
+# The gates are deliberately about KINEMATIC CONSISTENCY, not proximity alone:
+#   - the gap must be short (a flight that vanishes for half a second is two
+#     events, not one);
+#   - extrapolating the earlier fragment's velocity across the gap must land
+#     near where the later one starts (constant velocity is accurate here —
+#     gravity bends the path by ~1 px over the gaps involved);
+#   - the two velocities must agree in direction and magnitude. This is what
+#     keeps the WRONG joins out: pitch-into-hit reverses direction at contact,
+#     and flight-into-bounce reverses vertically at the ground, so both fail
+#     the angle test and the flight correctly ENDS at the landing.
+STITCH_MAX_GAP_S = 0.10          # longest detection dropout worth bridging
+STITCH_BASE_TOL_PX = 30.0        # position slack at zero gap
+STITCH_TOL_PX_PER_S = 0.35       # extra slack per px/s of speed, times gap
+STITCH_SPEED_RATIO_MAX = 2.0     # |vB|/|vA| must sit in [1/max, max]
+STITCH_MAX_ANGLE_DEG = 40.0      # direction change across the join
+
+
+def _track_end_velocity(tr: list[BallObservation], tail: int = 4) -> tuple[float, float]:
+    """Velocity over a track's last few points, px/s."""
+    seg = tr[-tail:] if len(tr) > tail else tr
+    dt = seg[-1].t - seg[0].t
+    if dt <= 0:
+        return (0.0, 0.0)
+    return ((seg[-1].x - seg[0].x) / dt, (seg[-1].y - seg[0].y) / dt)
+
+
+def _track_start_velocity(tr: list[BallObservation], head: int = 4) -> tuple[float, float]:
+    seg = tr[:head] if len(tr) > head else tr
+    dt = seg[-1].t - seg[0].t
+    if dt <= 0:
+        return (0.0, 0.0)
+    return ((seg[-1].x - seg[0].x) / dt, (seg[-1].y - seg[0].y) / dt)
+
+
+def _stitchable(a: list[BallObservation], b: list[BallObservation]) -> bool:
+    """Whether track b is plausibly the continuation of track a."""
+    gap = b[0].t - a[-1].t
+    if gap <= 0 or gap > STITCH_MAX_GAP_S:
+        return False
+    vax, vay = _track_end_velocity(a)
+    vbx, vby = _track_start_velocity(b)
+    speed_a = math.hypot(vax, vay)
+    speed_b = math.hypot(vbx, vby)
+    if speed_a <= 1e-9 or speed_b <= 1e-9:
+        return False
+    ratio = speed_b / speed_a
+    if not (1.0 / STITCH_SPEED_RATIO_MAX <= ratio <= STITCH_SPEED_RATIO_MAX):
+        return False
+    cosang = (vax * vbx + vay * vby) / (speed_a * speed_b)
+    if cosang < math.cos(math.radians(STITCH_MAX_ANGLE_DEG)):
+        return False
+    pred_x = a[-1].x + vax * gap
+    pred_y = a[-1].y + vay * gap
+    tol = STITCH_BASE_TOL_PX + STITCH_TOL_PX_PER_S * speed_a * gap
+    return math.hypot(b[0].x - pred_x, b[0].y - pred_y) <= tol
+
+
+def stitch_tracks(tracks: list[list[BallObservation]]) -> list[list[BallObservation]]:
+    """Join fragments of one flight, greedily, nearest-in-time first.
+
+    Deterministic on purpose: fragments are sorted by start time and each is
+    appended to the earliest-ending chain that accepts it, so the Swift port
+    can reproduce the output observation-for-observation.
+    """
+    frags = sorted(tracks, key=lambda tr: (tr[0].t, tr[0].x, tr[0].y))
+    chains: list[list[BallObservation]] = []
+    for frag in frags:
+        best_i = -1
+        best_end = -1.0
+        for i, chain in enumerate(chains):
+            if _stitchable(chain, frag):
+                # Prefer the chain whose end is CLOSEST in time — the most
+                # recent plausible predecessor, not an older lookalike.
+                if chain[-1].t > best_end:
+                    best_end = chain[-1].t
+                    best_i = i
+        if best_i >= 0:
+            chains[best_i] = chains[best_i] + frag
+        else:
+            chains.append(list(frag))
+    return chains
+
+
 # How directed a track has to be before it is treated as a flight: the straight
 # line from first sighting to last, over the distance actually walked. A ball
 # in flight is essentially 1.0 — it curves, but it never turns back. Clutter

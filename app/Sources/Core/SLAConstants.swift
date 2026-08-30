@@ -78,6 +78,18 @@ enum SLA {
     /// horizontal motion is smallest, and the cost of being loose is only that
     /// a wandering track has to wander a bit more obviously before it goes.
     static let trackStraightnessMin = 0.55
+
+    /// Stitching: re-joining fragments of one flight that detection gaps broke
+    /// apart. See `stitch_tracks` in `sla_common.py` for the full reasoning;
+    /// the short version is that a ball crossing a busy background drops out
+    /// of detection for longer than the builder can coast, each burst becomes
+    /// its own short track, and on real footage every piece of the hit died on
+    /// the minimum-length gate while a slow landing bounce won selection.
+    static let stitchMaxGapS = 0.10
+    static let stitchBaseTolPx = 30.0
+    static let stitchTolPxPerS = 0.35
+    static let stitchSpeedRatioMax = 2.0
+    static let stitchMaxAngleDeg = 40.0
     static let minGravityTrackS = 0.20     // below this the gravity scale is unreliable
     static let scaleDisagreeTol = 0.08     // G2 tolerance
     static let diameterDriftTol = 0.10     // depth-motion (cosine error) flag threshold

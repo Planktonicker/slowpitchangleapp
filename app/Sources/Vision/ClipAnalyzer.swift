@@ -249,7 +249,11 @@ enum ClipAnalyzer {
         }
 
         // --- build the track ---
-        var tracks = TrackBuilder.buildTracks(perFrame: perFrame, fps: fps)
+        // Stitched immediately: detection gaps fragment a real flight into
+        // bursts shorter than the length gate, and selection has to see the
+        // rejoined chains, not the pieces. See `TrackBuilder.stitchTracks`.
+        let fragments = TrackBuilder.buildTracks(perFrame: perFrame, fps: fps)
+        var tracks = TrackBuilder.stitchTracks(fragments)
         diagnostics?.tracksBuilt = tracks.count
         diagnostics?.bestTrackFrames = tracks.map(\.count).max() ?? 0
         var selected = TrackBuilder.selectOutboundTrack(tracks, direction: options.direction)

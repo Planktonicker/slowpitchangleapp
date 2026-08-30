@@ -40,6 +40,20 @@ final class ParityTests: XCTestCase {
         var track_straightness: [StraightnessCase]
         var select_track: [SelectCase]
         var build_tracks: [BuildCase]
+        var stitch_tracks: [StitchCase]
+    }
+
+    struct StitchCase: Decodable {
+        struct Obs: Decodable {
+            var frame: Int; var t: Double; var x: Double; var y: Double
+            var diameter_px: Double; var area_px: Double
+        }
+        var name: String
+        var tracks: [[Obs]]
+        var expected_chain_count: Int
+        var expected_chain_lens: [Int]
+        var expected_longest_first_frame: Int
+        var expected_longest_last_frame: Int
     }
 
     struct BuildCase: Decodable {
@@ -270,6 +284,45 @@ final class ParityTests: XCTestCase {
     }
 
     // MARK: - Constants
+
+    /// Re-joining fragments of one flight, and refusing the joins that would
+    /// corrupt a measurement: pitch into hit (reverses at contact), descent
+    /// into bounce (reverses at the ground), clutter onto anything.
+    ///
+    /// Pinned because the constants and the greedy order both matter — a port
+    /// that stitched in a different order would produce different chains from
+    /// identical fragments, and nothing downstream would notice.
+    func testStitchTracksMatchesReference() {
+        XCTAssertEqual(SLA.stitchMaxGapS,
+                       Self.fixtures.constants["STITCH_MAX_GAP_S"]!, accuracy: 1e-12)
+        XCTAssertEqual(SLA.stitchBaseTolPx,
+                       Self.fixtures.constants["STITCH_BASE_TOL_PX"]!, accuracy: 1e-12)
+        XCTAssertEqual(SLA.stitchTolPxPerS,
+                       Self.fixtures.constants["STITCH_TOL_PX_PER_S"]!, accuracy: 1e-12)
+        XCTAssertEqual(SLA.stitchSpeedRatioMax,
+                       Self.fixtures.constants["STITCH_SPEED_RATIO_MAX"]!, accuracy: 1e-12)
+        XCTAssertEqual(SLA.stitchMaxAngleDeg,
+                       Self.fixtures.constants["STITCH_MAX_ANGLE_DEG"]!, accuracy: 1e-12)
+
+        let cases = Self.fixtures.stitch_tracks
+        XCTAssertFalse(cases.isEmpty)
+        for c in cases {
+            let tracks = c.tracks.map { tr in
+                tr.map { BallObservation(frame: $0.frame, t: $0.t, x: $0.x, y: $0.y,
+                                         diameterPx: $0.diameter_px, areaPx: $0.area_px) }
+            }
+            let chains = TrackBuilder.stitchTracks(tracks)
+            XCTAssertEqual(chains.count, c.expected_chain_count, "chain count \(c.name)")
+            XCTAssertEqual(chains.map(\.count).sorted(), c.expected_chain_lens,
+                           "chain lengths \(c.name)")
+            if let longest = chains.max(by: { $0.count < $1.count }) {
+                XCTAssertEqual(longest.first?.frame, c.expected_longest_first_frame,
+                               "longest start \(c.name)")
+                XCTAssertEqual(longest.last?.frame, c.expected_longest_last_frame,
+                               "longest end \(c.name)")
+            }
+        }
+    }
 
     /// Linking candidates into tracks, on the frame layout that actually
     /// failed in the field: a ball crossing at 30-odd px per frame through a

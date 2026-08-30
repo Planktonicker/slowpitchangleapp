@@ -478,6 +478,11 @@ def main():
             "HSV_HI_V": float(sla.HSV_HI_DEFAULT[2]),
             "MIN_RADIUS_PX_DEFAULT": sla.MIN_RADIUS_PX_DEFAULT,
         "TRACK_STRAIGHTNESS_MIN": sla.TRACK_STRAIGHTNESS_MIN,
+        "STITCH_MAX_GAP_S": sla.STITCH_MAX_GAP_S,
+        "STITCH_BASE_TOL_PX": sla.STITCH_BASE_TOL_PX,
+        "STITCH_TOL_PX_PER_S": sla.STITCH_TOL_PX_PER_S,
+        "STITCH_SPEED_RATIO_MAX": sla.STITCH_SPEED_RATIO_MAX,
+        "STITCH_MAX_ANGLE_DEG": sla.STITCH_MAX_ANGLE_DEG,
             "MAX_RADIUS_PX_DEFAULT": sla.MAX_RADIUS_PX_DEFAULT,
             "BAT_BARREL_DIAMETER_M": sla.BAT_BARREL_DIAMETER_M,
             "CONTACT_PLAUSIBLE_M": sla.CONTACT_PLAUSIBLE_M,
@@ -508,6 +513,7 @@ def main():
         "track_straightness": [],
         "select_track": [],
         "build_tracks": [],
+        "stitch_tracks": [],
     }
 
     for c in fit_cases():
@@ -605,6 +611,49 @@ def main():
     for d in body["drift_gate"]:
         out["body_drift_gate"].append({
             "drift_m": d, "expected": sla.head_drift_plausible(d),
+        })
+
+    # Stitching: fragments of one flight, re-joined — and the joins that must
+    # be REFUSED. Deterministic layouts (no randomness) mirroring the field
+    # failure: a hit detected in 6/5/7-frame bursts with gaps the builder
+    # cannot coast, a landing bounce, and a slow pitch.
+    def _seg(f0, n, x0, y0, vxf, vyf, fps=199.0, d=27.0, a=460.0):
+        return [sla.BallObservation(frame=f0 + i, t=(f0 + i) / fps,
+                                    x=x0 + vxf * i, y=y0 + vyf * i,
+                                    diameter_px=d, area_px=a)
+                for i in range(n)]
+
+    vxf, vyf = 6900.0 / 199.0, -2200.0 / 199.0
+    frag1 = _seg(153, 6, 300.0, 500.0, vxf, vyf)
+    frag2 = _seg(164, 5, 300.0 + vxf * 11, 500.0 + vyf * 11, vxf, vyf)
+    frag3 = _seg(174, 7, 300.0 + vxf * 21, 500.0 + vyf * 21, vxf, vyf)
+    pitch = _seg(20, 100, 1150.0, 260.0, -2.4, 0.9, d=14.0, a=150.0)
+    # Bounce: descending into the turf then climbing out — direction reverses.
+    bounce_down = _seg(230, 5, 1050.0, 600.0, 18.0, 9.0, d=20.0, a=300.0)
+    bounce_up = _seg(236, 5, 1050.0 + 18 * 6, 600.0 + 9 * 5 - 9, 18.0, -9.0, d=20.0, a=300.0)
+    jitter = [sla.BallObservation(frame=200 + i, t=(200 + i) / 199.0,
+                                  x=400.0 + (2 if i % 2 else -2),
+                                  y=650.0 + (1 if i % 3 else -1),
+                                  diameter_px=11.0, area_px=95.0) for i in range(30)]
+
+    stitch_cases = [
+        ("fragments_rejoin", [frag1, frag2, frag3]),
+        ("pitch_stays_apart_from_hit", [pitch, frag1, frag2]),
+        ("bounce_does_not_continue_the_climb", [bounce_down, bounce_up]),
+        ("jitter_left_alone", [jitter, frag1]),
+        ("single_track_passthrough", [frag3]),
+    ]
+    for name, tracks in stitch_cases:
+        chains = sla.stitch_tracks(tracks)
+        out["stitch_tracks"].append({
+            "name": name,
+            "tracks": [[{"frame": o.frame, "t": o.t, "x": o.x, "y": o.y,
+                         "diameter_px": o.diameter_px, "area_px": o.area_px}
+                        for o in tr] for tr in tracks],
+            "expected_chain_count": len(chains),
+            "expected_chain_lens": sorted(len(c) for c in chains),
+            "expected_longest_first_frame": max(chains, key=len)[0].frame,
+            "expected_longest_last_frame": max(chains, key=len)[-1].frame,
         })
 
     # Track BUILDING, on the frame layout that actually failed: a ball
@@ -756,7 +805,8 @@ def main():
           f"{len(out['trigger_calibration'])} trigger-calibration cases, "
           f"{len(out['track_straightness'])} straightness cases, "
           f"{len(out['select_track'])} selection cases, "
-          f"{len(out['build_tracks'])} track-building cases")
+          f"{len(out['build_tracks'])} track-building cases, "
+          f"{len(out['stitch_tracks'])} stitch cases")
 
 
 if __name__ == "__main__":
