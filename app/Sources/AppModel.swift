@@ -38,7 +38,7 @@ final class AppModel: ObservableObject {
     @Published var settings = AppSettings.load() {
         didSet {
             settings.save()
-            capture.requireHitterToTrigger = settings.requireHitter
+            syncHitterGate()
             capture.visionOrientationOverride = settings.visionOrientation.orientation
             capture.triggerThresholdDb = settings.triggerDb
             capture.preRollS = settings.preRollS
@@ -106,7 +106,7 @@ final class AppModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        capture.requireHitterToTrigger = settings.requireHitter
+        syncHitterGate()
         capture.visionOrientationOverride = settings.visionOrientation.orientation
         capture.triggerThresholdDb = settings.triggerDb
         capture.preRollS = settings.preRollS
@@ -166,6 +166,8 @@ final class AppModel: ObservableObject {
         session = nil
         capture.isArmed = false
         capture.stop()
+        // The escape hatch expires with the round that used it.
+        hitterGateDisabledForSession = false
         finishedSession = SessionSummary.build(session: closed, swings: swings)
     }
 
@@ -288,14 +290,46 @@ final class AppModel: ObservableObject {
 
     /// Give up on the hitter requirement for this session. Swings captured
     /// afterwards carry `.hitterGateDisabled` so the looser gate is on record.
+    /// Give up on the hitter requirement **for this round**.
+    ///
+    /// It used to do that by writing `settings.requireHitter = false`, and
+    /// `settings` saves itself on every change — so a button labelled "for the
+    /// session", offered whenever the gate had been quiet a while and easy to
+    /// tap once out of curiosity, turned the requirement off PERMANENTLY and
+    /// wrote it to disk.
+    ///
+    /// The next round then started with `hitterGateDisabledForSession` reset
+    /// to false and `settings.requireHitter` still false: the gate was off, and
+    /// because the flag that records "the gate was off" was the session one,
+    /// nothing on the swing said so. That is the exact combination that
+    /// recorded an empty room and reported 331 mph with no note explaining how
+    /// it got past a requirement the owner believed was on.
+    ///
+    /// Now it is session state and only session state. The stored setting is
+    /// never touched, and it goes back on by itself at the end of the round.
     func trustAudioTriggerForSession() {
-        settings.requireHitter = false
         hitterGateDisabledForSession = true
         banner = Banner(kind: .info,
-                        text: "Trigger will now fire on sound alone. Swings are flagged so you know.")
+                        text: "Trigger will fire on sound alone for the rest of this round. Swings are flagged so you know, and the setting goes back on when the round ends.")
     }
 
-    private(set) var hitterGateDisabledForSession = false
+    private(set) var hitterGateDisabledForSession = false {
+        didSet { syncHitterGate() }
+    }
+
+    /// Whether a trigger currently needs a person in frame. Both the stored
+    /// setting and the round's escape hatch have a say, and the capture
+    /// controller must hear about either changing.
+    private func syncHitterGate() {
+        capture.requireHitterToTrigger = settings.requireHitter && !hitterGateDisabledForSession
+    }
+
+    /// True when the swing about to be recorded is not being checked for a
+    /// hitter — whichever of the two reasons it is. Flagged on the record, so
+    /// a reading taken without the check can never look like one taken with it.
+    var hitterCheckIsOff: Bool {
+        !settings.requireHitter || hitterGateDisabledForSession
+    }
 
     func disarm() { capture.isArmed = false }
 
@@ -750,7 +784,7 @@ final class AppModel: ObservableObject {
         dto.cameraFovDeg = placement.fovDeg > 0 ? placement.fovDeg : nil
         dto.visionOrientation = capture.visionOrientationForFrames
         dto.captureFlags = placement.captureFlags
-            + (hitterGateDisabledForSession ? [.hitterGateDisabled] : [])
+            + (hitterCheckIsOff ? [.hitterGateDisabled] : [])
             + (droppedFrames ? [.framesDropped] : [])
         dto.sessionID = session?.id
         sessionSwingCount += 1

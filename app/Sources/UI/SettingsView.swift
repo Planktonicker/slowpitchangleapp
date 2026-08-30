@@ -48,6 +48,15 @@ struct SettingsView: View {
                     Toggle("Only trigger with a person in frame", isOn: $model.settings.requireHitter)
                     Text("Uses on-device body-pose detection to ignore bangs and rattles when nobody is at the plate. Suppressed noises are counted on the capture screen. Manual capture always works.")
                         .font(.caption).foregroundStyle(.secondary)
+                    // The switch above can be ON while the check is OFF, for
+                    // the length of one round, if the escape hatch was used.
+                    // Saying so here is the difference between a setting you
+                    // can trust and one you cannot.
+                    if model.hitterGateDisabledForSession {
+                        Label("Paused for this round — you chose to trust the audio trigger. It comes back on when the round ends.",
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(Theme.warn)
+                    }
                     stepper("Threshold over noise floor", value: $model.settings.triggerDb,
                             range: 6...30, step: 1, unit: "dB")
                     Button("Calibrate at this venue") { showTriggerCalibration = true }

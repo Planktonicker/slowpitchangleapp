@@ -432,7 +432,13 @@ struct CaptureScreen: View {
             out.append(("\(capture.suppressedTriggerCount) ignored",
                         "bolt.slash.fill", Theme.warn))
         }
-        if model.settings.requireHitter, capture.isArmed, !capture.hitterPresent {
+        // Two different states, and conflating them is what let an empty room
+        // get recorded: "armed, looking, nobody there yet" is normal, and
+        // "not looking at all" is a thing the owner needs to see, because they
+        // set a switch that says otherwise.
+        if model.hitterCheckIsOff, capture.isArmed {
+            out.append(("Hitter check OFF", "person.slash.fill", Theme.fail))
+        } else if model.settings.requireHitter, capture.isArmed, !capture.hitterPresent {
             out.append(("No hitter", "person.slash.fill", Theme.warn))
         }
         if capture.status == .running, capture.fps < SLA.targetFPS - 1 {
