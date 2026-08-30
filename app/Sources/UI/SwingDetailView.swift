@@ -10,6 +10,12 @@ import SwiftUI
 /// measured number, and the hand-entered ground truth that feeds gate G3.
 struct SwingDetailView: View {
     @EnvironmentObject private var model: AppModel
+    /// Seeded from the list, then kept in step with the store.
+    ///
+    /// `@State` alone made this a snapshot taken when the screen opened, so a
+    /// re-analysis — which replaces the record in the store — left the detail
+    /// view and everything it presents showing the numbers from before. The
+    /// `onChange` below is what makes "Point at the ball" visibly do anything.
     @State var swing: SwingDTO
 
     @State private var player: AVPlayer?
@@ -50,6 +56,14 @@ struct SwingDetailView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.black)
         .task { await load() }
+        // Re-analysis replaces the stored record; pick the new one up and
+        // re-read the track files it just rewrote.
+        .onChange(of: model.swings) { _, swings in
+            guard let fresh = swings.first(where: { $0.id == swing.id }),
+                  fresh != swing else { return }
+            swing = fresh
+            Task { await load() }
+        }
         .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }
         .fullScreenCover(isPresented: $showReview) { TrackReviewView(swing: swing) }
     }

@@ -636,6 +636,16 @@ final class AppModel: ObservableObject {
                     updated.visionOrientationRaw = swing.visionOrientationRaw
                     updated.captureFlags = swing.captureFlags
                     updated.notes = swing.notes
+                    // Rewrite the track, pose and trace files to match the
+                    // analysis that just ran. Re-analysis used to carry the
+                    // FILENAMES forward and leave the files themselves
+                    // untouched, so a corrected reading was displayed over the
+                    // original track: the launch angle moved, the path on
+                    // screen did not, and the review screen contradicted the
+                    // number beside it. Anyone checking whether a fix had
+                    // worked was reading stale evidence.
+                    self.writeTracks(for: analysis, clipName: clipName,
+                                     setting: swing.setting, into: &updated)
                     self.analysisProgress = nil
                     self.update(updated)
                     self.banner = AppModel.Banner(kind: .info, text: "Re-analyzed.")

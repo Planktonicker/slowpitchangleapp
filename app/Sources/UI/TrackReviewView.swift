@@ -21,7 +21,16 @@ import UIKit
 /// exactly what was measured, not a second opinion computed for display. If
 /// the overlay looks wrong, the measurement was wrong.
 struct TrackReviewView: View {
-    let swing: SwingDTO
+    /// `@State`, not `let`: re-measuring replaces the stored record, and this
+    /// screen has to follow it. Held as a copy that tracks the store rather
+    /// than a snapshot from when it opened — otherwise tapping the ball
+    /// changed the measurement and showed the old track, which reads as the
+    /// tap having done nothing.
+    @State private var swing: SwingDTO
+
+    init(swing: SwingDTO) {
+        _swing = State(initialValue: swing)
+    }
 
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -66,6 +75,12 @@ struct TrackReviewView: View {
         }
         .preferredColorScheme(.dark)
         .task { await load() }
+        .onChange(of: model.swings) { _, swings in
+            guard let fresh = swings.first(where: { $0.id == swing.id }),
+                  fresh != swing else { return }
+            swing = fresh
+            Task { await load() }
+        }
         .onDisappear {
             if let timeObserver { player?.removeTimeObserver(timeObserver) }
             timeObserver = nil
@@ -280,7 +295,10 @@ struct TrackReviewView: View {
         model.update(updated)
         model.reanalyze(updated)
         pickingBall = false
-        dismiss()
+        // Deliberately NOT dismissing: the whole point of the tap is to see
+        // whether it found the ball, and re-analysis runs asynchronously. The
+        // onChange above swaps in the new record and re-reads the rewritten
+        // track files, so the answer appears on this screen.
     }
 
     // MARK: - Horizon
@@ -401,7 +419,8 @@ struct TrackReviewView: View {
         model.reanalyze(updated)
         showHorizonTool = false
         horizonFraction = nil
-        dismiss()
+        // Same reasoning as the ball tap: stay open so the corrected
+        // measurement lands where it can be checked.
     }
 
     // MARK: - Controls
@@ -451,7 +470,15 @@ struct TrackReviewView: View {
                 otherTracksList
             }
 
-            if !pickingBall, !showHorizonTool {
+            if model.isAnalyzing {
+                HStack(spacing: 8) {
+                    ProgressView().tint(Theme.yellow)
+                    Text("Re-measuring from the ball you picked…")
+                        .font(.callout).foregroundStyle(Theme.steel)
+                }
+            }
+
+            if !pickingBall, !showHorizonTool, !model.isAnalyzing {
                 Button {
                     pickingBall = true
                     player?.pause()
