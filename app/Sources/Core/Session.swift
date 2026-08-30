@@ -23,6 +23,52 @@ struct Session: Identifiable, Codable, Equatable, Sendable {
 
     var isOpen: Bool { endedAt == nil }
     var duration: TimeInterval { (endedAt ?? Date()).timeIntervalSince(startedAt) }
+
+    /// Rebuild a finished round from the swings that carry its id.
+    ///
+    /// Rounds are **derived, not stored**, and that is the whole design. A
+    /// parallel table of sessions is a second copy of the same fact, and the
+    /// two go out of step the first time somebody deletes a swing: the round
+    /// still claims twelve, eleven exist, and nothing reconciles them. Here the
+    /// round IS its swings — delete one and the round shrinks, delete them all
+    /// and the round is gone, which is the honest answer to "what happened to
+    /// that round" in every case.
+    ///
+    /// It also means no schema migration to make finished rounds reopenable:
+    /// every swing already carries the id.
+    ///
+    /// What is lost is the round's true clock. `startedAt` becomes the first
+    /// swing rather than the moment ARM was pressed, so a round reads as the
+    /// span of the hitting rather than of the standing about. That is arguably
+    /// the more useful number and is certainly not a worse one.
+    static func derived(id: UUID, from swings: [SwingDTO]) -> Session? {
+        let mine = swings.filter { $0.sessionID == id }.sorted { $0.capturedAt < $1.capturedAt }
+        guard let first = mine.first, let last = mine.last else { return nil }
+        return Session(id: id,
+                       mode: dominantMode(of: mine),
+                       startedAt: first.capturedAt,
+                       endedAt: last.capturedAt)
+    }
+
+    /// Every finished round in the store, newest first.
+    static func allDerived(from swings: [SwingDTO]) -> [Session] {
+        let ids = Set(swings.compactMap(\.sessionID))
+        return ids.compactMap { derived(id: $0, from: swings) }
+            .sorted { $0.startedAt > $1.startedAt }
+    }
+
+    /// The mode a round was, read back from what its swings were recorded as.
+    ///
+    /// Most common rather than first: the setting can be changed mid-round from
+    /// the capture screen, and one swing relabelled for a validation run should
+    /// not rename the whole round.
+    private static func dominantMode(of swings: [SwingDTO]) -> SessionMode {
+        var tally: [SessionMode: Int] = [:]
+        for s in swings { tally[SessionMode(setting: s.setting), default: 0] += 1 }
+        return tally.max { a, b in
+            a.value != b.value ? a.value < b.value : a.key.rawValue > b.key.rawValue
+        }?.key ?? .live
+    }
 }
 
 /// How the ball is being delivered. This is the first thing the app asks,
@@ -60,6 +106,20 @@ enum SessionMode: String, Codable, CaseIterable, Identifiable, Sendable {
         case .live: return "figure.baseball"
         case .toss: return "hand.raised"
         case .tee:  return "cone"
+        }
+    }
+
+    /// Back the other way, for rebuilding a finished round from its swings.
+    ///
+    /// The four validation settings have no field mode of their own — they are
+    /// not offered on the start screen — so they fold into the nearest one. A
+    /// round is being named here, not a measurement described; each swing keeps
+    /// its own exact `SwingSetting` either way.
+    init(setting: SwingSetting) {
+        switch setting {
+        case .tee, .teeid: self = .tee
+        case .toss:        self = .toss
+        case .live, .cage, .net, .fly: self = .live
         }
     }
 

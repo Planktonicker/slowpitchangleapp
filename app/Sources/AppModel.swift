@@ -169,6 +169,45 @@ final class AppModel: ObservableObject {
         finishedSession = SessionSummary.build(session: closed, swings: swings)
     }
 
+    /// Every finished round, newest first, rebuilt from the swings themselves.
+    ///
+    /// Derived rather than stored — see `Session.derived`. The round in
+    /// progress is excluded: it is not finished, and offering to reopen the
+    /// thing you are already in is a button that can only confuse.
+    var pastRounds: [Session] {
+        Session.allDerived(from: swings).filter { $0.id != session?.id }
+    }
+
+    func summary(for round: Session) -> SessionSummary {
+        SessionSummary.build(session: round, swings: swings)
+    }
+
+    /// Pick a finished round back up and keep hitting into it.
+    ///
+    /// For the round ended by accident, and for the one that turned out to be
+    /// half a round — you went to fetch more balls, the app was closed, and
+    /// what comes next is plainly the same session. Rebuilding it by hand meant
+    /// adding every swing to a new round one at a time.
+    ///
+    /// A reopened round keeps its ORIGINAL id, so every swing already in it
+    /// stays in it and nothing has to be re-tagged. `endedAt` clears, because a
+    /// round you are hitting into has not ended; when it ends again the summary
+    /// is rebuilt from scratch over the whole set, which is exactly what makes
+    /// the late swings count.
+    func reopenSession(_ round: Session) {
+        if session != nil { endSession() }
+        var reopened = round
+        reopened.endedAt = nil
+        session = reopened
+        currentSetting = round.mode.swingSetting
+        finishedSession = nil
+        sessionSwingCount = sessionSwings.count
+        hitterGateDisabledForSession = false
+        banner = Banner(kind: .info,
+                        text: "Back in that round — \(sessionSwingCount) swing"
+                            + (sessionSwingCount == 1 ? "" : "s") + " already in it.")
+    }
+
     /// Put an existing swing into the round in progress.
     ///
     /// For the clip filmed before anyone thought to start a session, and for

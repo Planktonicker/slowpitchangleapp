@@ -22,6 +22,7 @@ struct StartView: View {
     @State private var showSwings = false
     @State private var showSettings = false
     @State private var showTrends = false
+    @State private var showRounds = false
 
     var body: some View {
         NavigationStack {
@@ -59,6 +60,7 @@ struct StartView: View {
             .sheet(isPresented: $showSwings) { HistoryView() }
             .sheet(isPresented: $showSettings) { SettingsView() }
             .sheet(isPresented: $showTrends) { TrendsView() }
+            .sheet(isPresented: $showRounds) { RoundsView() }
         }
         .tint(Theme.yellow)
     }
@@ -113,7 +115,7 @@ struct StartView: View {
         VStack(spacing: 10) {
             Button("Start session") { model.startSession(mode: mode) }
                 .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 20))
-            Text("Next: frame the hitter and tap the ball once. The camera does not start until then.")
+            Text("Next: frame the hitter and tap the ball once. The camera does not start until then. To carry on with a round you already started, use Past rounds.")
                 .font(.caption)
                 .foregroundStyle(Theme.steel)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -148,8 +150,12 @@ struct StartView: View {
     /// go/no-go scoreboard for the measurement gates, which belongs with the
     /// rest of the specialist screens under Settings.
     private var betweenSessions: some View {
-        Button("Trends") { showTrends = true }
-            .buttonStyle(OutlineButtonStyle())
+        HStack(spacing: 12) {
+            Button("Past rounds") { showRounds = true }
+                .buttonStyle(OutlineButtonStyle())
+            Button("Trends") { showTrends = true }
+                .buttonStyle(OutlineButtonStyle())
+        }
     }
 
     /// The standing caveat, on the screen every session starts from.
