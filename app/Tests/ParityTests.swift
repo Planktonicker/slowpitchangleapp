@@ -37,6 +37,14 @@ final class ParityTests: XCTestCase {
         var body_strides: [BodyStrideCase]
         var body_drift_gate: [BodyDriftCase]
         var trigger_calibration: [TriggerCalCase]
+        var track_straightness: [StraightnessCase]
+    }
+
+    struct StraightnessCase: Decodable {
+        struct Point: Decodable { var x: Double; var y: Double }
+        var name: String
+        var points: [Point]
+        var expected: Double
     }
 
     struct TriggerCalCase: Decodable {
@@ -234,6 +242,25 @@ final class ParityTests: XCTestCase {
 
     // MARK: - Constants
 
+    /// The gate that separates a ball flight from clutter that merely persists.
+    ///
+    /// Pinned case by case rather than by spot-check because the failure it
+    /// prevents is silent: without it the longest track in a clip wins, and
+    /// the longest track is a patch of grass being re-detected for two seconds
+    /// while the ball crosses the frame in a fraction of one.
+    func testTrackStraightnessMatchesReference() {
+        let cases = Self.fixtures.track_straightness
+        XCTAssertFalse(cases.isEmpty)
+        for c in cases {
+            let track = c.points.enumerated().map { i, p in
+                BallObservation(frame: i, t: Double(i) / 240.0,
+                                x: p.x, y: p.y, diameterPx: 10, areaPx: 80)
+            }
+            assertClose(TrackBuilder.straightness(track), c.expected,
+                        "straightness \(c.name)")
+        }
+    }
+
     func testConstantsMatchReference() {
         let c = Self.fixtures.constants
         assertClose(SLA.g, c["G"]!, "G")
@@ -265,6 +292,7 @@ final class ParityTests: XCTestCase {
         assertClose(SLA.hsvHiDefault.s, c["HSV_HI_S"]!, "hsv hi S")
         assertClose(SLA.hsvHiDefault.v, c["HSV_HI_V"]!, "hsv hi V")
         assertClose(SLA.minRadiusPxDefault, c["MIN_RADIUS_PX_DEFAULT"]!, "min radius")
+        assertClose(SLA.trackStraightnessMin, c["TRACK_STRAIGHTNESS_MIN"]!, "track straightness min")
         assertClose(SLA.maxRadiusPxDefault, c["MAX_RADIUS_PX_DEFAULT"]!, "max radius")
 
         assertClose(SLA.smashPoorBelow, c["SMASH_POOR_BELOW"]!, "smash poor")

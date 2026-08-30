@@ -66,6 +66,18 @@ enum SLA {
     static let velocityWindowS = 0.12      // LA/EV fit window at contact (~29 frames @240)
     static let gravityWindowS = 0.35       // longer: curvature needs time to accumulate
     static let minTrackFrames = 8
+
+    /// How directed a track has to be before it is treated as a flight: the
+    /// straight line from first sighting to last, over the distance actually
+    /// walked. A ball in flight is essentially 1.0 — it curves, but it never
+    /// turns back. Clutter that is merely being re-detected in place scores
+    /// near 0.
+    ///
+    /// 0.55 is deliberately loose. It has to survive a genuine flight that is
+    /// partly occluded, detected raggedly, or caught near its apex where the
+    /// horizontal motion is smallest, and the cost of being loose is only that
+    /// a wandering track has to wander a bit more obviously before it goes.
+    static let trackStraightnessMin = 0.55
     static let minGravityTrackS = 0.20     // below this the gravity scale is unreliable
     static let scaleDisagreeTol = 0.08     // G2 tolerance
     static let diameterDriftTol = 0.10     // depth-motion (cosine error) flag threshold

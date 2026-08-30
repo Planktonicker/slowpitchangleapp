@@ -343,16 +343,65 @@ def build_tracks(
     return done
 
 
+# How directed a track has to be before it is treated as a flight: the straight
+# line from first sighting to last, over the distance actually walked. A ball
+# in flight is essentially 1.0 — it curves, but it never turns back. Clutter
+# that is merely being re-detected in place scores near 0.
+#
+# 0.55 is deliberately loose. It has to survive a genuine flight that is partly
+# occluded, detected raggedly, or caught near its apex where the horizontal
+# motion is smallest, and the cost of being loose is only that a wandering
+# track has to wander a bit more obviously before it is thrown out.
+TRACK_STRAIGHTNESS_MIN = 0.55
+
+
+def track_straightness(track: list[BallObservation]) -> float:
+    """Net displacement over path length, in [0, 1].
+
+    1.0 is a straight line. A ball flight sits just under it. A blob detected
+    over and over in the same place, jittering, sits near 0 however many frames
+    it survives for.
+    """
+    if len(track) < 2:
+        return 0.0
+    walked = 0.0
+    for a, b in zip(track, track[1:]):
+        walked += math.hypot(b.x - a.x, b.y - a.y)
+    if walked <= 1e-9:
+        return 0.0
+    net = math.hypot(track[-1].x - track[0].x, track[-1].y - track[0].y)
+    return net / walked
+
+
 def select_outbound_track(
     tracks: list[list[BallObservation]],
     fps: float,
     direction: str = "auto",     # "left" | "right" | "auto"
     min_len: int = MIN_TRACK_FRAMES,
 ) -> list[BallObservation] | None:
-    """Pick the hit ball: the longest/fastest coherent track moving outbound.
+    """Pick the hit ball: the fastest coherent track that actually goes somewhere.
 
     An inbound pitch also forms a track; it is slower and moves the other way.
     With direction="auto" the fastest track's horizontal direction wins.
+
+    Scored by speed times length, but gated on STRAIGHTNESS first, and that
+    gate is the whole point. A hit ball travels in one direction: the straight
+    line from its first sighting to its last is very nearly as long as the path
+    it actually walked. Background clutter of about the right colour — a patch
+    of sunlit grass, a shoe, a bag — does not travel. It sits there being
+    re-detected, wandering a few pixels either way, and a track builder will
+    happily link it across the entire clip.
+
+    Length alone therefore points the wrong way: the clutter track is the
+    LONGEST thing in the clip, precisely because it never leaves. One real clip
+    produced a 426-frame "flight" spanning 89% of the footage, which is not a
+    ball at any speed, while the actual ball flew through in a fraction of a
+    second. Multiplying speed by length let the wanderer out-score it.
+
+    Straightness costs nothing to compute and separates them completely: near 1
+    for a flight, far below it for anything milling about. It is deliberately
+    a gate rather than a weight — a track that doubles back is not a worse
+    flight, it is not a flight.
     """
     scored = []
     for tr in tracks:
@@ -364,6 +413,8 @@ def select_outbound_track(
         vx = (tr[-1].x - tr[0].x) / dt
         vy = (tr[-1].y - tr[0].y) / dt
         speed = math.hypot(vx, vy)
+        if track_straightness(tr) < TRACK_STRAIGHTNESS_MIN:
+            continue
         scored.append((speed * len(tr), speed, vx, tr))
     if not scored:
         return None

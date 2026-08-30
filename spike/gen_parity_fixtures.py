@@ -477,6 +477,7 @@ def main():
             "HSV_HI_S": float(sla.HSV_HI_DEFAULT[1]),
             "HSV_HI_V": float(sla.HSV_HI_DEFAULT[2]),
             "MIN_RADIUS_PX_DEFAULT": sla.MIN_RADIUS_PX_DEFAULT,
+        "TRACK_STRAIGHTNESS_MIN": sla.TRACK_STRAIGHTNESS_MIN,
             "MAX_RADIUS_PX_DEFAULT": sla.MAX_RADIUS_PX_DEFAULT,
             "BAT_BARREL_DIAMETER_M": sla.BAT_BARREL_DIAMETER_M,
             "CONTACT_PLAUSIBLE_M": sla.CONTACT_PLAUSIBLE_M,
@@ -504,6 +505,7 @@ def main():
         "body_strides": [],
         "body_drift_gate": [],
         "trigger_calibration": [],
+        "track_straightness": [],
     }
 
     for c in fit_cases():
@@ -603,6 +605,32 @@ def main():
             "drift_m": d, "expected": sla.head_drift_plausible(d),
         })
 
+    # Straightness: the gate that separates a flight from clutter that merely
+    # persists. The wandering case is the one that matters — it is what a patch
+    # of sunlit grass produces when a track builder links it across a whole
+    # clip, and it used to out-score the real ball on speed*length.
+    def _obs(pts):
+        return [sla.BallObservation(frame=i, t=i / 240.0, x=x, y=y,
+                                    diameter_px=10.0, area_px=80.0)
+                for i, (x, y) in enumerate(pts)]
+
+    straightness_cases = [
+        ("straight_line", [(0, 0), (10, 0), (20, 0), (30, 0), (40, 0)]),
+        ("flight_arc", [(0, 100), (25, 70), (50, 52), (75, 46), (100, 52), (125, 70)]),
+        ("wanders_in_place", [(0, 0), (6, 3), (1, 6), (7, 2), (2, 5), (5, 1)]),
+        ("doubles_back", [(0, 0), (20, 0), (40, 0), (20, 0), (0, 0)]),
+        ("two_points", [(0, 0), (30, 40)]),
+        ("single_point", [(5, 5)]),
+        ("stationary", [(3, 3), (3, 3), (3, 3), (3, 3)]),
+    ]
+    for name, pts in straightness_cases:
+        tr = _obs(pts)
+        out["track_straightness"].append({
+            "name": name,
+            "points": [{"x": float(x), "y": float(y)} for x, y in pts],
+            "expected": sla.track_straightness(tr),
+        })
+
     for c in trigger_cal_cases():
         th, sep, verdict = sla.suggest_trigger_db(
             c["background_peak_db"], c["quietest_hit_db"])
@@ -629,7 +657,8 @@ def main():
           f"{len(out['contact_offset'])} contact-offset cases, "
           f"{len(out['rectify_tilt'])} tilt-rectify cases, "
           f"{len(out['body_angles']) + len(out['body_tilts']) + len(out['body_distances']) + len(out['body_strides'])} body cases, "
-          f"{len(out['trigger_calibration'])} trigger-calibration cases")
+          f"{len(out['trigger_calibration'])} trigger-calibration cases, "
+          f"{len(out['track_straightness'])} straightness cases")
 
 
 if __name__ == "__main__":

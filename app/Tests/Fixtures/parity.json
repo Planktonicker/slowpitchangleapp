@@ -32,6 +32,7 @@
   "HSV_HI_S": 255.0,
   "HSV_HI_V": 255.0,
   "MIN_RADIUS_PX_DEFAULT": 4.0,
+  "TRACK_STRAIGHTNESS_MIN": 0.55,
   "MAX_RADIUS_PX_DEFAULT": 60.0,
   "BAT_BARREL_DIAMETER_M": 0.05715,
   "CONTACT_PLAUSIBLE_M": 0.07708542665440969,
@@ -8119,6 +8120,166 @@
    "expected_threshold_db": 13.0,
    "expected_separation_db": 0.0,
    "expected_verdict": "unusable"
+  }
+ ],
+ "track_straightness": [
+  {
+   "name": "straight_line",
+   "points": [
+    {
+     "x": 0.0,
+     "y": 0.0
+    },
+    {
+     "x": 10.0,
+     "y": 0.0
+    },
+    {
+     "x": 20.0,
+     "y": 0.0
+    },
+    {
+     "x": 30.0,
+     "y": 0.0
+    },
+    {
+     "x": 40.0,
+     "y": 0.0
+    }
+   ],
+   "expected": 1.0
+  },
+  {
+   "name": "flight_arc",
+   "points": [
+    {
+     "x": 0.0,
+     "y": 100.0
+    },
+    {
+     "x": 25.0,
+     "y": 70.0
+    },
+    {
+     "x": 50.0,
+     "y": 52.0
+    },
+    {
+     "x": 75.0,
+     "y": 46.0
+    },
+    {
+     "x": 100.0,
+     "y": 52.0
+    },
+    {
+     "x": 125.0,
+     "y": 70.0
+    }
+   ],
+   "expected": 0.8452607494998663
+  },
+  {
+   "name": "wanders_in_place",
+   "points": [
+    {
+     "x": 0.0,
+     "y": 0.0
+    },
+    {
+     "x": 6.0,
+     "y": 3.0
+    },
+    {
+     "x": 1.0,
+     "y": 6.0
+    },
+    {
+     "x": 7.0,
+     "y": 2.0
+    },
+    {
+     "x": 2.0,
+     "y": 5.0
+    },
+    {
+     "x": 5.0,
+     "y": 1.0
+    }
+   ],
+   "expected": 0.16673700838043737
+  },
+  {
+   "name": "doubles_back",
+   "points": [
+    {
+     "x": 0.0,
+     "y": 0.0
+    },
+    {
+     "x": 20.0,
+     "y": 0.0
+    },
+    {
+     "x": 40.0,
+     "y": 0.0
+    },
+    {
+     "x": 20.0,
+     "y": 0.0
+    },
+    {
+     "x": 0.0,
+     "y": 0.0
+    }
+   ],
+   "expected": 0.0
+  },
+  {
+   "name": "two_points",
+   "points": [
+    {
+     "x": 0.0,
+     "y": 0.0
+    },
+    {
+     "x": 30.0,
+     "y": 40.0
+    }
+   ],
+   "expected": 1.0
+  },
+  {
+   "name": "single_point",
+   "points": [
+    {
+     "x": 5.0,
+     "y": 5.0
+    }
+   ],
+   "expected": 0.0
+  },
+  {
+   "name": "stationary",
+   "points": [
+    {
+     "x": 3.0,
+     "y": 3.0
+    },
+    {
+     "x": 3.0,
+     "y": 3.0
+    },
+    {
+     "x": 3.0,
+     "y": 3.0
+    },
+    {
+     "x": 3.0,
+     "y": 3.0
+    }
+   ],
+   "expected": 0.0
   }
  ]
 }
