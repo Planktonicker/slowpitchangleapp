@@ -104,6 +104,50 @@ struct AppSettings: Codable, Equatable {
 
     static let storageKey = "swinglab.settings.v1"
 
+    /// Field-by-field decoding, every key optional, every miss falling back to
+    /// the property's own default.
+    ///
+    /// Swift's SYNTHESISED `Decodable` does not do this, and the difference is
+    /// not academic. A synthesised decoder calls `decode` — not
+    /// `decodeIfPresent` — for every non-optional property, and a default value
+    /// written at the declaration is invisible to it. So the moment a new field
+    /// is added to this struct, every previously saved blob fails to decode
+    /// ENTIRELY, `load()` swallows the error, and the user silently gets
+    /// factory settings back. Someone who had spent a session tuning an HSV
+    /// window for their venue would lose it to an app update, with no message
+    /// and nothing to point at.
+    ///
+    /// It also made the "Reset settings to defaults" button look broken: after
+    /// any such update the settings were already default, so pressing it
+    /// changed nothing visible.
+    ///
+    /// `try?` on each field rather than one `try` for the lot, so a single
+    /// corrupt or renamed value costs that one setting instead of all of them.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = AppSettings()
+        func take<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
+            ((try? c.decodeIfPresent(T.self, forKey: key)) ?? nil) ?? fallback
+        }
+        detector = take(.detector, d.detector)
+        bat = take(.bat, d.bat)
+        trackBat = take(.trackBat, d.trackBat)
+        trackBody = take(.trackBody, d.trackBody)
+        triggerDb = take(.triggerDb, d.triggerDb)
+        preRollS = take(.preRollS, d.preRollS)
+        postRollS = take(.postRollS, d.postRollS)
+        direction = take(.direction, d.direction)
+        requireHitter = take(.requireHitter, d.requireHitter)
+        forceFallbackDetector = take(.forceFallbackDetector, d.forceFallbackDetector)
+        keepClips = take(.keepClips, d.keepClips)
+        // Genuinely optional: absent and null both mean "measure it".
+        fpsOverride = (try? c.decodeIfPresent(Double.self, forKey: .fpsOverride)) ?? nil
+        importFovDeg = take(.importFovDeg, d.importFovDeg)
+        visionOrientation = take(.visionOrientation, d.visionOrientation)
+        speedUnit = take(.speedUnit, d.speedUnit)
+        hitterOnLeft = take(.hitterOnLeft, d.hitterOnLeft)
+    }
+
     static func load() -> AppSettings {
         guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
               let decoded = try? JSONDecoder().decode(AppSettings.self, from: data) else {

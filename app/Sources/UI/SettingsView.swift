@@ -59,7 +59,7 @@ struct SettingsView: View {
                             Text(d.rawValue.capitalized).tag(d)
                         }
                     }
-                    Text("Direction only matters when an inbound pitch is also in frame. Auto takes the fastest track.")
+                    Text("Which way the HIT ball crosses the frame. It matters because an inbound slow-pitch is a perfectly good track — straight, and fast enough to clear every other filter — that happens to cross the frame the other way. \"Auto\" works it out from which side the hitter stands on in the setup screen, so check that toggle is right before overriding this by hand.")
                         .font(.caption).foregroundStyle(.secondary)
                     // A free number, not a menu of four. Real footage is not
                     // limited to the round rates a picker can list — the first
@@ -134,7 +134,17 @@ struct SettingsView: View {
 
                 Section {
                     Button("Reset settings to defaults") {
+                        let before = model.settings
                         model.settings = AppSettings()
+                        // Say what happened. A silent reset is indistinguishable
+                        // from a broken button — especially when the settings
+                        // were already at defaults, which is exactly the state
+                        // an app update used to leave them in.
+                        model.banner = AppModel.Banner(
+                            kind: .info,
+                            text: before == model.settings
+                                ? "Settings were already at their defaults — nothing changed. Existing swings keep their old numbers; re-import a clip to measure it with these."
+                                : "Settings reset. Existing swings keep the numbers they were measured with — re-import a clip to measure it again.")
                     }
                     Button("Delete all swings", role: .destructive) {
                         showDeleteConfirm = true
