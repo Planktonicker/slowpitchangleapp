@@ -311,6 +311,7 @@ final class ParityTests: XCTestCase {
     /// it and the honest result is the one they asked for.
     func testSeededTrackingMatchesReference() {
         for (key, value) in [("SEED_SEARCH_RADIUS_PX", SLA.seedSearchRadiusPx),
+                             ("SEED_SEARCH_RADIUS_FRAC", SLA.seedSearchRadiusFrac),
                              ("SEED_GATE_BASE_PX", SLA.seedGateBasePx),
                              ("SEED_GATE_PREDICTED_PX", SLA.seedGatePredictedPx),
                              ("SEED_GATE_SPEED_MULT", SLA.seedGateSpeedMult),
