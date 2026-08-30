@@ -120,6 +120,78 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.swinglab.SwingLabTests
         GENERATE_INFOPLIST_FILE: YES
 
+  # SwingLab Pro — the multi-phone 3D capture variant (docs/SWINGLAB_PRO.md).
+  # A SECOND app over the SAME tree, not a fork: everything in Sources/ except
+  # the @main file compiles into both apps, so the shipping SwingLab target
+  # above stays untouched by construction while Pro grows in SourcesPro/.
+  SwingLabPro:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+        excludes:
+          # Pro has its own @main. Boot and InMemorySwingStore live in this
+          # file too and are re-provided in SourcesPro until P4 moves them
+          # into Sources/ proper.
+          - "SwingLabApp.swift"
+      - path: SourcesPro
+      - path: Resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.swinglab.SwingLabPro
+        PRODUCT_NAME: SwingLabPro
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+        # Same argument as SwingLab: the detector walks two million pixels a
+        # frame, and -Onone turns seconds of analysis into minutes.
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
+    info:
+      path: SwingLabPro-Info.plist
+      properties:
+        CFBundleDisplayName: SwingLab Pro
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        # Pro DOES network — but peer-to-peer and local-only, phone to phone
+        # over MultipeerConnectivity with the OS's own session encryption and
+        # nothing on top, which is exempt. There are still no internet
+        # requests at all; nothing leaves the phones on the tripods.
+        ITSAppUsesNonExemptEncryption: false
+        UILaunchScreen:
+          UIColorName: ""
+        NSCameraUsageDescription: >-
+          SwingLab Pro films your swings at 240fps to measure launch angle,
+          exit velocity and 3D swing motion. Video never leaves your devices.
+        NSMicrophoneUsageDescription: >-
+          SwingLab Pro listens for the crack of bat on ball so it can capture
+          the swing without you touching the phone — and so linked phones can
+          agree on exactly when contact happened.
+        NSPhotoLibraryAddUsageDescription: >-
+          Save a swing clip to your photo library to share it.
+        NSPhotoLibraryUsageDescription: >-
+          Read a clip you already filmed so SwingLab Pro can measure it.
+          Reading the library directly is the only way to get the ORIGINAL
+          slow-motion recording — every other route hands over a 30fps render
+          of it, and a 240fps clip measured as 30fps is wrong by a factor of
+          eight.
+        # Linked capture pairs two phones directly, no internet involved.
+        NSLocalNetworkUsageDescription: >-
+          SwingLab Pro links two iPhones over your local network so both film
+          the same swing in sync. Video and measurements never leave your
+          devices.
+        NSBonjourServices:
+          - _swinglab-pro._tcp
+          - _swinglab-pro._udp
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UIRequiredDeviceCapabilities:
+          - arm64
+
 schemes:
   SwingLab:
     build:
@@ -133,6 +205,17 @@ schemes:
       gatherCoverageData: true
       targets:
         - SwingLabTests
+    profile:
+      config: Release
+    archive:
+      config: Release
+
+  SwingLabPro:
+    build:
+      targets:
+        SwingLabPro: all
+    run:
+      config: Debug
     profile:
       config: Release
     archive:

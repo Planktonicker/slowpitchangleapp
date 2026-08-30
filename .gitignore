@@ -16,6 +16,7 @@ spike/out/
 app/*.xcodeproj
 # Info.plist is generated from project.yml too — one source of truth, not two
 app/SwingLab-Info.plist
+app/SwingLabPro-Info.plist
 xcuserdata/
 DerivedData/
 *.ipa
