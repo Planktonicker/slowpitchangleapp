@@ -38,6 +38,19 @@ final class ParityTests: XCTestCase {
         var body_drift_gate: [BodyDriftCase]
         var trigger_calibration: [TriggerCalCase]
         var track_straightness: [StraightnessCase]
+        var select_track: [SelectCase]
+    }
+
+    struct SelectCase: Decodable {
+        struct Obs: Decodable {
+            var frame: Int; var t: Double; var x: Double; var y: Double
+            var diameter_px: Double; var area_px: Double
+        }
+        var name: String
+        var direction: String
+        var tracks: [[Obs]]
+        /// `nil` when the reference returns no track at all.
+        var expected_index: Int?
     }
 
     struct StraightnessCase: Decodable {
@@ -241,6 +254,31 @@ final class ParityTests: XCTestCase {
     }
 
     // MARK: - Constants
+
+    /// Which track in a clip is the hit.
+    ///
+    /// The pitch case is the one worth pinning. A lobbed slow-pitch is slow
+    /// and hangs in frame for two seconds; a hit is several times faster and
+    /// gone in a fraction of one. Scoring on speed TIMES LENGTH cancelled
+    /// exactly that difference — the two came out within a percent of each
+    /// other — and the pipeline spent a field session measuring the pitch.
+    func testTrackSelectionMatchesReference() {
+        let cases = Self.fixtures.select_track
+        XCTAssertFalse(cases.isEmpty)
+        for c in cases {
+            let tracks = c.tracks.map { tr in
+                tr.map { BallObservation(frame: $0.frame, t: $0.t, x: $0.x, y: $0.y,
+                                         diameterPx: $0.diameter_px, areaPx: $0.area_px) }
+            }
+            let direction = TrackBuilder.Direction(rawValue: c.direction) ?? .auto
+            let picked = TrackBuilder.selectOutboundTrack(tracks, direction: direction)
+            if let expected = c.expected_index {
+                XCTAssertEqual(picked, tracks[expected], "selection \(c.name)")
+            } else {
+                XCTAssertNil(picked, "selection \(c.name) should pick nothing")
+            }
+        }
+    }
 
     /// The gate that separates a ball flight from clutter that merely persists.
     ///

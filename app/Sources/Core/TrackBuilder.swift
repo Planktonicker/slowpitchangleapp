@@ -84,7 +84,7 @@ enum TrackBuilder {
         case auto, left, right
     }
 
-    /// Pick the hit ball: the longest/fastest coherent outbound track.
+    /// Pick the hit ball: the FASTEST coherent track going the right way.
     ///
     /// An inbound pitch also forms a track; it is slower and moves the other
     /// way. With `.auto` the fastest track's horizontal direction wins.
@@ -110,7 +110,14 @@ enum TrackBuilder {
                                     direction: Direction = .auto,
                                     minLen: Int = SLA.minTrackFrames) -> [BallObservation]? {
         struct Scored {
+            /// Speed alone. Length used to multiply this, and in slow-pitch
+            /// that is exactly backwards: a lobbed pitch is slow and hangs in
+            /// frame for two seconds while a hit is several times faster and
+            /// gone in a fraction of one, so the two came out within a percent
+            /// of each other and the choice fell to noise. Speed alone
+            /// separates them about seven to one.
             var score: Double
+            var straightness: Double
             var vx: Double
             var index: Int
             var track: [BallObservation]
@@ -124,18 +131,17 @@ enum TrackBuilder {
             let vx = (last.x - first.x) / dt
             let vy = (last.y - first.y) / dt
             let speed = (vx * vx + vy * vy).squareRoot()
-            // Straightness before score, and this gate is the whole point.
-            // Length points the WRONG way on its own: background clutter of
-            // roughly the right colour does not travel, it sits there being
-            // re-detected, and a track builder will link it across the entire
-            // clip. One real clip produced a 426-frame "flight" spanning 89%
-            // of the footage — not a ball at any speed — while the actual ball
-            // crossed the frame in a fraction of a second. Multiplying speed
-            // by length let the wanderer win.
-            guard straightness(tr) >= SLA.trackStraightnessMin else { continue }
-            scored.append(Scored(score: speed * Double(tr.count), vx: vx, index: i, track: tr))
+            scored.append(Scored(score: speed, straightness: straightness(tr),
+                                 vx: vx, index: i, track: tr))
         }
         guard !scored.isEmpty else { return nil }
+
+        // Straightness is a PREFERENCE, not a hard gate. A gate that rejects
+        // every track returns nothing at all, which is a worse answer than a
+        // doubtful one — and on real footage the hit is sometimes detected
+        // raggedly enough to fail it.
+        let straight = scored.filter { $0.straightness >= SLA.trackStraightnessMin }
+        scored = straight.isEmpty ? scored : straight
 
         // Descending by score; the index tiebreak reproduces Python's stable
         // sort so the two implementations pick the same track on a tie.

@@ -506,6 +506,7 @@ def main():
         "body_drift_gate": [],
         "trigger_calibration": [],
         "track_straightness": [],
+        "select_track": [],
     }
 
     for c in fit_cases():
@@ -605,6 +606,59 @@ def main():
             "drift_m": d, "expected": sla.head_drift_plausible(d),
         })
 
+    # Track selection: which of several tracks in a clip is the HIT.
+    #
+    # The pitch case is the one that matters. A lobbed slow-pitch is slow and
+    # hangs in frame; a hit is several times faster and gone quickly. Scoring
+    # on speed times length cancels exactly that difference and used to pick
+    # the pitch.
+    def _line(x0, y0, x1, y1, n, fps=240.0):
+        pts = []
+        for i in range(n):
+            f = i / max(1, n - 1)
+            pts.append(sla.BallObservation(
+                frame=i, t=i / fps,
+                x=x0 + (x1 - x0) * f, y=y0 + (y1 - y0) * f,
+                diameter_px=10.0, area_px=80.0))
+        return pts
+
+    def _jitter(x, y, n, fps=240.0):
+        pts = []
+        for i in range(n):
+            pts.append(sla.BallObservation(
+                frame=i, t=i / fps,
+                x=x + (3 if i % 2 else -3), y=y + (2 if i % 3 else -2),
+                diameter_px=10.0, area_px=80.0))
+        return pts
+
+    select_cases = [
+        # A slow inbound pitch over many frames against a fast short hit.
+        ("pitch_vs_hit", "auto",
+         [_line(1100, 200, 200, 500, 430), _line(300, 500, 1250, 120, 60)]),
+        # The same pair, with the outbound direction known.
+        ("pitch_vs_hit_directed", "right",
+         [_line(1100, 200, 200, 500, 430), _line(300, 500, 1250, 120, 60)]),
+        # Stationary clutter tracked all clip against a real flight.
+        ("clutter_vs_hit", "auto",
+         [_jitter(240, 650, 400), _line(300, 500, 1250, 120, 60)]),
+        # Nothing long enough to be a flight.
+        ("all_too_short", "auto", [_line(0, 0, 50, 50, 4)]),
+        # Only clutter: something must still come back, flagged downstream,
+        # rather than the pipeline reporting no ball at all.
+        ("only_clutter", "auto", [_jitter(240, 650, 400)]),
+    ]
+    for name, direction, tracks in select_cases:
+        picked = sla.select_outbound_track(tracks, fps=240.0, direction=direction)
+        out["select_track"].append({
+            "name": name,
+            "direction": direction,
+            "tracks": [[{"frame": o.frame, "t": o.t, "x": o.x, "y": o.y,
+                         "diameter_px": o.diameter_px, "area_px": o.area_px}
+                        for o in tr] for tr in tracks],
+            "expected_index": None if picked is None else
+                next(i for i, tr in enumerate(tracks) if tr is picked),
+        })
+
     # Straightness: the gate that separates a flight from clutter that merely
     # persists. The wandering case is the one that matters — it is what a patch
     # of sunlit grass produces when a track builder links it across a whole
@@ -658,7 +712,8 @@ def main():
           f"{len(out['rectify_tilt'])} tilt-rectify cases, "
           f"{len(out['body_angles']) + len(out['body_tilts']) + len(out['body_distances']) + len(out['body_strides'])} body cases, "
           f"{len(out['trigger_calibration'])} trigger-calibration cases, "
-          f"{len(out['track_straightness'])} straightness cases")
+          f"{len(out['track_straightness'])} straightness cases, "
+          f"{len(out['select_track'])} selection cases")
 
 
 if __name__ == "__main__":

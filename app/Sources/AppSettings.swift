@@ -88,6 +88,20 @@ struct AppSettings: Codable, Equatable {
     /// angle up-positive whichever way the ball leaves).
     var hitterOnLeft = true
 
+    /// Which way the HIT ball crosses the frame, from where the hitter stands.
+    ///
+    /// The setup guide already asks the user which side the hitter is on, and
+    /// draws the flight arrow accordingly — the app has known the answer all
+    /// along and was not using it. It matters because an inbound slow-pitch is
+    /// a perfectly good track: straight, fast enough to clear every filter,
+    /// and crossing the frame the OPPOSITE way. Direction is the one thing
+    /// that separates the two for certain, and leaving it on "auto" left the
+    /// choice to a speed comparison between a lob and a line drive.
+    var outboundDirection: TrackBuilder.Direction {
+        // Hitter on the left means the ball leaves to the right.
+        hitterOnLeft ? .right : .left
+    }
+
     static let storageKey = "swinglab.settings.v1"
 
     static func load() -> AppSettings {
@@ -109,7 +123,9 @@ struct AppSettings: Codable, Equatable {
         o.bat = bat
         o.trackBat = trackBat
         o.trackBody = trackBody
-        o.direction = direction
+        // An explicit choice in Settings still wins; "auto" now means "work it
+        // out from the hitter's side" rather than "let the fastest track vote".
+        o.direction = direction == .auto ? outboundDirection : direction
         o.forceFallbackDetector = forceFallbackDetector
         o.fpsOverride = fpsOverride
         return o

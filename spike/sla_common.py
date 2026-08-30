@@ -379,29 +379,32 @@ def select_outbound_track(
     direction: str = "auto",     # "left" | "right" | "auto"
     min_len: int = MIN_TRACK_FRAMES,
 ) -> list[BallObservation] | None:
-    """Pick the hit ball: the fastest coherent track that actually goes somewhere.
+    """Pick the hit ball: the FASTEST coherent track going the right way.
 
-    An inbound pitch also forms a track; it is slower and moves the other way.
-    With direction="auto" the fastest track's horizontal direction wins.
+    Scored on speed alone. Length used to multiply it, and in slow-pitch that
+    is exactly backwards, because the two things in frame differ in opposite
+    directions:
 
-    Scored by speed times length, but gated on STRAIGHTNESS first, and that
-    gate is the whole point. A hit ball travels in one direction: the straight
-    line from its first sighting to its last is very nearly as long as the path
-    it actually walked. Background clutter of about the right colour — a patch
-    of sunlit grass, a shoe, a bag — does not travel. It sits there being
-    re-detected, wandering a few pixels either way, and a track builder will
-    happily link it across the entire clip.
+        inbound pitch   ~470 px/s over ~430 frames   ->  speed*len ~200,000
+        hit ball       ~3300 px/s over ~60 frames    ->  speed*len ~200,000
 
-    Length alone therefore points the wrong way: the clutter track is the
-    LONGEST thing in the clip, precisely because it never leaves. One real clip
-    produced a 426-frame "flight" spanning 89% of the footage, which is not a
-    ball at any speed, while the actual ball flew through in a fraction of a
-    second. Multiplying speed by length let the wanderer out-score it.
+    A lobbed pitch is slow and hangs in frame for two seconds; a hit is three
+    to seven times faster and gone in a fraction of one. Multiplying by length
+    cancels the very difference that tells them apart, and leaves the choice to
+    be decided by noise. Speed alone separates them seven to one, and the hit
+    ball is the fastest thing in a swing clip by a wide margin.
 
-    Straightness costs nothing to compute and separates them completely: near 1
-    for a flight, far below it for anything milling about. It is deliberately
-    a gate rather than a weight — a track that doubles back is not a worse
-    flight, it is not a flight.
+    Two filters sit in front of the score. `min_len` keeps out fragments.
+    STRAIGHTNESS keeps out clutter that never travels — a patch of sunlit
+    grass, a bag, a shoe, which a track builder will happily link across an
+    entire clip while it sits there being re-detected. It is a preference
+    rather than a hard gate: if nothing clears it, the whole field is scored
+    anyway, because returning nothing is worse than returning something
+    doubtful and flagged.
+
+    An inbound pitch also travels, straight and fast enough to survive both
+    filters, so `direction` is what finally excludes it: it crosses the frame
+    the opposite way to the hit.
     """
     scored = []
     for tr in tracks:
@@ -413,17 +416,24 @@ def select_outbound_track(
         vx = (tr[-1].x - tr[0].x) / dt
         vy = (tr[-1].y - tr[0].y) / dt
         speed = math.hypot(vx, vy)
-        if track_straightness(tr) < TRACK_STRAIGHTNESS_MIN:
-            continue
-        scored.append((speed * len(tr), speed, vx, tr))
+        scored.append((speed, track_straightness(tr), vx, tr))
     if not scored:
         return None
-    scored.sort(key=lambda s: -s[0])
+
+    # Straightness is a PREFERENCE, not a hard gate. A gate that rejects every
+    # track returns nothing at all, which is a worse answer than a doubtful
+    # one — and on real footage the hit is sometimes detected raggedly enough
+    # to fail it. Prefer directed tracks; fall back to the whole field rather
+    # than reporting no ball.
+    straight = [s for s in scored if s[1] >= TRACK_STRAIGHTNESS_MIN]
+    pool = straight if straight else scored
+    pool.sort(key=lambda s: -s[0])
+    scored = pool
 
     if direction == "auto":
         return scored[0][3]
     want_positive = direction == "right"
-    for _score, _speed, vx, tr in scored:
+    for _speed, _straightness, vx, tr in scored:
         if (vx > 0) == want_positive:
             return tr
     return None

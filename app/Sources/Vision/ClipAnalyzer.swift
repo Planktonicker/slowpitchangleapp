@@ -272,6 +272,16 @@ enum ClipAnalyzer {
             // found, rather than throwing away a short track for nothing — and
             // if there was nothing either way, the guard below says so.
         }
+        // Last resort, when the requested direction matched nothing. This used
+        // to take the LONGEST track, which on a swing clip is reliably the
+        // worst possible answer: the longest thing in the footage is either an
+        // inbound pitch hanging in frame for two seconds or a patch of grass
+        // being re-detected, never the hit. Falling back to the same scoring
+        // with the direction constraint dropped keeps the "fastest coherent
+        // track" rule and gives up only the thing that actually failed.
+        if selected == nil, !tracks.isEmpty {
+            selected = TrackBuilder.selectOutboundTrack(tracks, direction: .auto)
+        }
         if selected == nil, !tracks.isEmpty {
             tracks.sort { $0.count > $1.count }
             selected = tracks.first
