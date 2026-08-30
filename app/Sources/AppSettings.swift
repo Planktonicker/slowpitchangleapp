@@ -104,6 +104,44 @@ struct AppSettings: Codable, Equatable {
 
     static let storageKey = "swinglab.settings.v1"
 
+    static func load() -> AppSettings {
+        guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
+              let decoded = try? JSONDecoder().decode(AppSettings.self, from: data) else {
+            return AppSettings()
+        }
+        return decoded
+    }
+
+    func save() {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        UserDefaults.standard.set(data, forKey: Self.storageKey)
+    }
+
+    var analyzerOptions: ClipAnalyzer.Options {
+        var o = ClipAnalyzer.Options()
+        o.detector = detector
+        o.bat = bat
+        o.trackBat = trackBat
+        o.trackBody = trackBody
+        // An explicit choice in Settings still wins; "auto" now means "work it
+        // out from the hitter's side" rather than "let the fastest track vote".
+        o.direction = direction == .auto ? outboundDirection : direction
+        o.forceFallbackDetector = forceFallbackDetector
+        o.fpsOverride = fpsOverride
+        return o
+    }
+}
+
+
+// MARK: - Resilient decoding
+
+/// Declared in an extension, NOT in the struct body, and that placement is
+/// load-bearing: an initializer written inside a struct's own declaration
+/// suppresses the synthesised memberwise and no-argument initialisers. That
+/// would remove `AppSettings()` — which this decoder itself calls to source
+/// its defaults, and which "Reset settings to defaults" is built on.
+extension AppSettings {
+
     /// Field-by-field decoding, every key optional, every miss falling back to
     /// the property's own default.
     ///
@@ -146,32 +184,5 @@ struct AppSettings: Codable, Equatable {
         visionOrientation = take(.visionOrientation, d.visionOrientation)
         speedUnit = take(.speedUnit, d.speedUnit)
         hitterOnLeft = take(.hitterOnLeft, d.hitterOnLeft)
-    }
-
-    static func load() -> AppSettings {
-        guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
-              let decoded = try? JSONDecoder().decode(AppSettings.self, from: data) else {
-            return AppSettings()
-        }
-        return decoded
-    }
-
-    func save() {
-        guard let data = try? JSONEncoder().encode(self) else { return }
-        UserDefaults.standard.set(data, forKey: Self.storageKey)
-    }
-
-    var analyzerOptions: ClipAnalyzer.Options {
-        var o = ClipAnalyzer.Options()
-        o.detector = detector
-        o.bat = bat
-        o.trackBat = trackBat
-        o.trackBody = trackBody
-        // An explicit choice in Settings still wins; "auto" now means "work it
-        // out from the hitter's side" rather than "let the fastest track vote".
-        o.direction = direction == .auto ? outboundDirection : direction
-        o.forceFallbackDetector = forceFallbackDetector
-        o.fpsOverride = fpsOverride
-        return o
     }
 }
