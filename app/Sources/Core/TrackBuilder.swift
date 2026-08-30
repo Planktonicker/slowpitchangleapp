@@ -453,9 +453,22 @@ enum TrackBuilder {
         return (dx * dx + dy * dy).squareRoot() / walked
     }
 
+    /// - Parameter contactTime: when the caller knows it. A hit ball did not
+    ///   exist before the bat met it, so any track already in flight at contact
+    ///   is something else — the pitch above all, which is the one piece of
+    ///   clutter that survives every other filter: it is a ball, it genuinely
+    ///   moves, it is straight, and it is fast. Speed alone usually beats it
+    ///   because a hit is three to seven times quicker, and usually is not
+    ///   always: a mis-hit dribbles out slower than the pitch came in, and then
+    ///   the fastest track in the clip is the pitch. Nothing but the contact
+    ///   instant separates those two.
+    ///
+    ///   `.auto` does NOT infer a direction — it cannot, from one track. It
+    ///   means "no direction constraint". Mirrors `select_outbound_track`.
     static func selectOutboundTrack(_ tracks: [[BallObservation]],
                                     direction: Direction = .auto,
-                                    minLen: Int = SLA.minTrackFrames) -> [BallObservation]? {
+                                    minLen: Int = SLA.minTrackFrames,
+                                    contactTime: Double? = nil) -> [BallObservation]? {
         struct Scored {
             /// Speed alone. Length used to multiply this, and in slow-pitch
             /// that is exactly backwards: a lobbed pitch is slow and hangs in
@@ -489,6 +502,15 @@ enum TrackBuilder {
         // raggedly enough to fail it.
         let straight = scored.filter { $0.straightness >= SLA.trackStraightnessMin }
         scored = straight.isEmpty ? scored : straight
+
+        // Then, when contact is known, only what began at or after it. Same
+        // fall-back rule: a filter that empties the pool has told us nothing.
+        if let contactTime {
+            let after = scored.filter {
+                ($0.track.first?.t ?? 0) >= contactTime - SLA.selectContactTolS
+            }
+            if !after.isEmpty { scored = after }
+        }
 
         // Descending by score; the index tiebreak reproduces Python's stable
         // sort so the two implementations pick the same track on a tie.

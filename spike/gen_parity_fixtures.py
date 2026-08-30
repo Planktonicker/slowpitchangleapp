@@ -484,6 +484,7 @@ def main():
         "STITCH_ACCEL_K": sla.STITCH_ACCEL_K,
         "STITCH_VELOCITY_NOISE_PX_S": sla.STITCH_VELOCITY_NOISE_PX_S,
         "STITCH_MAX_ANGLE_DEG": sla.STITCH_MAX_ANGLE_DEG,
+        "SELECT_CONTACT_TOL_S": sla.SELECT_CONTACT_TOL_S,
         "BUILD_MAX_TURN_DEG": sla.BUILD_MAX_TURN_DEG,
         "SPEED_OF_SOUND_MPS": sla.SPEED_OF_SOUND_MPS,
         "CONTACT_AUDIO_MAX_DISTANCE_M": sla.CONTACT_AUDIO_MAX_DISTANCE_M,
@@ -892,6 +893,13 @@ def main():
                 diameter_px=10.0, area_px=80.0))
         return pts
 
+    def _seg(x0, y0, x1, y1, n, t0, fps=240.0):
+        """A line that starts at a stated TIME, so contact can sit between two."""
+        return [sla.BallObservation(
+            frame=int(t0 * fps) + i, t=t0 + i / fps,
+            x=x0 + (x1 - x0) * i / (n - 1), y=y0 + (y1 - y0) * i / (n - 1),
+            diameter_px=19.0, area_px=283.0) for i in range(n)]
+
     select_cases = [
         # A slow inbound pitch over many frames against a fast short hit.
         ("pitch_vs_hit", "auto",
@@ -908,11 +916,27 @@ def main():
         # rather than the pipeline reporting no ball at all.
         ("only_clutter", "auto", [_jitter(240, 650, 400)]),
     ]
-    for name, direction, tracks in select_cases:
-        picked = sla.select_outbound_track(tracks, fps=240.0, direction=direction)
+    # The case speed alone gets wrong: a MIS-HIT. Weak contact, the ball
+    # dribbles out slower than the pitch came in, and the fastest track in the
+    # clip is the pitch. Nothing but the contact instant separates these — the
+    # hit did not exist before the bat met the ball.
+    _mishit_pitch = _seg(1240, 60, 620, 430, 26, 0.190)
+    _mishit_hit = _seg(650, 425, 900, 380, 22, 0.302)
+    select_cases += [
+        ("mishit_slower_than_pitch", "auto", [_mishit_pitch, _mishit_hit]),
+    ]
+
+    for entry in select_cases:
+        name, direction, tracks = entry
+        # Contact is only supplied for the case that needs it, so the others
+        # keep pinning the behaviour when the caller does not know it.
+        contact = 0.30 if name == "mishit_slower_than_pitch" else None
+        picked = sla.select_outbound_track(tracks, fps=240.0, direction=direction,
+                                           contact_time=contact)
         out["select_track"].append({
             "name": name,
             "direction": direction,
+            "contact_time": contact,
             "tracks": [[{"frame": o.frame, "t": o.t, "x": o.x, "y": o.y,
                          "diameter_px": o.diameter_px, "area_px": o.area_px}
                         for o in tr] for tr in tracks],

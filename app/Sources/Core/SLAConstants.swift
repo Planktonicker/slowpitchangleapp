@@ -144,6 +144,14 @@ enum SLA {
         return max(0, audioT - d / speedOfSoundMps)
     }
 
+    /// How far before the known contact instant a hit's first sighting may
+    /// still land. The two clocks differ — the trigger fires a sound-travel
+    /// time after contact, and the detector's first sighting can be a frame
+    /// either side — but the gap this has to resolve is the several hundred
+    /// milliseconds a pitch spends in frame beforehand, so the tolerance is
+    /// wide compared to the error and narrow compared to the thing it excludes.
+    static let selectContactTolS = 0.05
+
     /// Association may not reverse a moving track — see `TrackBuilder`. The
     /// guard that keeps the incoming pitch out of the outgoing hit.
     static let buildMaxTurnDeg = 60.0

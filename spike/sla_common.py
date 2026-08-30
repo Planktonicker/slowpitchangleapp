@@ -945,11 +945,26 @@ def track_straightness(track: list[BallObservation]) -> float:
     return net / walked
 
 
+# A hit ball did not exist before the bat met it. Anything already in flight at
+# contact is something else — the pitch, most obviously, which is the one piece
+# of clutter that survives every other filter: it is a ball, it is genuinely
+# moving, it is straight, and it is fast.
+#
+# Tolerance because the two clocks are not the same clock. The audio trigger
+# fires a sound-travel-time after contact (corrected for, but not perfectly),
+# and the detector's first sighting of the hit can land a frame or two either
+# side of it. 50 ms is twelve frames at 240fps — far wider than that error, and
+# far narrower than the several hundred milliseconds a pitch spends in frame
+# before contact, which is the gap this actually has to resolve.
+SELECT_CONTACT_TOL_S = 0.05
+
+
 def select_outbound_track(
     tracks: list[list[BallObservation]],
     fps: float,
     direction: str = "auto",     # "left" | "right" | "auto"
     min_len: int = MIN_TRACK_FRAMES,
+    contact_time: float | None = None,
 ) -> list[BallObservation] | None:
     """Pick the hit ball: the FASTEST coherent track going the right way.
 
@@ -975,8 +990,19 @@ def select_outbound_track(
     doubtful and flagged.
 
     An inbound pitch also travels, straight and fast enough to survive both
-    filters, so `direction` is what finally excludes it: it crosses the frame
-    the opposite way to the hit.
+    filters. Two things exclude it.
+
+    `contact_time`, when the caller knows it, is the reliable one: a hit ball
+    did not exist before the bat met it, so any track already in flight at
+    contact is something else. This is a preference like straightness — if
+    nothing starts after contact the whole field is scored anyway.
+
+    `direction` is the fallback, and only when the caller states it. "auto"
+    does NOT infer a direction; it cannot, from one track. It means "no
+    direction constraint", so on a clip with no contact time the pitch is
+    excluded by being slower than the hit and by nothing else. That is usually
+    enough — a hit is three to seven times faster — and it is not always
+    enough, which is why the ball can be pointed at by hand.
     """
     scored = []
     for tr in tracks:
@@ -999,6 +1025,15 @@ def select_outbound_track(
     # than reporting no ball.
     straight = [s for s in scored if s[1] >= TRACK_STRAIGHTNESS_MIN]
     pool = straight if straight else scored
+
+    # Then, when contact is known, keep only what began at or after it. Same
+    # fall-back rule: a filter that empties the pool has told us nothing, and
+    # returning nothing is worse than returning something doubtful and flagged.
+    if contact_time is not None:
+        after = [s for s in pool if s[3][0].t >= contact_time - SELECT_CONTACT_TOL_S]
+        if after:
+            pool = after
+
     pool.sort(key=lambda s: -s[0])
     scored = pool
 

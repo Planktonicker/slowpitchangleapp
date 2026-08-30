@@ -298,7 +298,13 @@ enum ClipAnalyzer {
         var tracks = TrackBuilder.stitchTracks(fragments)
         diagnostics?.tracksBuilt = tracks.count
         diagnostics?.bestTrackFrames = tracks.map(\.count).max() ?? 0
-        var selected = TrackBuilder.selectOutboundTrack(tracks, direction: options.direction)
+        // The contact instant, when the caller knows it, is what keeps the
+        // incoming pitch out of the answer — see `selectOutboundTrack`. It is
+        // known on every live capture (the audio trigger, corrected for the
+        // speed of sound) and unknown on most imports, where selection falls
+        // back to speed as before.
+        var selected = TrackBuilder.selectOutboundTrack(tracks, direction: options.direction,
+                                                        contactTime: contactTime)
 
         // Last resort, when the requested direction matched nothing. This used
         // to take the LONGEST track, which on a swing clip is reliably the
@@ -308,7 +314,8 @@ enum ClipAnalyzer {
         // with the direction constraint dropped keeps the "fastest coherent
         // track" rule and gives up only the thing that actually failed.
         if selected == nil, !tracks.isEmpty {
-            selected = TrackBuilder.selectOutboundTrack(tracks, direction: .auto)
+            selected = TrackBuilder.selectOutboundTrack(tracks, direction: .auto,
+                                                        contactTime: contactTime)
         }
         if selected == nil, !tracks.isEmpty {
             tracks.sort { $0.count > $1.count }
