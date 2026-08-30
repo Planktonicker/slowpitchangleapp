@@ -61,6 +61,15 @@ struct SettingsView: View {
                     }
                     Text("Direction only matters when an inbound pitch is also in frame. Auto takes the fastest track.")
                         .font(.caption).foregroundStyle(.secondary)
+                    Picker("Imported clip frame rate", selection: $model.settings.fpsOverride) {
+                        Text("Trust the file").tag(Double?.none)
+                        Text("240 fps").tag(Double?.some(240))
+                        Text("120 fps").tag(Double?.some(120))
+                        Text("60 fps").tag(Double?.some(60))
+                        Text("30 fps").tag(Double?.some(30))
+                    }
+                    Text("Only matters for imported clips whose container lies about its rate — iPhone slow-motion exports often say 30 while holding every 240fps frame. Exit velocity scales directly with frame rate, so a wrong rate is a wrong speed by the same factor. Leave on \"Trust the file\" unless a diagnostics report told you otherwise.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
 
                 Section("Units") {

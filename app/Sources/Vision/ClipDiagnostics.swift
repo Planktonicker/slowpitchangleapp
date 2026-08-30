@@ -159,7 +159,7 @@ final class ClipDiagnostics {
         var out: [String] = []
         if fps > 0 && fps < 100 {
             out.append(String(format:
-                "%.0f fps, not 240. Exit velocity scales directly with frame rate, so if this is really slow-motion footage the rate is being read wrong — set an override in Settings. If it is genuinely %.0f fps, the ball moves too far between frames to track.",
+                "%.0f fps, not 240. Exit velocity scales directly with frame rate, so if this is really slow-motion footage the rate is being read wrong — set Settings → Analysis → \"Imported clip frame rate\". If it is genuinely %.0f fps, the ball moves too far between frames to track.",
                 fps, fps))
         }
         if durationS > 20 {
