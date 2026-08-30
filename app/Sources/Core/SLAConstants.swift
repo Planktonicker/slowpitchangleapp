@@ -90,6 +90,9 @@ enum SLA {
     static let stitchTolPxPerS = 0.35
     static let stitchSpeedRatioMax = 2.0
     static let stitchMaxAngleDeg = 40.0
+    /// Points in the least-squares endpoint-velocity window. Enough to average
+    /// detection noise down; few enough to stay local on a curving track.
+    static let stitchVelocityWindow = 6
     static let minGravityTrackS = 0.20     // below this the gravity scale is unreliable
     static let scaleDisagreeTol = 0.08     // G2 tolerance
     static let diameterDriftTol = 0.10     // depth-motion (cosine error) flag threshold

@@ -96,6 +96,16 @@ struct DetectionTrace: Codable, Sendable, Equatable {
     /// finding from a small number.
     var tracksBuilt = 0
 
+    /// For the fastest few chains that did NOT join each other: which stitch
+    /// gate refused, with the measured value against its limit. One line per
+    /// ordered pair, e.g. "0.795s -> 0.824s  gap 29ms: direction differs 63
+    /// deg (limit 40)". This exists because a screenshot showed three
+    /// fragments of one flight staying apart and nothing on screen could say
+    /// WHY — and the difference between "gap too long", "endpoints too
+    /// ragged" and "tolerance too tight" is the difference between three
+    /// different fixes.
+    var stitchExplains: [String] = []
+
     var hasSearchRegion: Bool {
         searchedX0 != nil && searchedY0 != nil && searchedX1 != nil && searchedY1 != nil
     }

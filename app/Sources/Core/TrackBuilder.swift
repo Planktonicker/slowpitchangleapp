@@ -105,43 +105,66 @@ enum TrackBuilder {
     ///
     /// An inbound pitch also forms a track; it is slower and moves the other
     /// way. With `.auto` the fastest track's horizontal direction wins.
-    /// Velocity over a track's last few points, px/s.
-    private static func endVelocity(_ tr: [BallObservation], tail: Int = 4) -> (vx: Double, vy: Double) {
-        let seg = tr.count > tail ? Array(tr.suffix(tail)) : tr
-        guard let first = seg.first, let last = seg.last else { return (0, 0) }
-        let dt = last.t - first.t
-        guard dt > 0 else { return (0, 0) }
-        return ((last.x - first.x) / dt, (last.y - first.y) / dt)
+    /// Least-squares linear velocity over a run of points, px/s.
+    ///
+    /// A least-squares slope, not an endpoint difference — fragments are
+    /// exactly where endpoint differences fail. A 5-frame burst with a few
+    /// pixels of noise on each end reads hundreds of px/s of phantom velocity
+    /// from two points, enough to swing the stitch gates at random; the same
+    /// noise averaged over every point barely moves the slope. Mirrors
+    /// `_segment_velocity` in `spike/sla_common.py`.
+    private static func segmentVelocity(_ seg: [BallObservation]) -> (vx: Double, vy: Double) {
+        let n = seg.count
+        guard n >= 2 else { return (0, 0) }
+        let meanT = seg.reduce(0.0) { $0 + $1.t } / Double(n)
+        let varT = seg.reduce(0.0) { $0 + ($1.t - meanT) * ($1.t - meanT) }
+        guard varT > 1e-12 else { return (0, 0) }
+        let vx = seg.reduce(0.0) { $0 + ($1.t - meanT) * $1.x } / varT
+        let vy = seg.reduce(0.0) { $0 + ($1.t - meanT) * $1.y } / varT
+        return (vx, vy)
     }
 
-    private static func startVelocity(_ tr: [BallObservation], head: Int = 4) -> (vx: Double, vy: Double) {
-        let seg = tr.count > head ? Array(tr.prefix(head)) : tr
-        guard let first = seg.first, let last = seg.last else { return (0, 0) }
-        let dt = last.t - first.t
-        guard dt > 0 else { return (0, 0) }
-        return ((last.x - first.x) / dt, (last.y - first.y) / dt)
+    static func endVelocity(_ tr: [BallObservation]) -> (vx: Double, vy: Double) {
+        segmentVelocity(Array(tr.suffix(SLA.stitchVelocityWindow)))
     }
 
-    /// Whether track `b` is plausibly the continuation of track `a`.
-    /// Mirrors `_stitchable` in `spike/sla_common.py`.
-    private static func stitchable(_ a: [BallObservation], _ b: [BallObservation]) -> Bool {
-        guard let aLast = a.last, let bFirst = b.first else { return false }
+    static func startVelocity(_ tr: [BallObservation]) -> (vx: Double, vy: Double) {
+        segmentVelocity(Array(tr.prefix(SLA.stitchVelocityWindow)))
+    }
+
+    /// Diagnostic access to the same endpoint velocities the stitch gates use.
+    static func endVelocityForDiagnostics(_ tr: [BallObservation]) -> (vx: Double, vy: Double) {
+        endVelocity(tr)
+    }
+
+    static func startVelocityForDiagnostics(_ tr: [BallObservation]) -> (vx: Double, vy: Double) {
+        startVelocity(tr)
+    }
+
+    /// Extrapolation error of joining `b` onto `a`, in px — or nil if the
+    /// gates refuse the join. Mirrors `_stitch_error` in `spike/sla_common.py`:
+    /// the error rather than a Bool, because the CHOICE between competing
+    /// joins is made on fit quality, and a yes/no answer let processing order
+    /// decide instead.
+    static func stitchError(_ a: [BallObservation], _ b: [BallObservation]) -> Double? {
+        guard let aLast = a.last, let bFirst = b.first else { return nil }
         let gap = bFirst.t - aLast.t
-        guard gap > 0, gap <= SLA.stitchMaxGapS else { return false }
+        guard gap > 0, gap <= SLA.stitchMaxGapS else { return nil }
         let va = endVelocity(a)
         let vb = startVelocity(b)
         let speedA = (va.vx * va.vx + va.vy * va.vy).squareRoot()
         let speedB = (vb.vx * vb.vx + vb.vy * vb.vy).squareRoot()
-        guard speedA > 1e-9, speedB > 1e-9 else { return false }
+        guard speedA > 1e-9, speedB > 1e-9 else { return nil }
         let ratio = speedB / speedA
-        guard ratio >= 1.0 / SLA.stitchSpeedRatioMax, ratio <= SLA.stitchSpeedRatioMax else { return false }
+        guard ratio >= 1.0 / SLA.stitchSpeedRatioMax, ratio <= SLA.stitchSpeedRatioMax else { return nil }
         let cosang = (va.vx * vb.vx + va.vy * vb.vy) / (speedA * speedB)
-        guard cosang >= cos(SLA.stitchMaxAngleDeg * .pi / 180) else { return false }
+        guard cosang >= cos(SLA.stitchMaxAngleDeg * .pi / 180) else { return nil }
         let predX = aLast.x + va.vx * gap
         let predY = aLast.y + va.vy * gap
         let tol = SLA.stitchBaseTolPx + SLA.stitchTolPxPerS * speedA * gap
         let dx = bFirst.x - predX, dy = bFirst.y - predY
-        return (dx * dx + dy * dy).squareRoot() <= tol
+        let err = (dx * dx + dy * dy).squareRoot()
+        return err <= tol ? err : nil
     }
 
     /// Join fragments of one flight, greedily, nearest-in-time first.
@@ -161,30 +184,37 @@ enum TrackBuilder {
     /// Mirrors `stitch_tracks` in `spike/sla_common.py`, pinned by
     /// `ParityTests` — deterministic order on purpose.
     static func stitchTracks(_ tracks: [[BallObservation]]) -> [[BallObservation]] {
-        let frags = tracks.sorted {
+        // Globally greedy on join error — repeatedly make the best-fitting
+        // join ANYWHERE until none fits. A per-fragment sweep answered "which
+        // chain should this fragment join?" but let processing order settle
+        // the symmetric question — which of two competing fragments is a
+        // chain's true continuation — and processing order traced back to a
+        // raw y coordinate in the sort key. Mirrors `stitch_tracks`.
+        var chains = tracks.map { $0 }.sorted {
             guard let a = $0.first, let b = $1.first else { return $0.count > $1.count }
             if a.t != b.t { return a.t < b.t }
             if a.x != b.x { return a.x < b.x }
             return a.y < b.y
         }
-        var chains: [[BallObservation]] = []
-        for frag in frags {
+        while true {
+            var bestErr = Double.infinity
             var bestI = -1
-            var bestEnd = -1.0
-            for (i, chain) in chains.enumerated() where stitchable(chain, frag) {
-                // The most recent plausible predecessor, not an older lookalike.
-                if let end = chain.last?.t, end > bestEnd {
-                    bestEnd = end
-                    bestI = i
+            var bestJ = -1
+            for i in chains.indices {
+                for j in chains.indices where i != j {
+                    guard let err = stitchError(chains[i], chains[j]) else { continue }
+                    if err < bestErr
+                        || (err == bestErr && (i < bestI || (i == bestI && j < bestJ))) {
+                        bestErr = err
+                        bestI = i
+                        bestJ = j
+                    }
                 }
             }
-            if bestI >= 0 {
-                chains[bestI] += frag
-            } else {
-                chains.append(frag)
-            }
+            if bestI < 0 { return chains }
+            chains[bestI] += chains[bestJ]
+            chains.remove(at: bestJ)
         }
-        return chains
     }
 
     /// Net displacement over path length, in 0...1.

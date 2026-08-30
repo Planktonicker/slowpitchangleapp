@@ -483,6 +483,7 @@ def main():
         "STITCH_TOL_PX_PER_S": sla.STITCH_TOL_PX_PER_S,
         "STITCH_SPEED_RATIO_MAX": sla.STITCH_SPEED_RATIO_MAX,
         "STITCH_MAX_ANGLE_DEG": sla.STITCH_MAX_ANGLE_DEG,
+        "STITCH_VELOCITY_WINDOW": float(sla.STITCH_VELOCITY_WINDOW),
             "MAX_RADIUS_PX_DEFAULT": sla.MAX_RADIUS_PX_DEFAULT,
             "BAT_BARREL_DIAMETER_M": sla.BAT_BARREL_DIAMETER_M,
             "CONTACT_PLAUSIBLE_M": sla.CONTACT_PLAUSIBLE_M,
@@ -636,7 +637,45 @@ def main():
                                   y=650.0 + (1 if i % 3 else -1),
                                   diameter_px=11.0, area_px=95.0) for i in range(30)]
 
+    # The competitive cases adversarial testing demanded: no earlier fixture
+    # ever had two joins fighting over the same fragment or chain, so a port
+    # could pass every test while breaking exactly there.
+    #
+    # Two interleaved flights sharing a detection dropout: each continuation
+    # must reattach to ITS OWN flight (join error ~0) rather than to the more
+    # recently ended other flight (error 26-40 px but inside tolerance).
+    flightA1 = _seg(100, 10, 100.0, 400.0, 15.0, -3.0)
+    flightA2 = _seg(120, 10, 100.0 + 15.0 * 20, 400.0 - 3.0 * 20, 15.0, -3.0)
+    flightB1 = _seg(101, 10, 120.0, 430.0, 15.0, 3.0)
+    flightB2 = _seg(121, 10, 120.0 + 15.0 * 20, 430.0 + 3.0 * 20, 15.0, 3.0)
+    # Two fragments starting the SAME frame, competing for one chain: the
+    # 0 px continuation must win over the 30 px lookalike regardless of how
+    # their raw coordinates happen to sort.
+    stem = _seg(140, 8, 500.0, 300.0, 20.0, 0.0)
+    cont_true = _seg(152, 6, 500.0 + 20.0 * 12, 300.0, 20.0, 0.0)
+    cont_noise = _seg(152, 6, 500.0 + 20.0 * 12, 270.0, 20.0, 0.0)
+
+    # Ragged fragments: deterministic +-3px zigzag on every point. Endpoint
+    # differences read hundreds of px/s of phantom velocity from this; the
+    # least-squares window reads through it and the flight still rejoins.
+    def _ragged(f0, n, x0, y0, vxf, vyf, fps=199.0):
+        out = []
+        for i in range(n):
+            jx = 3.0 if i % 2 == 0 else -3.0
+            jy = -2.0 if i % 3 == 0 else 2.0
+            out.append(sla.BallObservation(frame=f0 + i, t=(f0 + i) / fps,
+                                           x=x0 + vxf * i + jx, y=y0 + vyf * i + jy,
+                                           diameter_px=27.0, area_px=460.0))
+        return out
+
+    rag1 = _ragged(153, 6, 300.0, 500.0, vxf, vyf)
+    rag2 = _ragged(164, 5, 300.0 + vxf * 11, 500.0 + vyf * 11, vxf, vyf)
+    rag3 = _ragged(174, 7, 300.0 + vxf * 21, 500.0 + vyf * 21, vxf, vyf)
+
     stitch_cases = [
+        ("ragged_fragments_still_rejoin", [rag1, rag2, rag3]),
+        ("interleaved_flights_stay_pure", [flightA1, flightB1, flightA2, flightB2]),
+        ("closest_fit_wins_the_chain", [stem, cont_true, cont_noise]),
         ("fragments_rejoin", [frag1, frag2, frag3]),
         ("pitch_stays_apart_from_hit", [pitch, frag1, frag2]),
         ("bounce_does_not_continue_the_climb", [bounce_down, bounce_up]),

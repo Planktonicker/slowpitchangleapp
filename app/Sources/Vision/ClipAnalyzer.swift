@@ -278,6 +278,7 @@ enum ClipAnalyzer {
         trace.tracksBuilt = tracks.count
         trace.trackSummaries = Self.summarise(tracks: tracks, selected: selected,
                                               direction: options.direction)
+        trace.stitchExplains = Self.explainUnjoined(chains: tracks)
 
         guard let track = selected, track.count >= 3 else {
             throw ClipAnalysisError.noBallTrack
@@ -438,6 +439,69 @@ enum ClipAnalyzer {
     /// Decode every frame once, handing back (sampleBuffer, frameIndex,
     /// presentationSeconds). Frame time comes from the PTS rather than
     /// `index / fps`, so a dropped frame does not shift everything after it.
+    /// Why the fastest chains did not join each other, in the stitch gates'
+    /// own numbers. Diagnostic only — the decisions were already made by
+    /// `TrackBuilder.stitchError`; this re-walks the same gates (same shared
+    /// constants) to NAME the one that refused.
+    static func explainUnjoined(chains: [[BallObservation]]) -> [String] {
+        // The fast few are the ones worth explaining; clutter not joining
+        // clutter is not news.
+        let fast = chains.compactMap { tr -> (speed: Double, tr: [BallObservation])? in
+            guard let f = tr.first, let l = tr.last, l.t > f.t else { return nil }
+            let s = ((l.x - f.x) * (l.x - f.x) + (l.y - f.y) * (l.y - f.y)).squareRoot() / (l.t - f.t)
+            return s >= 800 ? (s, tr) : nil
+        }.sorted { $0.speed > $1.speed }.prefix(6).map(\.tr)
+
+        var out: [String] = []
+        for a in fast {
+            for b in fast {
+                guard let aLast = a.last, let bFirst = b.first, let aFirst = a.first,
+                      bFirst.t > aLast.t, bFirst.t - aLast.t < 0.4 else { continue }
+                let gap = bFirst.t - aLast.t
+                let head = String(format: "%.2f–%.2fs → %.2fs  gap %.0fms: ",
+                                  aFirst.t, aLast.t, bFirst.t, gap * 1000)
+                out.append(head + Self.stitchRefusal(a, b, gap: gap))
+                if out.count >= 8 { return out }
+            }
+        }
+        return out
+    }
+
+    private static func stitchRefusal(_ a: [BallObservation], _ b: [BallObservation],
+                                      gap: Double) -> String {
+        if gap > SLA.stitchMaxGapS {
+            return String(format: "gap over the %.0fms stitch limit", SLA.stitchMaxGapS * 1000)
+        }
+        guard let aLast = a.last, let bFirst = b.first else { return "empty track" }
+        let va = TrackBuilder.endVelocityForDiagnostics(a)
+        let vb = TrackBuilder.startVelocityForDiagnostics(b)
+        let speedA = (va.vx * va.vx + va.vy * va.vy).squareRoot()
+        let speedB = (vb.vx * vb.vx + vb.vy * vb.vy).squareRoot()
+        guard speedA > 1e-9, speedB > 1e-9 else { return "an endpoint has no measurable velocity" }
+        let ratio = speedB / speedA
+        if ratio < 1.0 / SLA.stitchSpeedRatioMax || ratio > SLA.stitchSpeedRatioMax {
+            return String(format: "speed ratio %.2f (limit %.1fx either way)",
+                          ratio, SLA.stitchSpeedRatioMax)
+        }
+        let cosang = (va.vx * vb.vx + va.vy * vb.vy) / (speedA * speedB)
+        let angle = acos(max(-1, min(1, cosang))) * 180 / .pi
+        if angle > SLA.stitchMaxAngleDeg {
+            return String(format: "direction differs %.0f° (limit %.0f°)",
+                          angle, SLA.stitchMaxAngleDeg)
+        }
+        let predX = aLast.x + va.vx * gap
+        let predY = aLast.y + va.vy * gap
+        let tol = SLA.stitchBaseTolPx + SLA.stitchTolPxPerS * speedA * gap
+        let dx = bFirst.x - predX, dy = bFirst.y - predY
+        let err = (dx * dx + dy * dy).squareRoot()
+        if err > tol {
+            return String(format: "lands %.0fpx from the prediction (tolerance %.0f)", err, tol)
+        }
+        // Should be impossible after stitching ran — and therefore the most
+        // important line this can ever print.
+        return String(format: "JOINABLE at %.0fpx — yet not joined; report this", err)
+    }
+
     /// Summarise every candidate track, worst-case truncated, with the
     /// selector's own reason for passing each one over.
     static func summarise(tracks: [[BallObservation]],

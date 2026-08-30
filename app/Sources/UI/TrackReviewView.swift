@@ -489,9 +489,9 @@ struct TrackReviewView: View {
                         .font(Theme.label(9))
                         .foregroundStyle(t.selected ? Theme.pass : Theme.steel)
                         .frame(width: 34, alignment: .leading)
-                    Text(String(format: "%d fr  %.0f px/s  str %.2f",
-                                t.frames, t.speedPxS, t.straightness))
-                        .font(Theme.numeral(11))
+                    Text(String(format: "%d fr %.2f–%.2fs  %.0f px/s  str %.2f",
+                                t.frames, t.startT, t.endT, t.speedPxS, t.straightness))
+                        .font(Theme.numeral(10))
                     Spacer(minLength: 4)
                     Text(t.rejectedBecause)
                         .font(Theme.label(9))
@@ -499,6 +499,19 @@ struct TrackReviewView: View {
                         .lineLimit(1)
                 }
                 .foregroundStyle(t.selected ? Theme.pass : .white.opacity(0.75))
+            }
+
+            if !trace.stitchExplains.isEmpty {
+                Text("why the fast pieces didn't join")
+                    .font(Theme.label(9)).tracking(1.1)
+                    .foregroundStyle(Theme.steel)
+                    .padding(.top, 3)
+                ForEach(Array(trace.stitchExplains.prefix(5).enumerated()), id: \.offset) { _, line in
+                    Text(line)
+                        .font(Theme.numeral(9))
+                        .foregroundStyle(Theme.warn)
+                        .lineLimit(2)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -303,6 +303,8 @@ final class ParityTests: XCTestCase {
                        Self.fixtures.constants["STITCH_SPEED_RATIO_MAX"]!, accuracy: 1e-12)
         XCTAssertEqual(SLA.stitchMaxAngleDeg,
                        Self.fixtures.constants["STITCH_MAX_ANGLE_DEG"]!, accuracy: 1e-12)
+        XCTAssertEqual(Double(SLA.stitchVelocityWindow),
+                       Self.fixtures.constants["STITCH_VELOCITY_WINDOW"]!, accuracy: 1e-12)
 
         let cases = Self.fixtures.stitch_tracks
         XCTAssertFalse(cases.isEmpty)

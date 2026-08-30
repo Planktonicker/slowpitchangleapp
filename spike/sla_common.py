@@ -394,70 +394,116 @@ STITCH_SPEED_RATIO_MAX = 2.0     # |vB|/|vA| must sit in [1/max, max]
 STITCH_MAX_ANGLE_DEG = 40.0      # direction change across the join
 
 
-def _track_end_velocity(tr: list[BallObservation], tail: int = 4) -> tuple[float, float]:
-    """Velocity over a track's last few points, px/s."""
-    seg = tr[-tail:] if len(tr) > tail else tr
-    dt = seg[-1].t - seg[0].t
-    if dt <= 0:
+def _segment_velocity(seg: list[BallObservation]) -> tuple[float, float]:
+    """Least-squares linear velocity over a run of points, px/s.
+
+    A least-squares slope, not an endpoint difference, because fragments are
+    exactly where endpoint differences fail. A 5-frame burst with a few pixels
+    of detection noise on each end carries velocity noise of hundreds of px/s
+    when read from two points — enough to swing the stitch gates at random —
+    while the same noise averaged over every point in the fit barely moves the
+    slope. On clean tracks the two are identical, which is what keeps the
+    noise-free parity fixtures unchanged.
+    """
+    n = len(seg)
+    if n < 2:
         return (0.0, 0.0)
-    return ((seg[-1].x - seg[0].x) / dt, (seg[-1].y - seg[0].y) / dt)
-
-
-def _track_start_velocity(tr: list[BallObservation], head: int = 4) -> tuple[float, float]:
-    seg = tr[:head] if len(tr) > head else tr
-    dt = seg[-1].t - seg[0].t
-    if dt <= 0:
+    mean_t = sum(o.t for o in seg) / n
+    var_t = sum((o.t - mean_t) ** 2 for o in seg)
+    if var_t <= 1e-12:
         return (0.0, 0.0)
-    return ((seg[-1].x - seg[0].x) / dt, (seg[-1].y - seg[0].y) / dt)
+    vx = sum((o.t - mean_t) * o.x for o in seg) / var_t
+    vy = sum((o.t - mean_t) * o.y for o in seg) / var_t
+    return (vx, vy)
 
 
-def _stitchable(a: list[BallObservation], b: list[BallObservation]) -> bool:
-    """Whether track b is plausibly the continuation of track a."""
+# Endpoint window: enough points to average the noise down, few enough to stay
+# LOCAL — a long curving track's end velocity must not be polluted by its
+# middle.
+STITCH_VELOCITY_WINDOW = 6
+
+
+def _track_end_velocity(tr: list[BallObservation]) -> tuple[float, float]:
+    return _segment_velocity(tr[-STITCH_VELOCITY_WINDOW:])
+
+
+def _track_start_velocity(tr: list[BallObservation]) -> tuple[float, float]:
+    return _segment_velocity(tr[:STITCH_VELOCITY_WINDOW])
+
+
+def _stitch_error(a: list[BallObservation], b: list[BallObservation]) -> float | None:
+    """Extrapolation error of joining b onto a, in px — or None if the gates
+    refuse the join outright.
+
+    Returns the error rather than a bool so the CHOICE between competing
+    chains can be made on fit quality. An adversarial test built two
+    interleaved flights sharing a detection dropout and showed the old
+    yes/no answer let recency decide instead: each flight's continuation was
+    stitched onto the OTHER flight — a chimera with a plausible speed, a
+    plausible straightness and a launch angle 19 degrees wrong, unflagged —
+    even though the true joins measured ~0 px of error against 26-40 px for
+    the steals. The number that settles it was already computed and then
+    thrown away.
+    """
     gap = b[0].t - a[-1].t
     if gap <= 0 or gap > STITCH_MAX_GAP_S:
-        return False
+        return None
     vax, vay = _track_end_velocity(a)
     vbx, vby = _track_start_velocity(b)
     speed_a = math.hypot(vax, vay)
     speed_b = math.hypot(vbx, vby)
     if speed_a <= 1e-9 or speed_b <= 1e-9:
-        return False
+        return None
     ratio = speed_b / speed_a
     if not (1.0 / STITCH_SPEED_RATIO_MAX <= ratio <= STITCH_SPEED_RATIO_MAX):
-        return False
+        return None
     cosang = (vax * vbx + vay * vby) / (speed_a * speed_b)
     if cosang < math.cos(math.radians(STITCH_MAX_ANGLE_DEG)):
-        return False
+        return None
     pred_x = a[-1].x + vax * gap
     pred_y = a[-1].y + vay * gap
     tol = STITCH_BASE_TOL_PX + STITCH_TOL_PX_PER_S * speed_a * gap
-    return math.hypot(b[0].x - pred_x, b[0].y - pred_y) <= tol
+    err = math.hypot(b[0].x - pred_x, b[0].y - pred_y)
+    return err if err <= tol else None
 
 
 def stitch_tracks(tracks: list[list[BallObservation]]) -> list[list[BallObservation]]:
-    """Join fragments of one flight, greedily, nearest-in-time first.
+    """Join fragments of one flight: repeatedly make the best-fitting join
+    anywhere, until no join fits.
 
-    Deterministic on purpose: fragments are sorted by start time and each is
-    appended to the earliest-ending chain that accepts it, so the Swift port
-    can reproduce the output observation-for-observation.
+    Globally greedy on the extrapolation error, NOT a per-fragment sweep, and
+    adversarial testing is why. A sweep in start-time order answers "which
+    chain should this fragment join?" — but the symmetric question, "which of
+    two competing fragments is this chain's true continuation?", was then
+    settled by processing order, which traced back to a raw y coordinate in
+    the sort key. A 40 px join could beat a 0 px join by sorting first. Making
+    the globally smallest-error join first answers both questions with the
+    same number.
+
+    Deterministic for the Swift port: chains keep a stable order (a merged
+    chain replaces its earlier member; the later member is removed), and ties
+    on error break by lower chain-pair indices.
     """
-    frags = sorted(tracks, key=lambda tr: (tr[0].t, tr[0].x, tr[0].y))
-    chains: list[list[BallObservation]] = []
-    for frag in frags:
+    chains = [list(tr) for tr in
+              sorted(tracks, key=lambda tr: (tr[0].t, tr[0].x, tr[0].y))]
+    while True:
+        best_err = math.inf
         best_i = -1
-        best_end = -1.0
-        for i, chain in enumerate(chains):
-            if _stitchable(chain, frag):
-                # Prefer the chain whose end is CLOSEST in time — the most
-                # recent plausible predecessor, not an older lookalike.
-                if chain[-1].t > best_end:
-                    best_end = chain[-1].t
-                    best_i = i
-        if best_i >= 0:
-            chains[best_i] = chains[best_i] + frag
-        else:
-            chains.append(list(frag))
-    return chains
+        best_j = -1
+        for i, a in enumerate(chains):
+            for j, b in enumerate(chains):
+                if i == j:
+                    continue
+                err = _stitch_error(a, b)
+                if err is None:
+                    continue
+                if err < best_err or (err == best_err and (i, j) < (best_i, best_j)):
+                    best_err = err
+                    best_i, best_j = i, j
+        if best_i < 0:
+            return chains
+        chains[best_i] = chains[best_i] + chains[best_j]
+        del chains[best_j]
 
 
 # How directed a track has to be before it is treated as a flight: the straight
