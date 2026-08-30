@@ -63,6 +63,10 @@ final class SwingEntity {
     var bodyJSON: String?
     /// Pipe-separated `CaptureFlag` raw values, same encoding as `flagsRaw`.
     var captureFlagsRaw: String = ""
+    /// The barrel-tape path as JSON, same reasoning as `bodyJSON`: it is a
+    /// variable-length list that nothing queries, so one column beats a
+    /// relationship and a migration.
+    var batPathJSON: String?
 
     /// The round this swing was taken in. Optional so every already-stored
     /// swing keeps loading — SwiftData gives a new optional column nil rather
@@ -113,6 +117,7 @@ final class SwingEntity {
         visionOrientationRaw = dto.visionOrientationRaw
         bodyJSON = Self.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
+        batPathJSON = Self.encodePath(dto.batPathPx)
         sessionID = dto.sessionID
         notes = dto.notes
     }
@@ -157,6 +162,7 @@ final class SwingEntity {
         visionOrientationRaw = dto.visionOrientationRaw
         bodyJSON = Self.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
+        batPathJSON = Self.encodePath(dto.batPathPx)
         sessionID = dto.sessionID
         notes = dto.notes
     }
@@ -204,6 +210,7 @@ final class SwingEntity {
         d.body = Self.decodeBody(bodyJSON)
         d.captureFlags = captureFlagsRaw.split(separator: "|")
             .compactMap { CaptureFlag(rawValue: String($0)) }
+        d.batPathPx = Self.decodePath(batPathJSON)
         d.sessionID = sessionID
         d.notes = notes
         return d
@@ -220,6 +227,16 @@ final class SwingEntity {
     static func decodeBody(_ json: String?) -> BodyMetrics? {
         guard let json, let data = json.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(BodyMetrics.self, from: data)
+    }
+
+    static func encodePath(_ path: [CGPoint]) -> String? {
+        guard !path.isEmpty, let data = try? JSONEncoder().encode(path) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func decodePath(_ json: String?) -> [CGPoint] {
+        guard let json, let data = json.data(using: .utf8) else { return [] }
+        return (try? JSONDecoder().decode([CGPoint].self, from: data)) ?? []
     }
 }
 

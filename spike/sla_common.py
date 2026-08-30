@@ -1584,6 +1584,17 @@ JOINT_LEFT_KNEE = "left_knee"
 JOINT_RIGHT_KNEE = "right_knee"
 JOINT_LEFT_ANKLE = "left_ankle"
 JOINT_RIGHT_ANKLE = "right_ankle"
+# Arms. These feed NO metric and are not meant to: side-on, the arms swing
+# across the optical axis, so elbow angle and hand path are foreshortened
+# exactly the way hip-shoulder separation is, and BIOMECHANICS.md refuses to
+# report any of them. They exist to be DRAWN. A hitter reviewing their own swing
+# looks at their hands first, and a skeleton with no arms reads as a broken
+# tracker rather than as a deliberate subset — which makes the metrics that ARE
+# honest look untrustworthy by association.
+JOINT_LEFT_ELBOW = "left_elbow"
+JOINT_RIGHT_ELBOW = "right_elbow"
+JOINT_LEFT_WRIST = "left_wrist"
+JOINT_RIGHT_WRIST = "right_wrist"
 
 # A joint below this Vision confidence is treated as absent rather than as a
 # guess. Apple's pose model reports low-confidence joints at plausible-looking

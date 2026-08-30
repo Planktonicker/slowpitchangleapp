@@ -191,6 +191,11 @@ final class HumanPresenceGate {
         .rightKnee: .rightKnee,
         .leftAnkle: .leftAnkle,
         .rightAnkle: .rightAnkle,
+        // Drawn, never measured — see `PoseJoint`.
+        .leftElbow: .leftElbow,
+        .rightElbow: .rightElbow,
+        .leftWrist: .leftWrist,
+        .rightWrist: .rightWrist,
     ]
 
     static func deviceSkeleton(from points: [VNHumanBodyPoseObservation.JointName: VNRecognizedPoint],

@@ -7,12 +7,18 @@ import Foundation
 
 /// The joints SwingLab keeps.
 ///
-/// A deliberate subset of Apple's body-pose output, not all of it. Every joint
-/// here feeds a metric `docs/BIOMECHANICS.md` says a side-on camera can
-/// honestly measure — stride, head movement, weight shift, knee flexion, spine
-/// tilt. Wrists and elbows are not included: the hands are what the bat tape
-/// already tracks far more precisely, and adding joints that feed nothing would
-/// only make the skeleton busier.
+/// A deliberate subset of Apple's body-pose output, not all of it. Most joints
+/// here feed a metric `docs/BIOMECHANICS.md` says a side-on camera can honestly
+/// measure — stride, head movement, weight shift, knee flexion, spine tilt.
+///
+/// The arms are the exception, and the exception is on purpose. Elbows and
+/// wrists feed **no metric** and must not: side-on the arms swing across the
+/// optical axis, so elbow angle and hand path are foreshortened exactly the way
+/// hip-shoulder separation is, and the same rule refuses all of them. They are
+/// carried in order to be DRAWN. A hitter reviewing their own swing looks at
+/// their hands first, and an armless skeleton reads as a broken tracker rather
+/// than as a deliberate subset — which makes the numbers that ARE honest look
+/// untrustworthy by association. Nothing in `BodyAnalyzer` may read them.
 ///
 /// Raw values match `sla_common.py`'s joint-name constants, so the reference
 /// implementation and the port name the same thing the same way.
@@ -33,12 +39,27 @@ enum PoseJoint: String, Codable, CaseIterable, CodingKeyRepresentable, Sendable 
     case rightKnee = "right_knee"
     case leftAnkle = "left_ankle"
     case rightAnkle = "right_ankle"
+    case leftElbow = "left_elbow"
+    case rightElbow = "right_elbow"
+    case leftWrist = "left_wrist"
+    case rightWrist = "right_wrist"
+
+    /// Drawn, never measured — see the note above. Foreshortened side-on, so
+    /// no metric may be derived from them.
+    var isDrawingOnly: Bool {
+        switch self {
+        case .leftElbow, .rightElbow, .leftWrist, .rightWrist: return true
+        default: return false
+        }
+    }
 
     /// Segments to stroke for the on-screen skeleton, in draw order.
     ///
-    /// Not the anatomical skeleton — the *measured* one. Drawing exactly the
-    /// joints the metrics use means the overlay is also the diagnostic: if the
-    /// stride number looks wrong, the ankle in the picture is where to look.
+    /// Everything below the shoulders is also the diagnostic: those are exactly
+    /// the joints the metrics use, so if the stride number looks wrong, the
+    /// ankle in the picture is where to look. The two arm chains are the
+    /// exception — nothing is measured from them, they are there because a
+    /// swing without arms does not look like a swing.
     static let segments: [[PoseJoint]] = [
         [.leftShoulder, .neck, .rightShoulder],
         [.neck, .nose],
@@ -47,6 +68,8 @@ enum PoseJoint: String, Codable, CaseIterable, CodingKeyRepresentable, Sendable 
         [.leftHip, .rightHip],
         [.leftHip, .leftKnee, .leftAnkle],
         [.rightHip, .rightKnee, .rightAnkle],
+        [.leftShoulder, .leftElbow, .leftWrist],
+        [.rightShoulder, .rightElbow, .rightWrist],
     ]
 }
 

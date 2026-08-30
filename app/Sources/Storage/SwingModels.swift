@@ -104,6 +104,10 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     /// = backspin/loft, negative = over the ball. `nil` when the bat was not
     /// tracked or the reading failed the geometric plausibility gate.
     var undercutMm: Double?
+    /// The barrel-tape path in raw buffer pixels, kept so the swing arc can be
+    /// drawn on a replay or burned into an export. Raw, not rectified — see
+    /// `ClipAnalysis.tapePathPx`. Empty when no bat was tracked.
+    var batPathPx: [CGPoint] = []
 
     var smashQuality: SmashQuality { SmashQuality(smash: smashFactor) }
     var contactQuality: ContactQuality {
@@ -208,6 +212,7 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
         self.flags = m.flags
         self.batAttackAngleDeg = analysis.bat?.attackAngleDeg
         self.batFrames = analysis.bat?.nFrames
+        self.batPathPx = analysis.tapePathPx
         // Only kept when it actually says something: a BodyMetrics with every
         // field nil is a row of dashes pretending to be a measurement.
         self.body = (analysis.body?.hasAnything ?? false) ? analysis.body : nil

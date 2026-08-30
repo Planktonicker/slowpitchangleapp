@@ -13,6 +13,14 @@ struct ClipAnalysis: Sendable {
     var metrics: SwingMetrics
     var track: [BallObservation]
     var bat: BatMetrics?
+    /// The barrel-tape path in RAW buffer pixels, for drawing.
+    ///
+    /// Deliberately not `bat.pathPx`. That one is tilt-rectified, because every
+    /// number is taken from the rectified copy; this one is not, because the
+    /// overlay is drawn on the original frames. Drawing the rectified path over
+    /// raw video puts the bat visibly beside the bat on any clip filmed off
+    /// level — which reads as a broken tracker when the tracker was right.
+    var tapePathPx: [CGPoint] = []
     /// Sagittal-plane body measurements, and the pose track they came from.
     /// Empty when body tracking was off or the hitter was never found.
     var body: BodyMetrics?
@@ -435,6 +443,8 @@ enum ClipAnalyzer {
         return ClipAnalysis(metrics: metrics,
                             track: track,
                             bat: bat,
+                            tapePathPx: bat == nil
+                                ? [] : tape.map { CGPoint(x: $0.x, y: $0.y) },
                             body: body,
                             pose: pose,
                             fps: fps,

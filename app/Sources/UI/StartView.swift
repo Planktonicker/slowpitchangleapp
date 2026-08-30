@@ -33,10 +33,13 @@ struct StartView: View {
                         header
                         modePicker
                         startButton
-                        if !model.swings.isEmpty {
-                            lastTime
-                            betweenSessions
-                        }
+                        // Always shown, empty or not. When it was conditional
+                        // on having swings, a fresh install had no route to the
+                        // history screen at all — and the history screen is
+                        // where importing a clip lives, which is the one thing
+                        // somebody with no swings yet is most likely to want.
+                        library
+                        if !model.swings.isEmpty { betweenSessions }
                         Spacer(minLength: 8)
                         footer
                     }
@@ -119,13 +122,17 @@ struct StartView: View {
         }
     }
 
-    private var lastTime: some View {
+    private var library: some View {
         Button { showSwings = true } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(model.swings.count) swing\(model.swings.count == 1 ? "" : "s") recorded")
+                    Text(model.swings.isEmpty
+                         ? "Swings & imports"
+                         : "\(model.swings.count) swing\(model.swings.count == 1 ? "" : "s") recorded")
                         .font(.system(size: 15, weight: .bold, design: .rounded))
-                    Text("Review, export, or re-measure")
+                    Text(model.swings.isEmpty
+                         ? "Import a clip you already filmed and measure it"
+                         : "Review, export, re-measure, or import a clip")
                         .font(.caption).foregroundStyle(Theme.steel)
                 }
                 Spacer()

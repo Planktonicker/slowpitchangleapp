@@ -31,6 +31,9 @@ struct SwingDetailView: View {
     @State private var carryText = ""
     @State private var shareURLs: [URL] = []
     @State private var showShare = false
+    @State private var showDetail = false
+    @State private var exporting: Double?
+    @State private var exportError: String?
 
     var body: some View {
         List {
@@ -41,17 +44,23 @@ struct SwingDetailView: View {
                 Section { replay } header: { Text("Replay") }
             }
             Section("Measured") { measured }
-            if swing.trackedFrames > 0 {
-                Section("Scale cross-check") { scaleSection }
-            }
-            if let attack = swing.batAttackAngleDeg {
-                Section("Bat") { batSection(attack) }
+            if let read = contactRead {
+                Section("Contact") { contactSection(read) }
             }
             if let body = swing.body, body.hasAnything {
                 Section("Body") { bodySection(body) }
             }
-            Section("Ground truth (gate G3)") { groundTruth }
-            Section("Placement") { placement }
+            // Everything below is diagnostics, and it is collapsed rather than
+            // deleted. A hitter does not need millimetres per pixel; the person
+            // working out why a reading looks wrong needs nothing else, and
+            // deleting the evidence to tidy the screen would leave a flag on
+            // the confidence row with no way to find out what caused it.
+            Section {
+                DisclosureGroup("Measurement detail", isExpanded: $showDetail) {
+                    measurementDetail
+                }
+                .tint(Theme.steel)
+            }
             Section { actions }
         }
         .navigationTitle(swing.clipFilename ?? "Swing")
@@ -186,16 +195,45 @@ struct SwingDetailView: View {
                            unit: model.settings.speedUnit.suffix)
             }
             ConfidenceRow(flags: swing.flags, captureFlags: swing.captureFlags)
-            detail("Tracked frames", "\(swing.trackedFrames)")
-            detail("Flight measured", String(format: "%.0f ms", swing.trackDurationS * 1000))
-            detail("Fit residual", String(format: "%.2f px", swing.fitRmsPx))
-            detail("Frame rate", String(format: "%.0f fps", swing.fps))
-            detail("Found by", swing.usedVisionHint ? "Vision + reference detector" : "reference detector")
-            detail("Triggered", swing.autoTriggered ? "automatically (audio)" : "manually")
             if let notes = swing.notes, !notes.isEmpty {
                 Text(notes).font(.caption).foregroundStyle(.orange)
             }
         }
+    }
+
+    /// The diagnostics, behind one disclosure. Same content as the four
+    /// sections this replaced — how the track was measured, whether the two
+    /// independent scales agree, where the camera was, and the ground-truth
+    /// entry that gate G3 needs.
+    private var measurementDetail: some View {
+        VStack(spacing: 14) {
+            VStack(spacing: 8) {
+                detail("Tracked frames", "\(swing.trackedFrames)")
+                detail("Flight measured", String(format: "%.0f ms", swing.trackDurationS * 1000))
+                detail("Fit residual", String(format: "%.2f px", swing.fitRmsPx))
+                detail("Frame rate", String(format: "%.0f fps", swing.fps))
+                detail("Found by", swing.usedVisionHint ? "Vision + reference detector" : "reference detector")
+                detail("Triggered", swing.autoTriggered ? "automatically (audio)" : "manually")
+            }
+            if swing.trackedFrames > 0 {
+                Divider()
+                sectionLabel("Scale cross-check")
+                scaleSection
+            }
+            Divider()
+            sectionLabel("Placement")
+            placement
+            Divider()
+            sectionLabel("Ground truth (gate G3)")
+            groundTruth
+        }
+    }
+
+    private func sectionLabel(_ text: String) -> some View {
+        Text(text.uppercased())
+            .font(Theme.label(10)).tracking(1.2)
+            .foregroundStyle(Theme.steel)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var scaleSection: some View {
@@ -253,9 +291,67 @@ struct SwingDetailView: View {
                                       body.coverage * 100),
                          color: Theme.warn)
             }
+            // What the numbers mean, in order, before the caveat about what
+            // this camera cannot see. A hitter cannot act on "stride 41 cm";
+            // they can act on what a stride the hips did not follow means.
+            ForEach(SwingRead.body(body)) { note in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(note.title)
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundStyle(.white)
+                        if note.isConvention {
+                            Text("COACHING")
+                                .font(Theme.label(8)).tracking(0.8)
+                                .padding(.horizontal, 5).padding(.vertical, 2)
+                                .background(Theme.surface, in: Capsule())
+                                .foregroundStyle(Theme.steel)
+                        }
+                    }
+                    Text(note.text).font(.callout).foregroundStyle(Theme.steel)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 2)
+            }
+            Text("Anything marked COACHING is convention or physics, not something this app measured you against — there are no published slow-pitch norms to score a swing on. What these are genuinely good for is watching your own numbers move.")
+                .font(.caption2).foregroundStyle(Theme.steel.opacity(0.85))
             Text("Sagittal-plane only — what a side-on camera measures within a few degrees of a motion-capture lab. No hip–shoulder separation, X-factor or torque: rotation about the vertical axis is viewed nearly edge-on from here, and torque needs segment masses and ground forces no camera can see. Compare these to your own numbers over time; there are no published slow-pitch norms to score them against.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    private var contactRead: SwingRead.Contact? {
+        SwingRead.contact(smash: swing.smashFactor,
+                          quality: swing.smashQuality,
+                          contactQuality: swing.contactQuality,
+                          undercutMm: swing.undercutMm,
+                          launchAngleDeg: swing.launchAngleDeg)
+    }
+
+    /// What happened at the collision, said in a sentence before any number.
+    ///
+    /// The order is the point. "Flush, and under the ball — the one that
+    /// carries" is what somebody can act on; 1.38 and +18 mm are the evidence
+    /// for it. Leading with the numbers makes the reader do the interpretation,
+    /// and the interpretation is the part the app is actually able to help with.
+    private func contactSection(_ read: SwingRead.Contact) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(read.headline)
+                .font(.system(size: 17, weight: .bold, design: .rounded))
+                .foregroundStyle(.white)
+            Text(read.why)
+                .font(.callout).foregroundStyle(Theme.steel)
+            if let tryThis = read.tryThis {
+                Label(tryThis, systemImage: "arrow.turn.down.right")
+                    .font(.callout)
+                    .foregroundStyle(Theme.yellow)
+            }
+            if let attack = swing.batAttackAngleDeg {
+                Divider()
+                batSection(attack)
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     private func batSection(_ attack: Double) -> some View {
@@ -404,6 +500,25 @@ struct SwingDetailView: View {
             } label: {
                 Label("Re-analyze without Vision", systemImage: "eye.slash")
             }
+            // The artefact that leaves the phone. A raw 240fps clip plays in a
+            // third of a second and shows nothing; this is the version a coach
+            // can actually watch.
+            if swing.clipFilename != nil {
+                if let progress = exporting {
+                    HStack {
+                        ProgressView(value: progress).tint(Theme.yellow)
+                        Text("\(Int(progress * 100))%")
+                            .font(.caption).monospacedDigit().foregroundStyle(Theme.steel)
+                    }
+                } else {
+                    Button { exportSlowMo() } label: {
+                        Label("Export slow-motion with overlay", systemImage: "film")
+                    }
+                }
+                if let exportError {
+                    Text(exportError).font(.caption).foregroundStyle(Theme.fail)
+                }
+            }
             Button {
                 var urls: [URL] = []
                 if let clip = swing.clipFilename { urls.append(ClipStore.clipURL(named: clip)) }
@@ -451,6 +566,56 @@ struct SwingDetailView: View {
             }
         }
         player = AVPlayer(url: url)
+    }
+
+    /// Render the overlay into a shareable file.
+    ///
+    /// The pose track is re-read from disk rather than kept in memory: it is
+    /// only needed at this moment, and holding every joint of every frame alive
+    /// for the whole time a detail screen is open costs more than reading it
+    /// back once.
+    private func exportSlowMo() {
+        guard let clip = swing.clipFilename else { return }
+        let url = ClipStore.clipURL(named: clip)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            exportError = "The clip file is gone — it was not kept, or storage was cleared."
+            return
+        }
+        exportError = nil
+        exporting = 0
+
+        var pose: [PoseObservation] = []
+        if let name = swing.poseFilename,
+           let data = try? Data(contentsOf: ClipStore.trackURL(named: name)) {
+            pose = (try? JSONDecoder().decode([PoseObservation].self, from: data)) ?? []
+        }
+
+        var options = OverlayVideoExporter.Options()
+        options.caption = SwingRead.exportCaption(launchAngleDeg: swing.launchAngleDeg,
+                                                  exitVeloMph: swing.exitVeloMph,
+                                                  smash: swing.smashFactor)
+        let batPath = swing.batPathPx
+        let observations = track
+        let contact = swing.contactTime
+
+        Task {
+            do {
+                let out = try await OverlayVideoExporter.export(
+                    clip: url, track: observations, pose: pose, batPath: batPath,
+                    contactTime: contact, options: options,
+                    progress: { p in Task { @MainActor in exporting = p } })
+                await MainActor.run {
+                    exporting = nil
+                    shareURLs = [out]
+                    showShare = true
+                }
+            } catch {
+                await MainActor.run {
+                    exporting = nil
+                    exportError = error.localizedDescription
+                }
+            }
+        }
     }
 
     private func saveGroundTruth() {

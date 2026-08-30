@@ -50,8 +50,17 @@ struct TrackReviewView: View {
     @State private var showBall = true
     @State private var showTrail = true
     @State private var showSkeleton = true
-    @State private var showRejects = true
-    @State private var showOtherTracks = true
+    @State private var showBat = true
+    /// Whether the two diagnostic chips are even offered. See the note on
+    /// `showRejects`.
+    @State private var showDiagnosticLayers = false
+    // Both OFF by default. They are the answer to "why did the app get this
+    // wrong", and on a swing it got right they are a screen full of amber
+    // rings and dashed lines over the thing the user came to look at. The
+    // "Wrong thing tracked?" button turns them on, which is exactly the moment
+    // they start earning their space.
+    @State private var showRejects = false
+    @State private var showOtherTracks = false
     /// Where the user says the true horizon is, as a fraction down the
     /// picture. `nil` until the tool is opened.
     @State private var horizonFraction: Double?
@@ -213,6 +222,19 @@ struct TrackReviewView: View {
                     .fill(Theme.pass)
                     .frame(width: 3, height: 3)
                     .position(map(o.x, o.y))
+            }
+
+            // The barrel path, in RAW buffer pixels like everything else here.
+            // `BatMetrics.pathPx` is the tilt-rectified copy the numbers come
+            // from; drawing that over the original frames puts the bat beside
+            // the bat on any clip filmed off level.
+            if showBat, swing.batPathPx.count >= 2 {
+                Path { p in
+                    p.move(to: map(swing.batPathPx[0].x, swing.batPathPx[0].y))
+                    for q in swing.batPathPx.dropFirst() { p.addLine(to: map(q.x, q.y)) }
+                }
+                .stroke(Color.pink.opacity(0.9),
+                        style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
             }
 
             if showSkeleton, let joints {
@@ -462,8 +484,11 @@ struct TrackReviewView: View {
                 toggleChip("Ball", isOn: $showBall, colour: Theme.pass)
                 toggleChip("Path", isOn: $showTrail, colour: Theme.yellow)
                 toggleChip("Body", isOn: $showSkeleton, colour: Theme.yellow)
-                toggleChip("Rejected", isOn: $showRejects, colour: Theme.warn)
-                toggleChip("Tracks", isOn: $showOtherTracks, colour: Theme.steel)
+                toggleChip("Bat", isOn: $showBat, colour: .pink)
+                if showDiagnosticLayers {
+                    toggleChip("Rejected", isOn: $showRejects, colour: Theme.warn)
+                    toggleChip("Tracks", isOn: $showOtherTracks, colour: Theme.steel)
+                }
             }
 
             if showOtherTracks, !trace.trackSummaries.isEmpty {
@@ -486,6 +511,7 @@ struct TrackReviewView: View {
                     // ball's own pixels is the difference between the seed
                     // working and finding nothing.
                     showRejects = true
+                    showDiagnosticLayers = true
                     player?.pause()
                 } label: {
                     Label(swing.ballSeedT == nil
@@ -582,7 +608,11 @@ struct TrackReviewView: View {
     /// turns "it didn't pick the ball" into a specific, fixable statement.
     private var otherTracksList: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text("\(trace.tracksBuilt) tracks built — top by speed")
+            // Not "1902 tracks built". That number is a property of the
+            // detector's inner loop, not of the swing, and nobody looking at
+            // this screen can act on it. What they can act on is which chains
+            // were candidates and why each was passed over.
+            Text("Other paths found — fastest first")
                 .font(Theme.label(10)).tracking(1.1)
                 .foregroundStyle(Theme.steel)
             ForEach(Array(trace.trackSummaries.prefix(4).enumerated()), id: \.offset) { _, t in

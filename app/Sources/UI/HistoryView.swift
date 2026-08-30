@@ -83,7 +83,11 @@ struct HistoryView: View {
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
-                    .disabled(visible.isEmpty)
+                    // `model.swings`, not `visible`: exportAll writes every
+                    // stored swing, not the filtered view, so scoping this to
+                    // the round would grey out an export that would have
+                    // worked.
+                    .disabled(model.swings.isEmpty)
                 }
             }
             .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }
