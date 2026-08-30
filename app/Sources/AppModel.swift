@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Full terms in LICENSE at the repository root. No warranty.
 
+import AVFoundation
 import Combine
 import Foundation
 import QuartzCore
@@ -223,6 +224,63 @@ final class AppModel: ObservableObject {
     /// so it arrives here already copied — there is nothing left to import,
     /// only to measure.
     func importCopiedClip(at stored: URL) {
+        // Ask before spending minutes. A 272-second session file took thirteen
+        // minutes to measure and produced ONE number off it, because only the
+        // best track in a clip is measured and the rest are discarded in
+        // silence. That cost was paid before the report explaining it could be
+        // read — which is precisely backwards, so the warning moves in front
+        // of the work.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if let prompt = await Self.lengthWarning(for: stored) {
+                self.longClipPrompt = prompt
+            } else {
+                self.beginAnalysis(of: stored)
+            }
+        }
+    }
+
+    /// A clip long enough that measuring it is minutes of work for one reading.
+    struct LongClipPrompt: Identifiable, Equatable {
+        var id: String { url.path }
+        var url: URL
+        var durationS: Double
+        var estimatedS: Double
+
+        var message: String {
+            String(format: "This clip is %.0f seconds long — a session, not a swing. Measuring it will take roughly %.0f minutes, and only the single best track in the whole file is reported; every other swing in it is discarded without a word. Trimming it to the one swing first is faster and gives a better answer.",
+                   durationS, max(1, estimatedS / 60).rounded())
+        }
+    }
+
+    @Published var longClipPrompt: LongClipPrompt?
+
+    /// Decide whether a clip is long enough to be worth asking about, from
+    /// metadata alone — no decoding, so this costs nothing.
+    ///
+    /// The estimate is measured, not guessed: analysis runs at roughly 15 ms
+    /// per decoded frame on the hardware this was first run on, and frames are
+    /// duration times rate. That predicted 812 s for the clip that actually
+    /// took 804 s, which is close enough to put a number in front of somebody.
+    static func lengthWarning(for url: URL,
+                              thresholdS: Double = 30) async -> LongClipPrompt? {
+        let asset = AVURLAsset(url: url)
+        guard let duration = try? await asset.load(.duration).seconds,
+              duration > thresholdS else { return nil }
+        // Nominal is fine here: this is an estimate of how long a wait to warn
+        // about, not a measurement anything is computed from.
+        var rate = 30.0
+        if let track = try? await asset.loadTracks(withMediaType: .video).first,
+           let nominal = try? await track.load(.nominalFrameRate), nominal > 1 {
+            rate = Double(nominal)
+        }
+        let frames = duration * max(1, rate)
+        return LongClipPrompt(url: url, durationS: duration,
+                              estimatedS: frames * 0.015)
+    }
+
+    /// Measure a clip, having decided it is worth measuring.
+    func beginAnalysis(of stored: URL) {
         // Stop the camera first. This is not tidiness — the capture session
         // holds the hardware video decoder, and an AVAssetReader that cannot
         // get one fails with "Operation Interrupted" after decoding zero

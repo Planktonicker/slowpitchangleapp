@@ -192,6 +192,15 @@ final class ClipDiagnostics {
                 "%.0f%% of the frame intervals differ from the typical one. Every timing measurement here — exit velocity above all — assumes frames arrive evenly, so this footage will read wrong by however uneven it is. Re-record rather than re-encode: a variable-rate file cannot be repaired after the fact.",
                 irregular * 100))
         }
+        // The opposite of "nothing matched", and until now it had no note at
+        // all: the report would print "21.114%" and leave the reader to know
+        // that a ball is about 0.05% of a frame. Three orders of magnitude is
+        // not a tuning nudge, it is the detector looking at scenery.
+        if let fraction = inWindowFraction, fraction > 0.02 {
+            out.append(String(format:
+                "%.1f%% of every frame matches the ball's colour window. A ball at this distance is a few hundredths of one percent, so the window is admitting the background wholesale — sunlit grass is the usual culprit, since it shares optic yellow's hue. Raise the LOWER SATURATION first (Settings → Ball colour): vegetation is dull where the ball is fluorescent, and that one number separates them without touching the hue at all.",
+                fraction * 100))
+        }
         if durationS > 20 {
             out.append(String(format:
                 "%.0fs long — a whole session rather than one swing. Only the single best track in the file is measured, so the other swings in it are discarded silently. Trim to the swing you care about.",
@@ -203,6 +212,14 @@ final class ClipDiagnostics {
                 width))
         }
         return out
+    }
+
+    /// Mean share of the frame passing the colour window, over the probed
+    /// frames. `nil` when nothing was probed.
+    private var inWindowFraction: Double? {
+        guard probedFrames > 0, !inWindowPixels.isEmpty, width > 0, height > 0 else { return nil }
+        let mean = Double(inWindowPixels.reduce(0, +)) / Double(inWindowPixels.count)
+        return mean / Double(width * height)
     }
 
     /// Name the stage that failed. The numbers above already contain this, but
@@ -223,6 +240,15 @@ final class ClipDiagnostics {
         if framesWithCandidates == 0 {
             return "colour matched but nothing passed the size and shape gates. Check the diameter range against how big the ball actually is here."
         }
+        // Checked before the track checks below, because when the window is
+        // this wide everything downstream is a consequence rather than a
+        // separate fault, and naming the consequence sends people tuning the
+        // wrong number.
+        if let fraction = inWindowFraction, fraction > 0.05 {
+            return String(format:
+                "the colour window is far too wide — %.0f%% of every frame matches it, where a ball is a few hundredths of one percent. Everything after this stage is measuring background. Raise the lower saturation in Settings → Ball colour.",
+                fraction * 100)
+        }
         if bestTrackFrames < 3 {
             return "candidates were found but never linked into a flight — they are probably not the same object frame to frame (background clutter of a similar colour)."
         }
@@ -232,6 +258,52 @@ final class ClipDiagnostics {
         if bestTrackFrames < SLA.minTrackFrames {
             return "measured, but off a short track — treat the number as provisional."
         }
+
+        // Everything above asks whether the PIPELINE ran. That is not the same
+        // question as whether the answer means anything, and answering only
+        // the first is how a -66 degree launch angle off a nineteen-second
+        // "flight" came back labelled "clean run." — the single most
+        // misleading thing this report has ever said. The checks below are the
+        // second question.
+
+        // A slow-pitch ball is in frame for a few hundred milliseconds. A
+        // track lasting seconds is not a flight; it is something stationary
+        // and ball-coloured being followed patiently across the whole clip.
+        if fps > 0 {
+            let trackSeconds = Double(bestTrackFrames) / fps
+            if trackSeconds > Self.implausibleTrackSeconds {
+                return String(format:
+                    "the longest \"flight\" lasts %.1f s. A hit ball crosses the frame in a fraction of a second, so this is a stationary object of about the right colour being tracked, not a swing — look at the colour line above: if a large share of every frame matches, the detector is following the background.",
+                    trackSeconds)
+            }
+        }
+
+        if flags.contains("HIGH_RESIDUAL") {
+            return "a track was measured but it does not fit a parabola, which a ball in flight must. The points being tracked are not one object moving ballistically — most often background clutter sharing the ball's colour."
+        }
+
+        if let angle = launchAngleDeg,
+           angle < Self.plausibleLaunchLoDeg || angle > Self.plausibleLaunchHiDeg {
+            return String(format:
+                "measured %.0f degrees, which is not a hit — that is the ball going almost straight %@. Whatever was tracked, it was not a struck ball.",
+                angle, angle < 0 ? "into the ground" : "up")
+        }
+
+        if flags.contains("DEPTH_MOTION") {
+            return "the ball was moving toward or away from the camera rather than across it, so it is foreshortened and reads slow. This is a camera-placement problem, not a detection one: stand square to the flight, on the side the hitter faces."
+        }
+
         return "clean run."
     }
+
+    /// Longest a tracked object may persist and still be called a flight.
+    ///
+    /// Generous — a high slow-pitch arc hangs, and the clip may catch part of
+    /// the descent — but nothing like the seconds a mis-tracked patch of turf
+    /// will happily produce.
+    private static let implausibleTrackSeconds = 2.5
+
+    /// Outside this, the number is not a mis-measured hit, it is not a hit.
+    private static let plausibleLaunchLoDeg = -25.0
+    private static let plausibleLaunchHiDeg = 75.0
 }
