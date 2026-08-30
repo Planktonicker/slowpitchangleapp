@@ -284,8 +284,11 @@ final class AppModel: ObservableObject {
     /// seen a person — almost certainly the gate failing rather than an empty
     /// field, and it would otherwise suppress every trigger in silence.
     var hitterGateLooksStuck: Bool {
-        capture.isArmed && settings.requireHitter && armedAt > 0
-            && capture.hitterGateNeverFired(since: armedAt)
+        // Once the escape has been taken the gate is off — offering it again
+        // is a button that changes nothing, shown beside a chip saying the
+        // check is already off.
+        capture.isArmed && settings.requireHitter && !hitterGateDisabledForSession
+            && armedAt > 0 && capture.hitterGateNeverFired(since: armedAt)
     }
 
     /// Give up on the hitter requirement for this session. Swings captured
@@ -337,10 +340,13 @@ final class AppModel: ObservableObject {
     /// contact. Recorded as such so gate G5 stays honest.
     func triggerManually() {
         capture.triggerManually()
-        pendingManual = true
+        // No flag kept here. Whether a clip was manual is recorded ON the
+        // clip by ClipRecorder — a pending flag consumed by whichever clip
+        // finished next mislabelled an auto clip as manual whenever the
+        // manual press was swallowed (button hit during a post-roll), which
+        // corrupted the G5 statistic and skipped the sound-travel correction
+        // on a clip that needed it.
     }
-
-    private var pendingManual = false
     /// Dropped-frame count when the current clip began, so the flag reflects
     /// drops during THIS clip rather than the whole session.
     private var dropsAtClipStart = 0
@@ -683,8 +689,14 @@ final class AppModel: ObservableObject {
     // MARK: - Clip handling
 
     func handleClip(_ output: ClipRecorder.Output, autoTriggered: Bool) {
-        let wasManual = pendingManual
-        pendingManual = false
+        let wasManual = output.manual
+        // Snapshot the conditions of CAPTURE, not of analysis-finish. Analysis
+        // takes seconds, and ending the round during it resets both the
+        // session and the gate override — reading them afterwards stripped the
+        // .hitterGateDisabled flag and the round membership from exactly the
+        // swing recorded under them.
+        let capturedSessionID = session?.id
+        let capturedGateOff = hitterCheckIsOff
         let setting = currentSetting
         let placement = wizard.placement
         let droppedDuringClip = capture.droppedFrameCount > dropsAtClipStart
@@ -739,7 +751,9 @@ final class AppModel: ObservableObject {
                                 droppedFrames: droppedDuringClip,
                                 analysis: finalAnalysis,
                                 failure: finalFailure,
-                                autoTriggered: autoTriggered && !wasManual)
+                                autoTriggered: autoTriggered && !wasManual,
+                                sessionID: capturedSessionID,
+                                gateWasOff: capturedGateOff)
             }
         }
     }
@@ -751,7 +765,9 @@ final class AppModel: ObservableObject {
                             droppedFrames: Bool,
                             analysis: ClipAnalysis?,
                             failure: String?,
-                            autoTriggered: Bool) {
+                            autoTriggered: Bool,
+                            sessionID: UUID?,
+                            gateWasOff: Bool) {
         analysisProgress = nil
 
         let clipName = settings.keepClips
@@ -784,9 +800,9 @@ final class AppModel: ObservableObject {
         dto.cameraFovDeg = placement.fovDeg > 0 ? placement.fovDeg : nil
         dto.visionOrientation = capture.visionOrientationForFrames
         dto.captureFlags = placement.captureFlags
-            + (hitterCheckIsOff ? [.hitterGateDisabled] : [])
+            + (gateWasOff ? [.hitterGateDisabled] : [])
             + (droppedFrames ? [.framesDropped] : [])
-        dto.sessionID = session?.id
+        dto.sessionID = sessionID
         sessionSwingCount += 1
 
         do {

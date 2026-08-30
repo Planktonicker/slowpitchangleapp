@@ -21,6 +21,15 @@ final class ClipRecorder {
         /// Seconds from the start of the clip to the contact impulse.
         var contactOffset: Double
         var duration: Double
+        /// True when the clip was started by the manual button rather than the
+        /// audio trigger. Carried ON THE CLIP, because the old design — a
+        /// `pendingManual` flag in AppModel consumed by whichever clip finished
+        /// next — mislabelled clips: press manual during an auto clip's
+        /// post-roll and the manual attempt is silently dropped, but the flag
+        /// stayed set, so the AUTO clip was recorded as manual. That corrupted
+        /// the G5 auto-trigger statistic AND skipped the sound-travel contact
+        /// correction on a clip that needed it.
+        var manual: Bool
     }
 
     private(set) var isRecording = false
@@ -32,13 +41,15 @@ final class ClipRecorder {
     private var deadline: CMTime = .invalid
     private var videoFormat: CMFormatDescription?
     private var audioFormat: CMFormatDescription?
+    private var startedManually = false
     private let queue = DispatchQueue(label: "swinglab.cliprecorder")
 
     /// Begin a clip. `videoRing`/`audioRing` are the pre-roll, oldest first.
     func begin(videoRing: [CMSampleBuffer],
                audioRing: [CMSampleBuffer],
                contactPTS: CMTime,
-               postRoll: Double) {
+               postRoll: Double,
+               manual: Bool) {
         guard !isRecording else { return }
         videoSamples = videoRing
         audioSamples = audioRing
@@ -47,6 +58,7 @@ final class ClipRecorder {
         startPTS = videoRing.first.map { CMSampleBufferGetPresentationTimeStamp($0) } ?? contactPTS
         videoFormat = videoRing.first.flatMap { CMSampleBufferGetFormatDescription($0) }
         audioFormat = audioRing.first.flatMap { CMSampleBufferGetFormatDescription($0) }
+        startedManually = manual
         isRecording = true
     }
 
@@ -88,6 +100,7 @@ final class ClipRecorder {
         let aFmt = audioFormat
         let start = startPTS
         let contact = contactPTS
+        let manual = startedManually
         videoSamples.removeAll()
         audioSamples.removeAll()
 
@@ -173,7 +186,8 @@ final class ClipRecorder {
                                 ? max(0, contact.seconds - start.seconds) : 0
                             completion(.success(Output(url: url,
                                                        contactOffset: offset,
-                                                       duration: duration)))
+                                                       duration: duration,
+                                                       manual: manual)))
                         } else {
                             completion(.failure(writer.error ?? RecorderError.writeFailed))
                         }

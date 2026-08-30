@@ -87,7 +87,13 @@ final class HumanPresenceGate {
     func looksUnreliable(since start: CFTimeInterval) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        guard _lastSeenAt == nil else { return false }
+        // Seen SINCE the caller's start, not ever. One detection while framing
+        // the shot used to satisfy this for the rest of the app's life, so a
+        // gate that went blind for the whole armed round — backlight, dark
+        // clothing, a wrong orientation override — suppressed every trigger
+        // with the escape hatch never offered: the exact silent failure this
+        // watchdog exists to catch.
+        if let seen = _lastSeenAt, seen >= start { return false }
         return CACurrentMediaTime() - start > neverSeenTimeout
     }
 

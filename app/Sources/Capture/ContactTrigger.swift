@@ -27,7 +27,23 @@ final class ContactTrigger {
     private let lock = NSLock()
 
     private var _lastDb: Double = 0
+    private var _peakDb: Double = -.infinity
     /// Live level for the UI, in dB over the rolling floor.
+    /// The loudest 5 ms window since the last call, then the hold resets.
+    ///
+    /// `lastDb` is only the FINAL window of the most recent buffer — a bat
+    /// crack occupies one or two windows in the middle of a ~23 ms buffer, so
+    /// any consumer sampling `lastDb` at UI rate reads the ring-out, tens of
+    /// dB under the impulse. Calibration was built on exactly that misread and
+    /// suggested thresholds the live trigger — which sees every window — then
+    /// blew straight through.
+    func consumePeakDb() -> Double {
+        lock.lock(); defer { lock.unlock() }
+        let peak = _peakDb == -.infinity ? _lastDb : _peakDb
+        _peakDb = -.infinity
+        return peak
+    }
+
     var lastDb: Double {
         lock.lock(); defer { lock.unlock() }
         return _lastDb
@@ -47,7 +63,13 @@ final class ContactTrigger {
         set { lock.lock(); _refractoryS = newValue; lock.unlock() }
     }
 
-    private var _isArmed = true
+    /// DISARMED until somebody arms it. This defaulted to true, and
+    /// `CaptureController` only synced it when its own `isArmed` CHANGED — so
+    /// from the moment the camera configured until the first press of ARM, the
+    /// trigger was live while the screen said "2 · Arm". A bat drop, a clap,
+    /// or a door recorded a clip from a ring buffer that was still discarding
+    /// late frames, on a phone whose owner had not armed anything.
+    private var _isArmed = false
     var isArmed: Bool {
         get { lock.lock(); defer { lock.unlock() }; return _isArmed }
         set { lock.lock(); _isArmed = newValue; lock.unlock() }
@@ -101,6 +123,7 @@ final class ContactTrigger {
             let floor = medianFloor() + 1e-9
             let db = 20 * log10(rms / floor)
             _lastDb = db
+            if db > _peakDb { _peakDb = db }
 
             let windowTime = startSeconds
                 + Double(offset) / sampleRate

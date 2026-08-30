@@ -232,8 +232,11 @@ final class CaptureController: NSObject, ObservableObject {
             guard let self else { return }
             self.uiLock.lock()
             let db = self.pendingDb
+            // Release the peak hold: without this the meter would latch the
+            // loudest thing ever heard instead of the loudest in each tick.
+            self.pendingDb = -.infinity
             let drops = self.pendingDrops
-            let dbChanged = abs(db - self.publishedDb) >= 0.5
+            let dbChanged = db.isFinite && abs(db - self.publishedDb) >= 0.5
             let dropsChanged = drops != self.publishedDrops
             if dbChanged { self.publishedDb = db }
             if dropsChanged { self.publishedDrops = drops }
@@ -447,6 +450,12 @@ final class CaptureController: NSObject, ObservableObject {
 
     func configureAndStart() {
         setStatus(.configuring)
+        // Establish the armed invariant BEFORE the session runs. `syncArmed`
+        // used to run only from `isArmed.didSet`, which by definition has not
+        // fired on a fresh start — so the trigger sat at whatever its default
+        // was. The default has been fixed too, but the invariant should not
+        // depend on a default agreeing with a UI flag.
+        pipelineQueue.async { [weak self] in self?.syncArmed() }
         sessionQueue.async { [weak self] in
             guard let self else { return }
             // Already live (e.g. .task re-fired without a matching stop):
@@ -491,6 +500,11 @@ final class CaptureController: NSObject, ObservableObject {
             self?.videoRing.removeAll()
             self?.audioRing.removeAll()
             self?.recorder.cancel()
+            // cancel() kills the recording without a completion, so nothing
+            // downstream will ever clear the indicator — do it here, or a
+            // round ended during the post-roll leaves REC shown forever and
+            // the idle timer disabled off the back of it.
+            DispatchQueue.main.async { self?.isRecordingClip = false }
         }
     }
 
@@ -732,6 +746,7 @@ final class CaptureController: NSObject, ObservableObject {
     }
 
     private func syncArmed() {
+        pipelineIsArmed = isArmed
         trigger.isArmed = isArmed && !recorder.isRecording
         if isArmed { trigger.reset() }
         let armed = isArmed
@@ -750,9 +765,19 @@ final class CaptureController: NSObject, ObservableObject {
         }
     }
 
+    /// Mirror of `isArmed` owned by `pipelineQueue`, so the recording path
+    /// can consult it without a cross-thread read of a @Published var.
+    private var pipelineIsArmed = false
+
     private func startClip(contactPTS: CMTime, gated: Bool) {
         guard !recorder.isRecording else { return }
         guard !videoRing.isEmpty else { return }
+        // Belt and braces with the trigger's own armed flag. The flag alone
+        // proved insufficient once: it defaulted to armed and nothing synced
+        // it until the first ARM press, so the app recorded swings while the
+        // screen said it would not. An audio trigger reaching this point on an
+        // unarmed controller is a bug upstream — refuse it here regardless.
+        if gated && !pipelineIsArmed { return }
         // The no-human false trigger from field testing: a sharp noise with
         // nobody in frame. Recording it would waste a clip AND corrupt G1
         // with a clip that never contained a swing, so it is suppressed —
@@ -765,7 +790,8 @@ final class CaptureController: NSObject, ObservableObject {
         recorder.begin(videoRing: videoRing.samples,
                        audioRing: audioRing.samples,
                        contactPTS: contactPTS,
-                       postRoll: postRollS)
+                       postRoll: postRollS,
+                       manual: !gated)
         DispatchQueue.main.async { self.isRecordingClip = true }
     }
 
@@ -858,9 +884,12 @@ extension CaptureController: AVCaptureVideoDataOutputSampleBufferDelegate,
             encoder?.encode(pixelBuffer: pb, pts: pts, duration: duration)
         } else {
             trigger.process(sampleBuffer: sampleBuffer)
-            let db = trigger.lastDb
+            // Peak since the last read, not the final window of this buffer:
+            // the published level exists so calibration and the meter can see
+            // impulses, and an impulse rarely lands in the final window.
+            let db = trigger.consumePeakDb()
             uiLock.lock()
-            pendingDb = db
+            pendingDb = max(pendingDb, db)
             uiLock.unlock()
             pipelineQueue.async { [weak self] in
                 guard let self else { return }
