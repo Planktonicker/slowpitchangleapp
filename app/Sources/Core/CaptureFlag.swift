@@ -29,6 +29,11 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
     case distanceOutsideProtocol = "DISTANCE_OUTSIDE_PROTOCOL"
     case scaleFromManualDistance = "SCALE_FROM_MANUAL_DISTANCE"
     case hitterGateDisabled = "HITTER_GATE_DISABLED"
+    /// The lens was well above or below contact height. Costs no accuracy on
+    /// its own — a level camera sees the same geometry from any height — but
+    /// it means the on-screen framing guide was not the one being matched, so
+    /// the distance and the framing behind this reading deserve a second look.
+    case cameraHeightOffProtocol = "CAMERA_HEIGHT_OFF_PROTOCOL"
     /// Frames were dropped while this clip was being captured. Stamped at
     /// capture time on purpose: the live counter is transient, and without
     /// this the fact evaporates when the counter clears, leaving a swing in
@@ -54,6 +59,8 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
             return "Scale came from a typed distance rather than a measured object, so it inherits whatever error is in that number."
         case .hitterGateDisabled:
             return "The requirement for a person in frame was switched off for this session, so a loud noise alone could have started this clip."
+        case .cameraHeightOffProtocol:
+            return "The lens was measured well away from the 1.1 m contact height the capture protocol asks for. A level camera sees the same geometry from any height, so this costs no accuracy by itself — the ball simply rides higher or lower in the picture. It is recorded because the on-screen framing guide is drawn for 1.1 m, so it was not a valid target for this shot, and because the usual reaction to a low camera is to aim it upward, which does cost accuracy."
         case .importedClip:
             return "This clip was imported, not filmed by the app. Launch angle and exit velocity still hold — both come from the ball's own size in the picture, which travels with the footage. What is missing is everything the app measures at capture time: no camera distance, no level or tilt reading to correct with, and no audio trigger, so contact is taken to be the first frame the ball was tracked in rather than the crack of the bat."
         case .framesDropped:
@@ -71,6 +78,7 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
         case .distanceOutsideProtocol: return "distance"
         case .scaleFromManualDistance: return "typed distance"
         case .hitterGateDisabled: return "no hitter check"
+        case .cameraHeightOffProtocol: return "camera height"
         case .importedClip: return "imported"
         case .framesDropped: return "dropped frames"
         }

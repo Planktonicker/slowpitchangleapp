@@ -149,15 +149,29 @@ garden, too low for a cage.
 1. Tripod **side-on** to the swing, on the side the hitter **faces**
    (1B side for a right-hander), **4.5–6 m** from the plate — five big steps.
 2. Phone **landscape**, roughly level. Open SwingLab.
-3. Setup opens itself (or tap **"SET UP"**, top right). Match the scene to the
-   yellow batter outline: hitter where the figure stands, ball on the tee circle.
-4. Level chip should read **"Level ✓"** or end in **"— corrected ✓"**. Ending
-   in **"— too steep"** or **"— lens unknown"** → raise the tripod and level
-   the phone instead of aiming it up.
-5. Hitter steps in → **"Hitter detected ✓"**.
-6. Ball on the tee → **tap it on screen** → **"Ball found"**, distance chip
+3. Setup opens itself (or tap **"SET UP"**, top right).
+4. **Horizon line first, outline second.** A dashed line runs across the
+   picture — that is where level actually falls. Aim the phone until it sits in
+   the green band and reads **"LEVEL ✓"**. Off the bottom of the screen means
+   you are aiming up; off the top, aiming down.
+
+   Do this *before* worrying about the outline. The outline can be matched
+   perfectly from a phone lying in the grass aimed upward — backing up and
+   tilting fits a person into it just as well as standing it at belt height —
+   so an outline that fits proves nothing on its own.
+5. Match the scene to the batter outline: hitter where the figure stands, ball
+   on the tee circle. **If the outline is red**, it is telling you it is not a
+   valid target from where the phone is; the red banner across it says which
+   fault to fix. Only a **yellow** outline is worth matching.
+6. Hitter steps in → **"Hitter detected ✓"**.
+7. Ball on the tee → **tap it on screen** → **"Ball found"**, distance chip
    **"Good"**.
-7. Close setup (X) → tap **"2 · Arm"**.
+8. A **"Lens 1.1 m up ✓"** chip now appears beside the level chip — the app has
+   worked out how high the phone actually is, from the hitter's feet, the
+   distance and the tilt. Amber means it is far from the 1.1 m the outline
+   assumes. Raise or lower the tripod, but **keep it level**: aiming up to
+   compensate for a short tripod costs far more than the low camera does.
+9. Close setup (X) → tap **"2 · Arm"**.
 
 ### Each swing
 Hit. The app records by itself and the swing card appears in a few seconds with

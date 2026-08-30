@@ -93,6 +93,17 @@ Open, in rough priority order:
 
 ## Gotchas that have already cost time
 
+- **The batter outline cannot tell you where the phone is.** It constrains two
+  things — how tall the hitter is in frame and where their feet land — against
+  three unknowns: distance, tilt and lens height. Distance sets the size, tilt
+  slides the picture up or down, so *every* lens height has a distance and a
+  tilt that match the outline exactly, including a phone lying in the grass.
+  The first real clip was filmed that way, from a guide glowing confident
+  yellow. `CameraPose` closes the system: tilt from the IMU, distance from the
+  ball tap, feet from the live pose, and the height falls out. Any new framing
+  aid has to be checked the same way — count the constraints against the
+  unknowns before trusting it.
+
 - **One `AVCaptureVideoPreviewLayer` in the whole app.** Two sharing a session
   fight over the preview connection and leave the screen permanently black.
   Setup is an overlay over the existing preview, not a sheet with its own.

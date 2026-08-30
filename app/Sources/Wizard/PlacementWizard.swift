@@ -46,6 +46,15 @@ final class PlacementWizard: ObservableObject {
 
     @Published var manualDistanceM: Double = 6
 
+    /// Where the hitter's feet sit in the capture buffer, 0 at the top and 1
+    /// at the bottom, smoothed from the live pose. Fed in by the setup overlay
+    /// because that is the only screen that runs pose.
+    ///
+    /// It is here rather than in the overlay because it is the third leg of
+    /// the camera-height estimate, and the other two — tilt and distance —
+    /// already live on this object.
+    @Published private(set) var hitterFeetFraction: Double?
+
     @Published private(set) var scaleSource: ScaleSource = .none
     @Published private(set) var measuredPxPerM: Double?
     /// Ball diameter from the last successful tap-measure, for display.
@@ -57,6 +66,29 @@ final class PlacementWizard: ObservableObject {
         level.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
             .store(in: &cancellables)
+    }
+
+    /// Record where the pose currently puts the hitter's feet.
+    ///
+    /// Smoothed, because ankle keypoints jitter by a percent or two of frame
+    /// height between frames and the height readout is quoted to 10 cm — an
+    /// unfiltered number would flicker enough to look broken even while being
+    /// well inside tolerance.
+    ///
+    /// Deliberately never cleared from here. The hitter stepping out of frame
+    /// does not move the tripod, and closing the setup overlay stops pose
+    /// entirely — so a self-clearing value would erase the estimate at exactly
+    /// the moment it needs to survive, which is when swings start being
+    /// stamped with it. `clearScale()` retires it instead, because
+    /// re-measuring the distance is the thing that actually signals the camera
+    /// moved.
+    func noteHitterFeet(_ fraction: Double) {
+        guard fraction.isFinite else { return }
+        guard let previous = hitterFeetFraction else {
+            hitterFeetFraction = fraction
+            return
+        }
+        hitterFeetFraction = previous + (fraction - previous) * 0.25
     }
 
     // MARK: - Scale sources
@@ -108,6 +140,7 @@ final class PlacementWizard: ObservableObject {
     func clearScale() {
         measuredPxPerM = nil
         lastBallDiameterPx = nil
+        hitterFeetFraction = nil
         scaleSource = .none
     }
 
@@ -122,6 +155,38 @@ final class PlacementWizard: ObservableObject {
         let halfFov = fieldOfViewDeg / 2 * .pi / 180
         let widthAtDistanceM = imageWidthPx / pxPerM
         return widthAtDistanceM / (2 * tan(halfFov))
+    }
+
+    /// How high the lens is above the ground, solved from the hitter's feet.
+    ///
+    /// This is the number the batter outline could never supply. The outline
+    /// constrains how tall the hitter is in frame and where their feet land —
+    /// two facts — while the camera has three unknowns: distance, tilt and
+    /// height. A phone lying on the grass and aimed up can match the outline
+    /// exactly. Tilt comes from the IMU and distance from the ball tap, so
+    /// the feet close the system and the height falls out.
+    ///
+    /// `nil` until all three are available, and `nil` when they contradict
+    /// each other. See `CameraPose.lensHeightM`.
+    var lensHeightEstimateM: Double? {
+        guard let feet = hitterFeetFraction,
+              let d = derivedDistanceM,
+              level.isAvailable, level.hasReading,
+              imageWidthPx > 0, imageHeightPx > 0,
+              let vHalf = CameraPose.verticalHalfAngleDeg(
+                  horizontalFovDeg: fieldOfViewDeg,
+                  frameAspect: imageWidthPx / imageHeightPx)
+        else { return nil }
+        return CameraPose.lensHeightM(feetFraction: feet, distanceM: d,
+                                      tiltDeg: level.tiltDeg,
+                                      verticalHalfAngleDeg: vHalf)
+    }
+
+    /// Whether the lens is near the height the batter outline is drawn for.
+    /// `nil` means not measured yet, which is not the same as wrong.
+    var isLensHeightOK: Bool? {
+        guard let h = lensHeightEstimateM else { return nil }
+        return abs(h - CameraPose.idealLensHeightM) <= CameraPose.lensHeightToleranceM
     }
 
     /// The protocol's window is 4.5-6 m; 3.5-8.5 m is accepted with a nudge,
@@ -210,6 +275,18 @@ final class PlacementWizard: ObservableObject {
            let m = derivedDistanceM {
             out.append((.warning, String(format: "Camera reads %.1f m away. 4.5–6 m is ideal.", m)))
         }
+
+        // Height last, because it is the one the user can least often fix —
+        // a short tripod is a short tripod. It is said at all because the
+        // batter outline cannot say it, and because the wrong reaction to a
+        // low camera (aiming it up) is worse than the low camera.
+        if let h = lensHeightEstimateM, isLensHeightOK == false {
+            if h < CameraPose.idealLensHeightM {
+                out.append((.warning, String(format: "Lens is about %.1f m off the ground — belt height (1.1 m) is what the outline is drawn for. Raise it if you can, but keep it LEVEL: aiming up to compensate costs more than the height does.", h)))
+            } else {
+                out.append((.warning, String(format: "Lens is about %.1f m off the ground, above the 1.1 m the outline is drawn for. Lower it, or expect the hitter to sit low in frame.", h)))
+            }
+        }
         return out
     }
 
@@ -232,6 +309,7 @@ final class PlacementWizard: ObservableObject {
         }
         if !isDistanceAcceptable { out.append(.distanceOutsideProtocol) }
         if scaleSource == .manual { out.append(.scaleFromManualDistance) }
+        if isLensHeightOK == false { out.append(.cameraHeightOffProtocol) }
         return out
     }
 

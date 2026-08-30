@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Full terms in LICENSE at the repository root. No warranty.
 
+import ImageIO
 import SwiftUI
 
 /// Camera setup, drawn **over** the capture screen's live preview.
@@ -47,6 +48,19 @@ struct SetupOverlay: View {
         GeometryReader { geo in
             let isLandscape = geo.size.width > geo.size.height
             ZStack {
+                // Drawn UNDER the framing guide on purpose: the guide is the
+                // instruction and the horizon is the condition that
+                // instruction assumes, so the batter is drawn over it rather
+                // than sliced by it.
+                HorizonGuide(
+                    tiltDeg: wizard.level.hasReading ? wizard.level.tiltDeg : nil,
+                    visibleVerticalHalfDeg: CameraPose.visibleVerticalHalfAngleDeg(
+                        horizontalFovDeg: capture.fieldOfViewDeg,
+                        isLandscape: isLandscape,
+                        screenAspect: Double(geo.size.width / max(1, geo.size.height))),
+                    toleranceDeg: wizard.level.tiltToleranceDeg,
+                    correctableMaxDeg: SLA.tiltCorrectableMaxDeg)
+
                 // The guide is drawn into the part of the frame the panels do
                 // not cover. Without this the ball-flight arrow and its label
                 // ran straight under the distance card in landscape, so the
@@ -107,6 +121,49 @@ struct SetupOverlay: View {
             }
         }
         .sheet(isPresented: $showTips) { PlacementTipsView() }
+        // The third leg of the camera-height estimate. Ankles rather than the
+        // pose's bounding box: the box grows a margin around the silhouette
+        // and would put the "ground" several centimetres below the feet, which
+        // at 5 m is tens of centimetres of height error.
+        .onChange(of: capture.skeleton) { _, joints in
+            if let feet = Self.feetFraction(from: joints,
+                                            orientation: capture.visionOrientation) {
+                wizard.noteHitterFeet(feet)
+            }
+        }
+    }
+
+    /// Where the hitter's feet sit in the capture buffer, from the live pose,
+    /// as a fraction from the top of the *upright* picture.
+    ///
+    /// Both ankles when both are seen, because a side-on hitter's rear ankle is
+    /// often the occluded one and averaging is steadier than picking; either
+    /// alone otherwise. `nil` with no ankles at all — the height estimate is
+    /// better absent than guessed off a hip.
+    ///
+    /// The orientation argument is not optional politeness. `deviceSkeleton`
+    /// hands back **buffer** coordinates, and the buffer is landscape-native
+    /// whichever way the phone is held, so "down the buffer" is only "down in
+    /// the world" for one of the two landscape orientations. Filming
+    /// landscape the other way up inverts it, and in portrait the buffer's y
+    /// axis runs sideways across the world, where a foot position says nothing
+    /// about height at all. Ignoring this would not produce a slightly wrong
+    /// height — it would produce a confident one, upside down.
+    static func feetFraction(from joints: [PoseJoint: CGPoint]?,
+                             orientation: CGImagePropertyOrientation) -> Double? {
+        guard let joints else { return nil }
+        let flip: Bool
+        switch orientation {
+        case .up:   flip = false
+        case .down: flip = true
+        // Portrait, or a mirrored variant: no vertical reading to take.
+        default:    return nil
+        }
+        let ankles: [Double] = [joints[.leftAnkle], joints[.rightAnkle]]
+            .compactMap { $0.map { Double($0.y) } }
+        guard !ankles.isEmpty else { return nil }
+        let mean = ankles.reduce(0, +) / Double(ankles.count)
+        return flip ? 1 - mean : mean
     }
 
     /// Width of the landscape control column. Named because the framing guide
@@ -232,9 +289,21 @@ struct SetupOverlay: View {
         let flightEndX = min(0.93, 1 - rightInset - 0.04)
         let arrowTopY = max(topInset + 0.03, ballY - (isLandscape ? 0.30 : 0.22))
 
+        // The outline is drawn for ONE camera: level, at contact height. Match
+        // it from anywhere else and it is decoration wearing the clothes of an
+        // instruction — see `CameraPose` for why two constraints cannot pin
+        // down three unknowns. When the pose is wrong the guide goes red and
+        // says so, because a confident yellow figure over a phone lying in the
+        // grass is how the first real clip got filmed.
+        let valid = CameraPose.outlineIsValid(
+            tiltDeg: wizard.level.hasReading ? wizard.level.tiltDeg : nil,
+            tiltToleranceDeg: wizard.level.tiltToleranceDeg,
+            lensHeightM: wizard.lensHeightEstimateM)
+        let ink = valid ? Theme.yellow : Theme.fail
+
         return ZStack {
             BatterOutline()
-                .foregroundStyle(Theme.yellow.opacity(0.9))
+                .foregroundStyle(ink.opacity(0.9))
                 .frame(width: figureW * w, height: figureH * h)
                 .scaleEffect(x: flip, y: 1, anchor: .center)
                 .position(pt(centreX, (headY + footY) / 2))
@@ -245,17 +314,17 @@ struct SetupOverlay: View {
                 p.move(to: pt(teeX, footY))
                 p.addLine(to: pt(teeX, ballY + 0.012))
             }
-            .stroke(Theme.yellow.opacity(0.7),
+            .stroke(ink.opacity(0.7),
                     style: StrokeStyle(lineWidth: 2, dash: [5, 4]))
             Circle()
-                .strokeBorder(Theme.yellow, lineWidth: 2.5)
+                .strokeBorder(ink, lineWidth: 2.5)
                 .frame(width: 0.042 * min(w, h), height: 0.042 * min(w, h))
                 .position(pt(teeX, ballY))
             // One short word, clear of the artwork. "BALL ON TEE" was long
             // enough to reach back across the batter's shoulder, and below the
             // ball is where the hitter's caption goes — that pair collided into
             // "STAND HERETEE".
-            guideLabel("BALL", at: pt(teeX, ballY - 0.075), small: true)
+            guideLabel("BALL", at: pt(teeX, ballY - 0.075), small: true, ink: ink)
 
             // Where the ball goes — the whole reason the frame is composed
             // this way, and the thing the old guide never said.
@@ -265,7 +334,7 @@ struct SetupOverlay: View {
                                control: pt(teeX + (flightEndX - teeX) * 0.55,
                                            arrowTopY + 0.06))
             }
-            .stroke(Theme.yellow.opacity(0.75),
+            .stroke(ink.opacity(0.75),
                     style: StrokeStyle(lineWidth: 2.5, dash: [9, 6]))
             // Arrowhead in points, not in fractions of each axis. Fractions
             // are stretched by the screen's own aspect, which in landscape
@@ -277,7 +346,7 @@ struct SetupOverlay: View {
                 p.addLine(to: tip)
                 p.addLine(to: CGPoint(x: tip.x - flip * a * 0.85, y: tip.y + a * 1.05))
             }
-            .stroke(Theme.yellow,
+            .stroke(ink,
                     style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
             // Tucked under the arrowhead, a third of the way along rather than
             // halfway. Halfway and low put it inside the control column once
@@ -285,7 +354,8 @@ struct SetupOverlay: View {
             // the level bar; between the two is the one band that is clear in
             // every orientation and both panel states.
             guideLabel("BALL FLIES THIS WAY",
-                       at: pt(teeX + (flightEndX - teeX) * 0.35, arrowTopY + 0.06))
+                       at: pt(teeX + (flightEndX - teeX) * 0.35, arrowTopY + 0.06),
+                       ink: ink)
 
             // Two short lines rather than one long one. A single 30-character
             // caption centred on the batter — who stands near the edge, which
@@ -298,10 +368,50 @@ struct SetupOverlay: View {
                     .font(Theme.label(9)).tracking(1.2)
                     .opacity(0.8)
             }
-            .foregroundStyle(Theme.yellow)
+            .foregroundStyle(ink)
             .shadow(color: .black.opacity(0.9), radius: 3)
             .position(pt(centreX, min(0.95, footY + 0.045)))
+
+            // The one line that would have saved the first field trip. It sits
+            // ON the guide rather than in the advisory list, because the guide
+            // is what the user is looking at while they move the tripod.
+            if !valid {
+                Text(invalidGuideReason)
+                    .font(Theme.label(10)).tracking(1.1)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.white)
+                    // Width before padding, or the background sizes itself to
+                    // the unwrapped line and the text spills out of it.
+                    .frame(maxWidth: w * 0.66)
+                    .padding(.horizontal, 9).padding(.vertical, 5)
+                    .background(Theme.fail.opacity(0.9), in: RoundedRectangle(cornerRadius: 7))
+                    // Centred, not on the batter: mirroring the guide would
+                    // otherwise swing this off the side of the screen, and it
+                    // is a message about the whole shot rather than about the
+                    // figure it sits above.
+                    .position(x: w * 0.5,
+                              y: CGFloat(py(max(topInset + 0.07, headY - 0.06))))
+            }
         }
+    }
+
+    /// Why the outline is not a target right now, worst cause first.
+    ///
+    /// Tilt outranks height because it is both the more damaging fault and the
+    /// one people cause while trying to fix the other: a tripod that will not
+    /// reach belt height invites aiming the phone up, which trades a harmless
+    /// error for a real one.
+    private var invalidGuideReason: String {
+        let level = wizard.level
+        if level.hasReading, !level.isTiltOK {
+            return String(format: "AIM LEVEL FIRST — CAMERA IS %.0f° %@\nTHIS OUTLINE ASSUMES A LEVEL LENS",
+                          abs(level.tiltDeg), level.tiltDeg > 0 ? "DOWN" : "UP")
+        }
+        if let h = wizard.lensHeightEstimateM {
+            return String(format: "LENS IS %.1f M UP, OUTLINE IS DRAWN FOR 1.1 M\n%@ — BUT KEEP IT LEVEL",
+                          h, h < CameraPose.idealLensHeightM ? "RAISE THE TRIPOD" : "LOWER THE TRIPOD")
+        }
+        return "OUTLINE NOT VALID FOR THIS CAMERA POSITION"
     }
 
     /// How a 1.75 m hitter standing 5.25 m from a level, contact-height camera
@@ -342,11 +452,12 @@ struct SetupOverlay: View {
     }
 
     private func guideLabel(_ text: String, at point: CGPoint,
-                            small: Bool = false) -> some View {
+                            small: Bool = false,
+                            ink: Color = Theme.yellow) -> some View {
         Text(text)
             .font(Theme.label(small ? 9 : 11))
             .tracking(1.4)
-            .foregroundStyle(Theme.yellow.opacity(small ? 0.7 : 0.9))
+            .foregroundStyle(ink.opacity(small ? 0.7 : 0.9))
             .shadow(color: .black.opacity(0.9), radius: 3)
             .position(point)
     }
@@ -374,9 +485,27 @@ struct SetupOverlay: View {
             }
             .frame(maxWidth: 280)
 
-            StatChip(text: levelChip.text, color: levelChip.color)
+            HStack(spacing: 6) {
+                StatChip(text: levelChip.text, color: levelChip.color)
+                // Only once it is actually known. A permanent "height unknown"
+                // chip would be one more thing to learn to ignore, and the
+                // estimate needs a hitter stood in frame with the distance
+                // already measured — a state the user reaches on their own.
+                if let h = heightChip {
+                    StatChip(text: h.text, color: h.color)
+                }
+            }
         }
         .allowsHitTesting(false)
+    }
+
+    /// The measured lens height, once the pose, the distance and the tilt are
+    /// all in. This is the reading the batter outline could never give.
+    private var heightChip: (text: String, color: Color)? {
+        guard let h = wizard.lensHeightEstimateM else { return nil }
+        let ok = wizard.isLensHeightOK == true
+        return (String(format: "Lens %.1f m up%@", h, ok ? " ✓" : ""),
+                ok ? Theme.pass : Theme.warn)
     }
 
     /// Plain function, not a `@ViewBuilder`: the branching is about *words*,
@@ -698,8 +827,29 @@ struct PlacementTipsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    sectionLabel("From above — right", Theme.pass)
                     diagram
-                        .frame(height: 210)
+                        .frame(height: 200)
+                        .frame(maxWidth: .infinity)
+                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+
+                    // The failure this app was actually handed, drawn rather
+                    // than described. Every number comes from the ball's path
+                    // ACROSS the image, so a ball flying at the lens is
+                    // foreshortened: it reads slow, and no amount of detector
+                    // tuning recovers it. The right-hand picture is the only
+                    // one that says which arrangements are wrong, and it is
+                    // the one the framing outline can never draw, because the
+                    // outline only ever sees the shot from the camera.
+                    sectionLabel("From above — wrong", Theme.fail)
+                    wrongDiagram
+                        .frame(height: 200)
+                        .frame(maxWidth: .infinity)
+                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+
+                    sectionLabel("From the side", Theme.pass)
+                    sideDiagram
+                        .frame(height: 170)
                         .frame(maxWidth: .infinity)
                         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
 
@@ -707,9 +857,11 @@ struct PlacementTipsView: View {
                         "Square to the ball's flight, on the side the hitter FACES — first-base side for a right-hander, third-base side for a left-hander. Behind them their own body hides the bat at contact.")
                     tip("2", "Five to seven big steps",
                         "That's 4.5–6 m. Closer and the ball leaves the frame too fast; further and it gets too small to measure.")
-                    tip("3", "As high as the tripod goes — but keep it level",
-                        "Belt height (about 1.1 m, where bat meets ball) is ideal. A shorter tripod is fine: a level camera sitting low sees exactly the same geometry, just with the ball higher in the picture. What costs you accuracy is tilting the phone UP to point at contact height — so if it won't reach, leave it level and let the ball ride high in frame. The app measures any tilt and corrects for it, but correcting is not the same as not needing to.")
-                    tip("4", "Tap the ball on screen",
+                    tip("3", "Put the dashed line in the green band",
+                        "That line is the real horizon — where level falls in the picture. Aim the phone until it sits inside the band and the phone is level, whatever the ground under the tripod is doing. If the line is off the bottom of the screen you are aiming up; off the top, you are aiming down. This is the check the batter outline cannot do for you: the outline can be matched perfectly from a phone lying in the grass, because moving back and tilting up fits a person into it just as well as standing it at belt height does.")
+                    tip("4", "As high as the tripod goes — but keep it level",
+                        "Belt height (about 1.1 m, where bat meets ball) is ideal. Once a hitter is stood in frame and the ball has been tapped, the setup screen shows the height it has actually measured — the outline alone can never tell, which is why it used to look right from the ground. A shorter tripod is fine: a level camera sitting low sees exactly the same geometry, just with the ball higher in the picture. What costs you accuracy is tilting the phone UP to point at contact height — so if it won't reach, leave it level and let the ball ride high in frame.")
+                    tip("5", "Tap the ball on screen",
                         "Put a ball on the tee — where contact will actually happen — and touch it on the picture. That one tap gives both the scale and the distance. Measure it at the hitting spot: the scale is only right at that distance, so a ball held near the lens would set the wrong one.")
                 }
                 .padding()
@@ -762,6 +914,131 @@ struct PlacementTipsView: View {
                          at: CGPoint(x: phone.x + 52, y: phone.y))
             context.draw(Text("ABOUT 5 M").font(Theme.label(9)).foregroundStyle(.white.opacity(0.7)),
                          at: CGPoint(x: phone.x + 74, y: (phone.y + hitter.y) / 2))
+        }
+        .padding(10)
+    }
+
+    private func sectionLabel(_ text: String, _ colour: Color) -> some View {
+        Text(text)
+            .font(Theme.label(11)).tracking(1.3)
+            .foregroundStyle(colour)
+    }
+
+    /// The two ways people actually get this wrong, side by side.
+    ///
+    /// Both are drawn from above with the same hitter in the same place, so
+    /// the only thing that changes between this and the diagram above it is
+    /// where the phone sits — which is the entire lesson.
+    private var wrongDiagram: some View {
+        Canvas { context, size in
+            let w = size.width, h = size.height
+
+            func cross(at p: CGPoint) {
+                var x = Path()
+                let a: CGFloat = 9
+                x.move(to: CGPoint(x: p.x - a, y: p.y - a))
+                x.addLine(to: CGPoint(x: p.x + a, y: p.y + a))
+                x.move(to: CGPoint(x: p.x + a, y: p.y - a))
+                x.addLine(to: CGPoint(x: p.x - a, y: p.y + a))
+                context.stroke(x, with: .color(Theme.fail),
+                               style: StrokeStyle(lineWidth: 3, lineCap: .round))
+            }
+
+            // Left half: the phone downrange, ball flying into the lens.
+            let hitterA = CGPoint(x: w * 0.10, y: h * 0.62)
+            let phoneA = CGPoint(x: w * 0.40, y: h * 0.30)
+            var flightA = Path()
+            flightA.move(to: hitterA)
+            flightA.addLine(to: CGPoint(x: phoneA.x - 6, y: phoneA.y + 10))
+            context.stroke(flightA, with: .color(Theme.fail),
+                           style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
+            context.fill(Path(ellipseIn: CGRect(x: hitterA.x - 8, y: hitterA.y - 8, width: 16, height: 16)),
+                         with: .color(.white))
+            context.fill(Path(roundedRect: CGRect(x: phoneA.x - 6, y: phoneA.y - 11, width: 12, height: 22), cornerRadius: 3),
+                         with: .color(Theme.fail))
+            cross(at: CGPoint(x: w * 0.25, y: h * 0.44))
+            context.draw(Text("BALL FLIES AT THE LENS").font(Theme.label(9)).foregroundStyle(Theme.fail),
+                         at: CGPoint(x: w * 0.25, y: h * 0.80))
+            context.draw(Text("reads slow — flagged for depth")
+                            .font(Theme.label(8)).foregroundStyle(.white.opacity(0.65)),
+                         at: CGPoint(x: w * 0.25, y: h * 0.90))
+
+            // Right half: the phone behind the hitter.
+            let hitterB = CGPoint(x: w * 0.72, y: h * 0.50)
+            let phoneB = CGPoint(x: w * 0.60, y: h * 0.50)
+            var flightB = Path()
+            flightB.move(to: hitterB)
+            flightB.addLine(to: CGPoint(x: w * 0.97, y: h * 0.38))
+            context.stroke(flightB, with: .color(Theme.fail),
+                           style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
+            context.fill(Path(ellipseIn: CGRect(x: hitterB.x - 8, y: hitterB.y - 8, width: 16, height: 16)),
+                         with: .color(.white))
+            context.fill(Path(roundedRect: CGRect(x: phoneB.x - 6, y: phoneB.y - 11, width: 12, height: 22), cornerRadius: 3),
+                         with: .color(Theme.fail))
+            cross(at: CGPoint(x: w * 0.66, y: h * 0.30))
+            context.draw(Text("PHONE BEHIND THE HITTER").font(Theme.label(9)).foregroundStyle(Theme.fail),
+                         at: CGPoint(x: w * 0.74, y: h * 0.80))
+            context.draw(Text("their body hides the bat")
+                            .font(Theme.label(8)).foregroundStyle(.white.opacity(0.65)),
+                         at: CGPoint(x: w * 0.74, y: h * 0.90))
+        }
+        .padding(10)
+    }
+
+    /// Side elevation: the height question, which no overhead view can show
+    /// and which the framing outline silently assumes an answer to.
+    private var sideDiagram: some View {
+        Canvas { context, size in
+            let w = size.width, h = size.height
+            let ground = h * 0.80
+
+            var g = Path()
+            g.move(to: CGPoint(x: 0, y: ground))
+            g.addLine(to: CGPoint(x: w, y: ground))
+            context.stroke(g, with: .color(.white.opacity(0.3)), lineWidth: 1.5)
+
+            // Hitter and contact point.
+            let hx = w * 0.22
+            var body = Path()
+            body.move(to: CGPoint(x: hx, y: ground))
+            body.addLine(to: CGPoint(x: hx, y: ground - h * 0.44))
+            context.stroke(body, with: .color(.white), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+            context.fill(Path(ellipseIn: CGRect(x: hx - 6, y: ground - h * 0.54, width: 12, height: 12)),
+                         with: .color(.white))
+            let contactY = ground - h * 0.28
+            context.fill(Path(ellipseIn: CGRect(x: hx + 16, y: contactY - 5, width: 10, height: 10)),
+                         with: .color(Theme.yellow))
+
+            // The right camera: level, at contact height.
+            let cx = w * 0.74
+            var tripod = Path()
+            tripod.move(to: CGPoint(x: cx, y: contactY))
+            tripod.addLine(to: CGPoint(x: cx, y: ground))
+            context.stroke(tripod, with: .color(Theme.steel),
+                           style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
+            context.fill(Path(roundedRect: CGRect(x: cx - 9, y: contactY - 7, width: 18, height: 14), cornerRadius: 3),
+                         with: .color(Theme.pass))
+            var sight = Path()
+            sight.move(to: CGPoint(x: cx - 10, y: contactY))
+            sight.addLine(to: CGPoint(x: hx + 26, y: contactY))
+            context.stroke(sight, with: .color(Theme.pass.opacity(0.8)),
+                           style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+            context.draw(Text("LEVEL, 1.1 M").font(Theme.label(9)).foregroundStyle(Theme.pass),
+                         at: CGPoint(x: cx + 4, y: contactY - 20))
+
+            // The wrong one: on the ground, aimed up to compensate.
+            var badSight = Path()
+            badSight.move(to: CGPoint(x: w * 0.90, y: ground - 6))
+            badSight.addLine(to: CGPoint(x: hx + 30, y: contactY - h * 0.10))
+            context.stroke(badSight, with: .color(Theme.fail.opacity(0.85)),
+                           style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+            context.fill(Path(roundedRect: CGRect(x: w * 0.90 - 9, y: ground - 13, width: 18, height: 14), cornerRadius: 3),
+                         with: .color(Theme.fail))
+            context.draw(Text("ON THE GROUND, AIMED UP").font(Theme.label(9)).foregroundStyle(Theme.fail),
+                         at: CGPoint(x: w * 0.72, y: ground + 16))
+            context.draw(Text("the outline still matches — that is the trap")
+                            .font(Theme.label(8)).foregroundStyle(.white.opacity(0.65)),
+                         at: CGPoint(x: w * 0.5, y: ground + 30))
         }
         .padding(10)
     }
