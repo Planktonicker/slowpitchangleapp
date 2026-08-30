@@ -31,13 +31,21 @@ struct PixelImage {
     /// "did this pixel change", and any reasonable luma answers it.
     func lumaPlane() -> [UInt8] {
         var out = [UInt8](repeating: 0, count: width * height)
-        for y in 0..<height {
-            let row = base + y * bytesPerRow
-            let outRow = y * width
-            for x in 0..<width {
-                let p = row + x * 4
-                let v = 0.114 * Double(p[0]) + 0.587 * Double(p[1]) + 0.299 * Double(p[2])
-                out[outRow + x] = UInt8(min(255, max(0, v)))
+        // Integer fixed-point (29/150/77 out of 256 ≈ BT.601), no branches:
+        // this walks two million pixels a frame on the analysis hot path, and
+        // the scalar Double version was the most expensive loop after HSV.
+        // The only question ever asked of a luma here is "did this pixel
+        // change by more than the threshold", which ±1 count of rounding
+        // cannot flip in aggregate.
+        out.withUnsafeMutableBufferPointer { dst in
+            for y in 0..<height {
+                let row = base + y * bytesPerRow
+                let outRow = y * width
+                for x in 0..<width {
+                    let p = row + x * 4
+                    let v = 29 &* Int(p[0]) &+ 150 &* Int(p[1]) &+ 77 &* Int(p[2])
+                    dst[outRow + x] = UInt8(truncatingIfNeeded: (v &+ 128) >> 8)
+                }
             }
         }
         return out

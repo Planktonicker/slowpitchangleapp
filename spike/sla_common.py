@@ -164,9 +164,25 @@ def motion_mask(
     barely changes between frames. Growing the mask closes it back into one
     blob, so the colour stage sees a whole ball rather than two crescents that
     fail the roundness gate.
+
+    `dilate_px` must be odd. An even kernel has no centre pixel, so OpenCV
+    anchors it at ``(k//2, k//2)`` and grows the mask ONE-SIDEDLY — 2 gives a
+    3x3 block offset down and right of the moved pixel, not a centred one. The
+    Swift port (`MotionMask.mask`) dilates with a symmetric radius, which is
+    exact for odd kernels and wrong for even ones, and the difference is not
+    cosmetic: the gate decides which blobs survive, and a differently-cut blob
+    has a different minor axis, which is the ball diameter, which is the scale
+    behind every number the app reports. Refused rather than silently
+    diverging, because the only thing that would notice is a field trip.
     """
     if prev_gray is None:
         return None
+    if dilate_px > 0 and dilate_px % 2 == 0:
+        raise ValueError(
+            f"dilate_px must be odd (got {dilate_px}); "
+            "even kernels dilate one-sidedly in OpenCV and the Swift port "
+            "cannot reproduce that with a symmetric radius"
+        )
     diff = cv2.absdiff(gray, prev_gray)
     mask = (diff > threshold).astype(np.uint8) * 255
     if dilate_px > 0:
@@ -890,13 +906,35 @@ def _prune_to_ballistic(track: list[BallObservation], passes: int = 2) -> list[B
         rel = [t - t0 for t in ts]
         # x is linear in t, y is quadratic — the physical model, not a
         # y-versus-x curve, which is ill-conditioned for a steep flight.
+        #
+        # Every accumulation below is spelled out left-to-right rather than
+        # handed to sum(), for the reason `_segment_velocity` gives: CPython
+        # 3.12 gave sum() Neumaier compensated summation for floats and the
+        # Swift port (`TrackBuilder.pruneToBallistic`) uses a naive reduce.
+        # This function is where that matters MOST, not least: the seed_track
+        # fixtures pin discrete outputs — expected_len, expected_first_frame,
+        # expected_last_frame — so a last-ulp difference in a residual that
+        # happens to land on `limit` keeps an observation on one side and drops
+        # it on the other, and the parity failure is an integer mismatch with
+        # nothing anywhere naming the cause.
         n = len(out)
-        mean_t = sum(rel) / n
-        var_t = sum((t - mean_t) ** 2 for t in rel)
+        acc = 0.0
+        for t in rel:
+            acc += t
+        mean_t = acc / n
+        var_t = 0.0
+        for t in rel:
+            var_t += (t - mean_t) ** 2
         if var_t <= 1e-12:
             return out
-        vx = sum((rel[i] - mean_t) * out[i].x for i in range(n)) / var_t
-        x0 = sum(o.x for o in out) / n - vx * mean_t
+        num = 0.0
+        for i in range(n):
+            num += (rel[i] - mean_t) * out[i].x
+        vx = num / var_t
+        sum_x = 0.0
+        for o in out:
+            sum_x += o.x
+        x0 = sum_x / n - vx * mean_t
         coeffs, _rms = fit_quadratic(np.asarray(rel), np.asarray([o.y for o in out]))
         res = []
         for i, o in enumerate(out):

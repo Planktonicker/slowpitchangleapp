@@ -276,18 +276,28 @@ final class PlacementWizard: ObservableObject {
     }
 
     /// Severity of an advisory, so the UI can colour it.
-    enum AdviceLevel { case blocking, warning }
+    ///
+    /// There is no `.blocking` any more, and the removal is the point: nothing
+    /// blocks arming, so a severity meaning "this stops you" could only ever
+    /// be painted next to a button that was not in fact stopped. It survived
+    /// the gate it belonged to, and the two advisories still carrying it were
+    /// the ones about camera distance — drawn in warning red, at the top of
+    /// the list, above genuine warnings, under a fully enabled ARM.
+    ///
+    /// `.info` is for what was skipped rather than what is wrong. Sorting
+    /// warnings ahead of it is what makes `topAdvisory` — the single line the
+    /// primary button gets — the worst thing true rather than the first.
+    enum AdviceLevel { case warning, info }
 
     /// Everything worth telling the user about the current placement, worst
-    /// first. Replaces `blockingReason`: most of these no longer block.
+    /// first. Replaces `blockingReason`: none of these block any more.
     var advisories: [(level: AdviceLevel, text: String)] {
         var out: [(AdviceLevel, String)] = []
 
-        if scaleSource == .none {
-            out.append((.blocking, "Tap the ball in the picture to set the distance."))
-        }
+        // Absurd is a warning, not merely missing: the number is non-nil, so
+        // it is still handed to the sound-travel correction as if it were real.
         if isDistanceAbsurd, let m = derivedDistanceM {
-            out.append((.blocking, String(format: "Camera reads %.1f m away — that can't be right. Re-measure.", m)))
+            out.append((.warning, String(format: "Camera reads %.1f m away — that can't be right. Tap the ball again in Set up.", m)))
         }
 
         if !level.isAvailable || !level.hasReading {
@@ -313,6 +323,15 @@ final class PlacementWizard: ObservableObject {
         if scaleSource != .none, !isDistanceAbsurd, !isDistanceAcceptable,
            let m = derivedDistanceM {
             out.append((.warning, String(format: "Camera reads %.1f m away. 4.5–6 m is ideal.", m)))
+        }
+
+        // Said out loud, because arming no longer requires it and the app
+        // otherwise gives no sign anything was skipped. `.info` on purpose:
+        // the swing will still be measured — the scale comes from the ball's
+        // own diameter — and dressing a missing nicety as a warning is how
+        // people learn to skip past the warnings that matter.
+        if scaleSource == .none {
+            out.append((.info, "No camera distance yet — tap the ball in Set up. Not required: it buys a 3-frame contact correction and a lens-height check."))
         }
 
         // Height last, because it is the one the user can least often fix —
@@ -346,7 +365,17 @@ final class PlacementWizard: ObservableObject {
             }
             if !level.isRollOK { out.append(.notLevel) }
         }
-        if !isDistanceAcceptable { out.append(.distanceOutsideProtocol) }
+        // "Never measured" and "measured, and it was too far" are different
+        // facts, and only one of them is a claim about where the camera was.
+        // `isDistanceAcceptable` is false in both cases — it returns false for
+        // a nil distance — so stamping DISTANCE_OUTSIDE_PROTOCOL off it alone
+        // told every hitter who skipped the ball tap that their camera had been
+        // outside a window nobody ever put a tape measure to.
+        if derivedDistanceM == nil {
+            out.append(.distanceNotMeasured)
+        } else if !isDistanceAcceptable {
+            out.append(.distanceOutsideProtocol)
+        }
         if scaleSource == .manual { out.append(.scaleFromManualDistance) }
         if isLensHeightOK == false { out.append(.cameraHeightOffProtocol) }
         return out
@@ -373,7 +402,13 @@ final class PlacementWizard: ObservableObject {
 
     var placement: Placement {
         Placement(distanceM: derivedDistanceM,
-                  heightM: nil,
+                  // The lens height the ball tap, the IMU and the hitter's feet
+                  // between them close out. This was hardcoded nil, so the one
+                  // number the outline guide was replaced with reached no swing
+                  // record ever written — while the same wizard state was
+                  // simultaneously stamping CAMERA_HEIGHT_OFF_PROTOCOL computed
+                  // from the estimate the record refused to carry.
+                  heightM: lensHeightEstimateM,
                   // Both angles are handed to the analyzer to be corrected,
                   // not merely reported.
                   rollDeg: level.rollDeg,

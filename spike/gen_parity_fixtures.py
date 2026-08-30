@@ -668,10 +668,22 @@ def main():
     moved[3][3] = 200                      # one pixel jumps by 100
     faint = [row[:] for row in still]
     faint[3][3] = 110                      # ...and one by 10, under the threshold
+    # The two cases either side of the line. Everything above sits far from it
+    # — deltas of 100 and 10 against a threshold of 18 — so the fixtures pinned
+    # the dilation and the general idea of a threshold while leaving both the
+    # VALUE and the STRICTNESS free: change the port's `> threshold` to `>=`,
+    # or hardcode any threshold from 11 to 99, and every case still passed.
+    # The reference is strict, so 18 must not move and 19 must.
+    at_threshold = [row[:] for row in still]
+    at_threshold[3][3] = 100 + int(sla.MOTION_DIFF_THRESHOLD)
+    over_threshold = [row[:] for row in still]
+    over_threshold[3][3] = 100 + int(sla.MOTION_DIFF_THRESHOLD) + 1
     _mm("first_frame_has_no_previous", None, still)
     _mm("nothing_moved", still, still)
     _mm("one_pixel_moved", still, moved)
     _mm("change_below_threshold", still, faint)
+    _mm("change_exactly_at_threshold", still, at_threshold)
+    _mm("change_one_over_threshold", still, over_threshold)
 
     # Seeded tracking: the ball's flight followed out from a tap. Deterministic
     # layouts — a flight in ragged bursts among stationary clutter, plus the

@@ -806,7 +806,7 @@ struct SetupOverlay: View {
             if let advice = wizard.topAdvisory {
                 Text(advice.text)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(advice.level == .blocking ? Theme.warn : Theme.steel)
+                    .foregroundStyle(advice.level == .warning ? Theme.warn : Theme.steel)
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)

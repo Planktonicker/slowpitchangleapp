@@ -27,6 +27,14 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
     case notLevel = "NOT_LEVEL"
     case levelUnknown = "LEVEL_UNKNOWN"
     case distanceOutsideProtocol = "DISTANCE_OUTSIDE_PROTOCOL"
+    /// No camera distance was ever measured for this swing. Distinct from
+    /// `.distanceOutsideProtocol` on purpose: since arming stopped requiring a
+    /// distance, "never tapped the ball" became the common case, and stamping
+    /// it as *outside the window* asserted a measurement that was never made.
+    /// Nothing in the analysis depends on it — the scale comes from the ball's
+    /// own diameter — but the sound-travel contact correction and the lens
+    /// height estimate both do, and this says they were skipped.
+    case distanceNotMeasured = "DISTANCE_NOT_MEASURED"
     case scaleFromManualDistance = "SCALE_FROM_MANUAL_DISTANCE"
     case hitterGateDisabled = "HITTER_GATE_DISABLED"
     /// The lens was well above or below contact height. Costs no accuracy on
@@ -59,6 +67,8 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
             return "No motion-sensor reading was available, so the camera's angle is unknown rather than known-good."
         case .distanceOutsideProtocol:
             return "The camera was outside the 3.5–8.5 m window the capture protocol asks for. Readings are still computed, but the ball is smaller or larger in frame than the detector is tuned for."
+        case .distanceNotMeasured:
+            return "The camera distance was never measured for this swing — the ball was not tapped during setup. Launch angle and exit velocity do not need it: the scale comes from the ball's own size in the picture. What was skipped is the sound-travel correction on contact time, about three frames at 240fps, and the lens-height estimate."
         case .scaleFromManualDistance:
             return "Scale came from a typed distance rather than a measured object, so it inherits whatever error is in that number."
         case .hitterGateDisabled:
@@ -82,6 +92,7 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
         case .notLevel: return "off level"
         case .levelUnknown: return "level unknown"
         case .distanceOutsideProtocol: return "distance"
+        case .distanceNotMeasured: return "no distance"
         case .scaleFromManualDistance: return "typed distance"
         case .hitterGateDisabled: return "no hitter check"
         case .cameraHeightOffProtocol: return "camera height"

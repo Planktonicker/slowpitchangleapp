@@ -873,6 +873,12 @@ final class AppModel: ObservableObject {
         ClipStore.delete(trackNamed: swing.trackCSVFilename)
         ClipStore.delete(trackNamed: swing.poseFilename)
         ClipStore.delete(trackNamed: swing.traceFilename)
+        // The report too. Every one of the files above got a delete line when
+        // it was added and this one did not, so "Delete all swings" — which
+        // promises to remove the measurements and the footage behind them —
+        // left one .report.txt per swing behind forever, on a device the app
+        // itself warns fills quickly at 240fps.
+        ClipStore.delete(trackNamed: swing.diagnosticsFilename)
         try? store.delete(id: swing.id)
         reload()
     }
@@ -900,6 +906,12 @@ final class AppModel: ObservableObject {
         options.trackBody = settings.trackBody
         options.forceFallbackDetector = forceFallback
         analysisProgress = 0
+        // Re-analysis gets its own report, for the same reason the first pass
+        // does: the whole point of re-measuring is to find out whether a change
+        // helped, and the stage-by-stage account is the only thing that says
+        // where it helped. Without this the button that exists to produce
+        // evidence was deleting it.
+        let diagnostics = ClipDiagnostics()
 
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
@@ -918,11 +930,14 @@ final class AppModel: ObservableObject {
                     contactTime: !swing.captureFlags.contains(.importedClip)
                         && swing.contactTime > 0 ? swing.contactTime : nil,
                     options: options,
+                    diagnostics: diagnostics,
                     progress: { p in
                         Task { @MainActor [weak self] in self?.analysisProgress = p }
                     })
                 }
+                let report = diagnostics.report(detector: options.detector)
                 await MainActor.run {
+                    self.lastDiagnostics = report
                     var updated = SwingDTO(analysis: analysis,
                                            setting: swing.setting,
                                            clipFilename: clipName,
@@ -944,6 +959,13 @@ final class AppModel: ObservableObject {
                     updated.ballSeedX = swing.ballSeedX
                     updated.ballSeedY = swing.ballSeedY
                     updated.visionOrientationRaw = swing.visionOrientationRaw
+                    // The round the swing belongs to. Re-measuring a swing is
+                    // not moving it: without this line the rebuilt DTO started
+                    // with a nil session id, and "This round" filters on that,
+                    // so tapping re-measure made the swing vanish from the
+                    // round it was hit in, from that round's summary and from
+                    // the past-rounds list derived off the same field.
+                    updated.sessionID = swing.sessionID
                     // Recomputed, not carried: a re-analysis that finally
                     // found the ball must be able to CLEAR this, and one that
                     // still has not must not inherit a clean bill from before.
@@ -959,7 +981,8 @@ final class AppModel: ObservableObject {
                     // number beside it. Anyone checking whether a fix had
                     // worked was reading stale evidence.
                     self.writeTracks(for: analysis, clipName: clipName,
-                                     setting: swing.setting, into: &updated)
+                                     setting: swing.setting, into: &updated,
+                                     report: report)
                     self.analysisProgress = nil
                     self.update(updated)
                     self.banner = AppModel.Banner(kind: .info, text: "Re-analyzed.")

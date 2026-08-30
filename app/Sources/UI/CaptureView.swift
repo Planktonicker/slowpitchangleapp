@@ -728,7 +728,7 @@ struct StatusSheet: View {
                     ForEach(wizard.advisories.indices, id: \.self) { i in
                         Text(wizard.advisories[i].text)
                             .font(.caption)
-                            .foregroundStyle(wizard.advisories[i].level == .blocking
+                            .foregroundStyle(wizard.advisories[i].level == .warning
                                              ? Theme.warn : .secondary)
                     }
                 }

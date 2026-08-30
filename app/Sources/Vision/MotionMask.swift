@@ -53,15 +53,29 @@ enum MotionMask {
             moved[i] = (d < 0 ? -d : d) > threshold
         }
         guard dilatePx > 0 else { return moved }
-        // Two passes of a square structuring element, matching OpenCV's
-        // `dilate(..., iterations: 2)`. Separated into rows then columns:
-        // a square dilation is the composition of the two, and doing it that
-        // way is O(n·k) instead of O(n·k²).
-        let r = dilatePx / 2
-        for _ in 0..<2 {
-            moved = dilateRows(moved, w: w, h: h, radius: r)
-            moved = dilateCols(moved, w: w, h: h, radius: r)
-        }
+        // OpenCV's `dilate(3x3 ones, iterations: 2)` — a radius-1 square
+        // applied twice — is EXACTLY a radius-2 square applied once (dilation
+        // by a square is separable and composes by adding radii), so one
+        // rows pass and one cols pass at double radius produce the identical
+        // mask with half the passes and two fewer full-frame allocations.
+        // The parity fixtures pin the result: one moved pixel must light
+        // exactly a 5x5 block.
+        //
+        // Odd only, and this is a real constraint rather than a tidiness one.
+        // An even kernel has no centre pixel, so OpenCV anchors it at
+        // (k/2, k/2) and grows the mask one-sidedly: k=2 lights a 3x3 block
+        // offset down and right, where the symmetric radius below lights a
+        // centred 5x5. `motion_mask` raises on even for the same reason. The
+        // gate decides which blobs survive, a differently-cut blob has a
+        // different minor axis, and that minor axis is the ball diameter —
+        // the scale under every reported number. Both callers pass the
+        // default 3; a venue tuner reaching for 4 gets stopped, not silently
+        // given a different answer from the Mac reference.
+        precondition(dilatePx % 2 == 1,
+                     "motion dilation must be odd; even kernels dilate one-sidedly in the reference")
+        let r = (dilatePx / 2) * 2
+        moved = dilateRows(moved, w: w, h: h, radius: r)
+        moved = dilateCols(moved, w: w, h: h, radius: r)
         return moved
     }
 

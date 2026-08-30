@@ -152,8 +152,16 @@ struct ValidationScoreboard {
         }
 
         // G5 — how often the audio trigger fired on its own.
-        board.g5Total = swings.count
-        board.g5AutoTriggered = swings.filter(\.autoTriggered).count
+        //
+        // Over the app's OWN captures only. An imported clip is stamped
+        // `autoTriggered: false` because there was no microphone in the loop at
+        // all, so counting it here scored the venue's trigger down for swings
+        // it was never present at: import five clips for detector tuning after
+        // ten clean live swings and a 100% trigger rate reads as 67%, failing a
+        // gate about hardware that did nothing wrong.
+        let ownCaptures = swings.filter { !$0.captureFlags.contains(.importedClip) }
+        board.g5Total = ownCaptures.count
+        board.g5AutoTriggered = ownCaptures.filter(\.autoTriggered).count
 
         return board
     }

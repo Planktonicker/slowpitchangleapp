@@ -839,6 +839,16 @@ enum ClipAnalyzer {
                            irregularFraction: Double(irregular) / Double(usable.count))
     }
 
+    /// Every pass decodes to BGRA, including the two that only hand the buffer
+    /// to Vision and would be happy with the native YUV. That looks like waste
+    /// and it is, but the ways to avoid it are all worse: `outputSettings: nil`
+    /// vends the track's ORIGINAL format, i.e. still-compressed samples with no
+    /// image buffer at all; naming a specific bi-planar YUV forces a conversion
+    /// of its own whenever the file's range is the other one; and the two
+    /// remaining passes would then run against a different pixel layout from
+    /// the measurement pass, which is the one thing here that must not vary.
+    /// The conversion is VideoToolbox's and it is not what makes this slow —
+    /// the measurement pass walking two million pixels a frame is.
     private static func forEachSampleBuffer(asset: AVAsset,
                                             track: AVAssetTrack,
                                             _ body: (CMSampleBuffer, Int, Double) throws -> Void) throws {
