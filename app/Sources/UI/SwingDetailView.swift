@@ -63,6 +63,7 @@ struct SwingDetailView: View {
                 }
                 .tint(Theme.steel)
             }
+            if model.isInSession { Section("Round") { roundMembership } }
             Section { actions }
         }
         .navigationTitle(swing.clipFilename ?? "Swing")
@@ -491,6 +492,34 @@ struct SwingDetailView: View {
             detail("Lens height", swing.lensHeightM.map { Fmt.m($0, decimals: 2) } ?? "—")
             detail("Roll correction", swing.cameraRollDeg.map { String(format: "%+.2f°", $0) } ?? "—")
             detail("Diameter drift", String(format: "%+.1f%%", swing.diameterDrift * 100))
+        }
+    }
+
+    /// Whether this swing counts toward the round in progress.
+    ///
+    /// A round is a grouping the hitter makes, not a fact about the footage —
+    /// so it has to be editable. Without this the only way to fix a swing that
+    /// landed in the wrong round, or in none, was to delete it and re-import.
+    @ViewBuilder private var roundMembership: some View {
+        if swing.sessionID == model.session?.id {
+            HStack {
+                Label("In this round", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(Theme.pass)
+                Spacer()
+                Button("Remove") { model.removeFromSession(swing) }
+                    .foregroundStyle(Theme.steel)
+            }
+            .font(.callout)
+        } else {
+            Button {
+                model.addToCurrentSession(swing)
+            } label: {
+                Label("Add to this round", systemImage: "plus.circle")
+            }
+            Text(swing.sessionID == nil
+                 ? "This swing belongs to no round. Adding it counts it in the summary when the round ends."
+                 : "This swing belongs to an earlier round. Adding it moves it into this one.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 

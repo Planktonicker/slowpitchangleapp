@@ -169,6 +169,31 @@ final class AppModel: ObservableObject {
         finishedSession = SessionSummary.build(session: closed, swings: swings)
     }
 
+    /// Put an existing swing into the round in progress.
+    ///
+    /// For the clip filmed before anyone thought to start a session, and for
+    /// the swing that landed in the wrong round because it was imported after
+    /// one ended. A round is a grouping the hitter makes, not a fact about the
+    /// footage, so it has to be editable — otherwise the only way to fix a
+    /// mis-grouped swing is to delete it.
+    func addToCurrentSession(_ swing: SwingDTO) {
+        guard let id = session?.id, swing.sessionID != id else { return }
+        var updated = swing
+        updated.sessionID = id
+        update(updated)
+        sessionSwingCount = sessionSwings.count
+    }
+
+    /// Take it back out. Leaves the swing in the full history — this changes
+    /// which round it belongs to, it does not delete anything.
+    func removeFromSession(_ swing: SwingDTO) {
+        guard swing.sessionID != nil else { return }
+        var updated = swing
+        updated.sessionID = nil
+        update(updated)
+        sessionSwingCount = sessionSwings.count
+    }
+
     /// Discard a round that recorded nothing, without showing a summary of
     /// nothing. Called when the hitter backs out of setup.
     func abandonSession() {
@@ -538,6 +563,15 @@ final class AppModel: ObservableObject {
         var dto = SwingDTO(analysis: analysis, setting: setting,
                            clipFilename: name, autoTriggered: false)
         dto.captureFlags = [.importedClip]
+        // Imported INTO the round it was imported during. Without this a clip
+        // brought in mid-session vanished: "This round" filters on the session
+        // id, so the swing appeared nowhere on the screen that had just been
+        // used to import it, and the end-of-round summary never counted it.
+        //
+        // The round is where the swing was looked at, not where it was filmed,
+        // and that is the honest reading — the record still carries
+        // `.importedClip`, so nothing about its provenance is lost.
+        dto.sessionID = session?.id
         confirmBall(analysis, into: &dto)
         // Carried on the record so re-analysis uses the same lens the first
         // pass assumed, and so the horizon tool has a focal length to work

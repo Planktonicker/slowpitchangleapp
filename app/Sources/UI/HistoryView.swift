@@ -8,6 +8,10 @@ import UniformTypeIdentifiers
 struct HistoryView: View {
     @EnvironmentObject private var model: AppModel
     @State private var filter: SwingSetting?
+    /// Break out of the round's scope, so an older swing can be found and
+    /// added to it. Without this "This round" was a dead end: the swing you
+    /// wanted to add was, by definition, not in the round yet.
+    @State private var showEverything = false
     @State private var shareURLs: [URL] = []
     @State private var showShare = false
     @State private var showImporter = false
@@ -21,7 +25,7 @@ struct HistoryView: View {
     /// is labelled "This round", so showing anything else would be a lie in the
     /// most literal sense. Outside a round it is the full history, filterable.
     private var sessionScoped: [SwingDTO] {
-        guard let id = model.session?.id else { return model.swings }
+        guard let id = model.session?.id, !showEverything else { return model.swings }
         return model.swings.filter { $0.sessionID == id }
     }
 
@@ -38,8 +42,8 @@ struct HistoryView: View {
                         Label(model.isInSession ? "No swings yet this round" : "No swings yet",
                               systemImage: "figure.baseball")
                     } description: {
-                        Text(model.isInSession
-                             ? "Arm the camera on the Capture tab and hit. Every clip is kept — including the ones that measure nothing, because those are the ones worth looking at."
+                        Text(model.isInSession && !showEverything
+                             ? "Arm the camera on the Capture tab and hit. Every clip is kept — including the ones that measure nothing, because those are the ones worth looking at. Older swings can be pulled into this round: switch to Every swing in the filter, open one, and add it."
                              : "Start a session, set the camera up, arm it, and hit. Clips are kept so anything that looks wrong can be re-run later.")
                     } actions: {
                         Button("Import from Photos") { showPhotoPicker = true }
@@ -49,7 +53,7 @@ struct HistoryView: View {
                     list
                 }
             }
-            .navigationTitle(model.isInSession ? "This round" : "Swings")
+            .navigationTitle(model.isInSession && !showEverything ? "This round" : "Swings")
             .scrollContentBackground(.hidden)
             .background(Theme.black)
             .toolbar {
@@ -149,6 +153,13 @@ struct HistoryView: View {
 
     private var filterMenu: some View {
         Menu {
+            if model.isInSession {
+                Picker("Show", selection: $showEverything) {
+                    Text("This round").tag(false)
+                    Text("Every swing").tag(true)
+                }
+                Divider()
+            }
             Button("All settings") { filter = nil }
             Divider()
             ForEach(SwingSetting.allCases) { setting in
@@ -157,7 +168,9 @@ struct HistoryView: View {
                     .disabled(count == 0)
             }
         } label: {
-            Label(filter?.displayName ?? "All", systemImage: "line.3.horizontal.decrease.circle")
+            Label(filter?.displayName
+                  ?? (model.isInSession && showEverything ? "Every swing" : "All"),
+                  systemImage: "line.3.horizontal.decrease.circle")
         }
     }
 
