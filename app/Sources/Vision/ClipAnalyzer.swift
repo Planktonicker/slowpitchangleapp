@@ -502,19 +502,30 @@ enum ClipAnalyzer {
         let speedA = (va.vx * va.vx + va.vy * va.vy).squareRoot()
         let speedB = (vb.vx * vb.vx + vb.vy * vb.vy).squareRoot()
         guard speedA > 1e-9, speedB > 1e-9 else { return "an endpoint has no measurable velocity" }
-        let ratio = speedB / speedA
-        if ratio < 1.0 / SLA.stitchSpeedRatioMax || ratio > SLA.stitchSpeedRatioMax {
-            return String(format: "speed ratio %.2f (limit %.1fx either way)",
-                          ratio, SLA.stitchSpeedRatioMax)
+        let diameters = (a.map(\.diameterPx) + b.map(\.diameterPx)).sorted()
+        let medianD = diameters[diameters.count / 2]
+        guard medianD > 1e-9 else { return "no measurable ball size" }
+        let gPx = SLA.g * medianD / SLA.ballDiameterM
+
+        let jx = vb.vx - va.vx, jy = vb.vy - va.vy
+        let jump = (jx * jx + jy * jy).squareRoot()
+        let jumpLimit = SLA.stitchAccelK * gPx * gap + SLA.stitchVelocityNoisePxS
+        if jump > jumpLimit {
+            return String(format: "velocity jumps %.0f px/s — gravity allows %.0f",
+                          jump, jumpLimit)
         }
-        let cosang = (va.vx * vb.vx + va.vy * vb.vy) / (speedA * speedB)
-        let angle = acos(max(-1, min(1, cosang))) * 180 / .pi
-        if angle > SLA.stitchMaxAngleDeg {
-            return String(format: "direction differs %.0f° (limit %.0f°)",
-                          angle, SLA.stitchMaxAngleDeg)
+        let hopX = bFirst.x - aLast.x, hopY = bFirst.y - aLast.y
+        let hop = (hopX * hopX + hopY * hopY).squareRoot()
+        if hop > 4.0 {
+            let coshop = (va.vx * hopX + va.vy * hopY) / (speedA * hop)
+            let hopAngle = acos(max(-1, min(1, coshop))) * 180 / .pi
+            if hopAngle > SLA.stitchMaxAngleDeg {
+                return String(format: "the two sit %.0f° apart, not along the flight",
+                              hopAngle)
+            }
         }
         let predX = aLast.x + va.vx * gap
-        let predY = aLast.y + va.vy * gap
+        let predY = aLast.y + va.vy * gap + 0.5 * gPx * gap * gap
         let tol = SLA.stitchBaseTolPx + SLA.stitchTolPxPerS * speedA * gap
         let dx = bFirst.x - predX, dy = bFirst.y - predY
         let err = (dx * dx + dy * dy).squareRoot()

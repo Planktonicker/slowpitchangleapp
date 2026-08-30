@@ -88,8 +88,14 @@ enum SLA {
     static let stitchMaxGapS = 0.10
     static let stitchBaseTolPx = 30.0
     static let stitchTolPxPerS = 0.35
-    static let stitchSpeedRatioMax = 2.0
     static let stitchMaxAngleDeg = 40.0
+    /// Velocity agreement bounded by physics rather than taste: over the gap,
+    /// gravity can change a real flight's velocity by g·gap and no more. The
+    /// old 2x-and-40-degree pair was ~two orders of magnitude looser and
+    /// admitted a passing bird, a shallow bounce, and an eight-burst
+    /// 160-degree arc. See `_stitch_error` in `spike/sla_common.py`.
+    static let stitchAccelK = 3.0
+    static let stitchVelocityNoisePxS = 400.0
     /// Points in the least-squares endpoint-velocity window. Enough to average
     /// detection noise down; few enough to stay local on a curving track.
     static let stitchVelocityWindow = 6

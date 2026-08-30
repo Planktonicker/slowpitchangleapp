@@ -355,8 +355,10 @@ final class ParityTests: XCTestCase {
                        Self.fixtures.constants["STITCH_BASE_TOL_PX"]!, accuracy: 1e-12)
         XCTAssertEqual(SLA.stitchTolPxPerS,
                        Self.fixtures.constants["STITCH_TOL_PX_PER_S"]!, accuracy: 1e-12)
-        XCTAssertEqual(SLA.stitchSpeedRatioMax,
-                       Self.fixtures.constants["STITCH_SPEED_RATIO_MAX"]!, accuracy: 1e-12)
+        XCTAssertEqual(SLA.stitchAccelK,
+                       Self.fixtures.constants["STITCH_ACCEL_K"]!, accuracy: 1e-12)
+        XCTAssertEqual(SLA.stitchVelocityNoisePxS,
+                       Self.fixtures.constants["STITCH_VELOCITY_NOISE_PX_S"]!, accuracy: 1e-12)
         XCTAssertEqual(SLA.stitchMaxAngleDeg,
                        Self.fixtures.constants["STITCH_MAX_ANGLE_DEG"]!, accuracy: 1e-12)
         XCTAssertEqual(Double(SLA.stitchVelocityWindow),

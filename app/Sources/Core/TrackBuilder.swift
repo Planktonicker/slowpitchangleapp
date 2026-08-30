@@ -116,12 +116,22 @@ enum TrackBuilder {
     private static func segmentVelocity(_ seg: [BallObservation]) -> (vx: Double, vy: Double) {
         let n = seg.count
         guard n >= 2 else { return (0, 0) }
-        let meanT = seg.reduce(0.0) { $0 + $1.t } / Double(n)
-        let varT = seg.reduce(0.0) { $0 + ($1.t - meanT) * ($1.t - meanT) }
+        // Explicit left-to-right accumulation on both sides — see the note in
+        // `_segment_velocity`: a newer CPython's compensated `sum()` would
+        // otherwise drift from this naive reduce with nothing to catch it.
+        var acc = 0.0
+        for o in seg { acc += o.t }
+        let meanT = acc / Double(n)
+        acc = 0
+        for o in seg { acc += (o.t - meanT) * (o.t - meanT) }
+        let varT = acc
         guard varT > 1e-12 else { return (0, 0) }
-        let vx = seg.reduce(0.0) { $0 + ($1.t - meanT) * $1.x } / varT
-        let vy = seg.reduce(0.0) { $0 + ($1.t - meanT) * $1.y } / varT
-        return (vx, vy)
+        var ax = 0.0, ay = 0.0
+        for o in seg {
+            ax += (o.t - meanT) * o.x
+            ay += (o.t - meanT) * o.y
+        }
+        return (ax / varT, ay / varT)
     }
 
     static func endVelocity(_ tr: [BallObservation]) -> (vx: Double, vy: Double) {
@@ -155,12 +165,30 @@ enum TrackBuilder {
         let speedA = (va.vx * va.vx + va.vy * va.vy).squareRoot()
         let speedB = (vb.vx * vb.vx + vb.vy * vb.vy).squareRoot()
         guard speedA > 1e-9, speedB > 1e-9 else { return nil }
-        let ratio = speedB / speedA
-        guard ratio >= 1.0 / SLA.stitchSpeedRatioMax, ratio <= SLA.stitchSpeedRatioMax else { return nil }
-        let cosang = (va.vx * vb.vx + va.vy * vb.vy) / (speedA * speedB)
-        guard cosang >= cos(SLA.stitchMaxAngleDeg * .pi / 180) else { return nil }
+        // Gravity, in pixels, from the ball's own apparent size.
+        let diameters = (a.map(\.diameterPx) + b.map(\.diameterPx)).sorted()
+        let medianD = diameters[diameters.count / 2]
+        guard medianD > 1e-9 else { return nil }
+        let gPx = SLA.g * medianD / SLA.ballDiameterM
+
+        // Velocity agreement, bounded by what gravity can do in `gap`.
+        let jx = vb.vx - va.vx, jy = vb.vy - va.vy
+        let jump = (jx * jx + jy * jy).squareRoot()
+        guard jump <= SLA.stitchAccelK * gPx * gap + SLA.stitchVelocityNoisePxS else { return nil }
+
+        // The hop must go the way the ball was going — without this the
+        // position tolerance is direction-blind and a run of clutter bursts
+        // manufactures a net velocity that never existed.
+        let hopX = bFirst.x - aLast.x, hopY = bFirst.y - aLast.y
+        let hop = (hopX * hopX + hopY * hopY).squareRoot()
+        if hop > 4.0 {
+            let coshop = (va.vx * hopX + va.vy * hopY) / (speedA * hop)
+            guard coshop >= cos(SLA.stitchMaxAngleDeg * .pi / 180) else { return nil }
+        }
+
+        // Predict WITH gravity.
         let predX = aLast.x + va.vx * gap
-        let predY = aLast.y + va.vy * gap
+        let predY = aLast.y + va.vy * gap + 0.5 * gPx * gap * gap
         let tol = SLA.stitchBaseTolPx + SLA.stitchTolPxPerS * speedA * gap
         let dx = bFirst.x - predX, dy = bFirst.y - predY
         let err = (dx * dx + dy * dy).squareRoot()
@@ -201,14 +229,28 @@ enum TrackBuilder {
             var bestI = -1
             var bestJ = -1
             for i in chains.indices {
+                // Each chain bids for its EARLIEST-STARTING stitchable
+                // successor only. Without this the globally smallest error can
+                // pick a skip-join over the adjacent one when a couple of
+                // pixels of jitter make it marginally tighter, stranding the
+                // middle fragment inside the merged span where it can never
+                // join anything — measured at 6.9% of trials.
+                var candJ = -1
+                var candT = Double.infinity
+                var candErr = Double.infinity
                 for j in chains.indices where i != j {
-                    guard let err = stitchError(chains[i], chains[j]) else { continue }
-                    if err < bestErr
-                        || (err == bestErr && (i < bestI || (i == bestI && j < bestJ))) {
-                        bestErr = err
-                        bestI = i
-                        bestJ = j
+                    guard let err = stitchError(chains[i], chains[j]),
+                          let bt = chains[j].first?.t else { continue }
+                    if bt < candT || (bt == candT && err < candErr) {
+                        candT = bt; candErr = err; candJ = j
                     }
+                }
+                guard candJ >= 0 else { continue }
+                if candErr < bestErr
+                    || (candErr == bestErr && (i < bestI || (i == bestI && candJ < bestJ))) {
+                    bestErr = candErr
+                    bestI = i
+                    bestJ = candJ
                 }
             }
             if bestI < 0 { return chains }

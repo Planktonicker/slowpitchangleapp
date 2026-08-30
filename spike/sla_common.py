@@ -383,15 +383,39 @@ def build_tracks(
 #   - extrapolating the earlier fragment's velocity across the gap must land
 #     near where the later one starts (constant velocity is accurate here —
 #     gravity bends the path by ~1 px over the gaps involved);
-#   - the two velocities must agree in direction and magnitude. This is what
-#     keeps the WRONG joins out: pitch-into-hit reverses direction at contact,
-#     and flight-into-bounce reverses vertically at the ground, so both fail
-#     the angle test and the flight correctly ENDS at the landing.
+#   - the two velocities must agree to within what gravity could have changed
+#     them by over the gap. A pitch-into-hit reverses direction at contact and
+#     fails outright. A bounce is NOT as safe as this comment once claimed: a
+#     shallow 10-degree descent rebounding 7 degrees up is only a 17-degree
+#     turn, which the old 40-degree gate waved through — the physics bound is
+#     what actually refuses it, because bouncing changes velocity by far more
+#     than gravity can in 0.1 s.
 STITCH_MAX_GAP_S = 0.10          # longest detection dropout worth bridging
 STITCH_BASE_TOL_PX = 30.0        # position slack at zero gap
 STITCH_TOL_PX_PER_S = 0.35       # extra slack per px/s of speed, times gap
-STITCH_SPEED_RATIO_MAX = 2.0     # |vB|/|vA| must sit in [1/max, max]
-STITCH_MAX_ANGLE_DEG = 40.0      # direction change across the join
+STITCH_MAX_ANGLE_DEG = 40.0      # cone the hop between fragments must lie in
+
+# Velocity agreement, bounded by PHYSICS rather than by taste.
+#
+# Adversarial testing found the old ratio-and-angle pair (2x, 40 deg) to be
+# about two orders of magnitude looser than the thing it claimed to model. Over
+# a 0.10 s gap gravity can change a real flight's velocity by g*gap and no
+# more — a percent or two in speed, a couple of degrees in direction — so a
+# gate admitting a doubling and a 40-degree turn admits almost anything moving.
+# What it actually admitted, with runnable repros: an ordinary pigeon crossing
+# 35 ms after the ball (blended track, launch angle 39 deg against a truth of
+# 28, and no flag raised because the fit residual stayed under threshold); a
+# shallow landing bounce, falsifying this file's own claim that the flight
+# "correctly ENDS at the landing"; and eight bursts strung along a 160-degree
+# arc, because a 40-degree limit per join composes without limit over a chain.
+#
+# The bound is |v_b - v_a| <= K * g_px * gap + noise floor, with g in pixels
+# recovered from the ball's own measured diameter — the same trick the scale
+# estimate uses. K carries drag and the noise floor carries the residual
+# velocity error of a short fragment, which is the honest reason a real join
+# is never exactly zero.
+STITCH_ACCEL_K = 3.0
+STITCH_VELOCITY_NOISE_PX_S = 400.0
 
 
 def _segment_velocity(seg: list[BallObservation]) -> tuple[float, float]:
@@ -408,13 +432,28 @@ def _segment_velocity(seg: list[BallObservation]) -> tuple[float, float]:
     n = len(seg)
     if n < 2:
         return (0.0, 0.0)
-    mean_t = sum(o.t for o in seg) / n
-    var_t = sum((o.t - mean_t) ** 2 for o in seg)
+    # Explicit left-to-right accumulation, NOT sum(). CPython 3.12 gave sum()
+    # Neumaier compensated summation for floats; the Swift port uses a naive
+    # reduce. They agree today only because the fixtures were generated on
+    # 3.11 — regenerating them on a newer interpreter would silently introduce
+    # a parity drift that no test names. Spelling the loop out costs nothing
+    # and makes the two bit-identical by construction.
+    acc = 0.0
+    for o in seg:
+        acc += o.t
+    mean_t = acc / n
+    acc = 0.0
+    for o in seg:
+        acc += (o.t - mean_t) ** 2
+    var_t = acc
     if var_t <= 1e-12:
         return (0.0, 0.0)
-    vx = sum((o.t - mean_t) * o.x for o in seg) / var_t
-    vy = sum((o.t - mean_t) * o.y for o in seg) / var_t
-    return (vx, vy)
+    ax = 0.0
+    ay = 0.0
+    for o in seg:
+        ax += (o.t - mean_t) * o.x
+        ay += (o.t - mean_t) * o.y
+    return (ax / var_t, ay / var_t)
 
 
 # Endpoint window: enough points to average the noise down, few enough to stay
@@ -454,14 +493,35 @@ def _stitch_error(a: list[BallObservation], b: list[BallObservation]) -> float |
     speed_b = math.hypot(vbx, vby)
     if speed_a <= 1e-9 or speed_b <= 1e-9:
         return None
-    ratio = speed_b / speed_a
-    if not (1.0 / STITCH_SPEED_RATIO_MAX <= ratio <= STITCH_SPEED_RATIO_MAX):
+    # Gravity, in pixels, from the ball's own apparent size.
+    diameters = sorted([o.diameter_px for o in a] + [o.diameter_px for o in b])
+    median_d = diameters[len(diameters) // 2]
+    if median_d <= 1e-9:
         return None
-    cosang = (vax * vbx + vay * vby) / (speed_a * speed_b)
-    if cosang < math.cos(math.radians(STITCH_MAX_ANGLE_DEG)):
+    g_px = G * median_d / BALL_DIAMETER_M
+
+    # Velocity agreement, bounded by what gravity can actually do in `gap`.
+    jump = math.hypot(vbx - vax, vby - vay)
+    if jump > STITCH_ACCEL_K * g_px * gap + STITCH_VELOCITY_NOISE_PX_S:
         return None
+
+    # The hop itself must go the way the ball was going. Without this the
+    # position tolerance is direction-blind, and a run of clutter bursts each
+    # sitting 29 px "ahead" of a leftward prediction stitches into a chain with
+    # a manufactured rightward net velocity — one that then wins selection as
+    # the hit, on a clip where the pre-stitch answer was correctly nothing.
+    hop_x = b[0].x - a[-1].x
+    hop_y = b[0].y - a[-1].y
+    hop = math.hypot(hop_x, hop_y)
+    if hop > 4.0:
+        coshop = (vax * hop_x + vay * hop_y) / (speed_a * hop)
+        if coshop < math.cos(math.radians(STITCH_MAX_ANGLE_DEG)):
+            return None
+
+    # Predict WITH gravity: over 0.1 s at these scales it is a real number of
+    # pixels, and leaving it out biases every join in the same direction.
     pred_x = a[-1].x + vax * gap
-    pred_y = a[-1].y + vay * gap
+    pred_y = a[-1].y + vay * gap + 0.5 * g_px * gap * gap
     tol = STITCH_BASE_TOL_PX + STITCH_TOL_PX_PER_S * speed_a * gap
     err = math.hypot(b[0].x - pred_x, b[0].y - pred_y)
     return err if err <= tol else None
@@ -491,15 +551,30 @@ def stitch_tracks(tracks: list[list[BallObservation]]) -> list[list[BallObservat
         best_i = -1
         best_j = -1
         for i, a in enumerate(chains):
+            # Each chain bids for its EARLIEST-STARTING stitchable successor
+            # only. Without this the globally smallest error could pick the
+            # skip-join A->C over the adjacent A->B when a couple of pixels of
+            # jitter made it marginally tighter — after which B lies inside the
+            # merged chain's span, can never join anything, and its
+            # observations are silently lost. Measured at 6.9% of trials on
+            # this file's own fixture layout.
+            cand_j = -1
+            cand_key = None
             for j, b in enumerate(chains):
                 if i == j:
                     continue
                 err = _stitch_error(a, b)
                 if err is None:
                     continue
-                if err < best_err or (err == best_err and (i, j) < (best_i, best_j)):
-                    best_err = err
-                    best_i, best_j = i, j
+                key = (b[0].t, err, j)
+                if cand_key is None or key < cand_key:
+                    cand_key, cand_j = key, j
+            if cand_j < 0:
+                continue
+            err = cand_key[1]
+            if err < best_err or (err == best_err and (i, cand_j) < (best_i, best_j)):
+                best_err = err
+                best_i, best_j = i, cand_j
         if best_i < 0:
             return chains
         chains[best_i] = chains[best_i] + chains[best_j]
