@@ -593,6 +593,11 @@ final class AppModel: ObservableObject {
         options.tiltDeg = swing.cameraTiltDeg ?? 0
         options.fieldOfViewDeg = swing.cameraFovDeg ?? 0
         options.visionOrientation = swing.visionOrientation
+        // A hand-picked ball survives re-analysis — otherwise correcting the
+        // tilt would silently throw the user's disambiguation away.
+        if let t = swing.ballSeedT, let x = swing.ballSeedX, let y = swing.ballSeedY {
+            options.ballSeed = (t: t, x: x, y: y)
+        }
         options.trackBody = settings.trackBody
         options.forceFallbackDetector = forceFallback
         analysisProgress = 0
@@ -625,6 +630,9 @@ final class AppModel: ObservableObject {
                     updated.cameraFovDeg = swing.cameraFovDeg
                     updated.poseFilename = swing.poseFilename
                     updated.traceFilename = swing.traceFilename
+                    updated.ballSeedT = swing.ballSeedT
+                    updated.ballSeedX = swing.ballSeedX
+                    updated.ballSeedY = swing.ballSeedY
                     updated.visionOrientationRaw = swing.visionOrientationRaw
                     updated.captureFlags = swing.captureFlags
                     updated.notes = swing.notes

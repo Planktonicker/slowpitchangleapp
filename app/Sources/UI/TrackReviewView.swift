@@ -47,6 +47,7 @@ struct TrackReviewView: View {
     /// picture. `nil` until the tool is opened.
     @State private var horizonFraction: Double?
     @State private var showHorizonTool = false
+    @State private var pickingBall = false
 
     var body: some View {
         NavigationStack {
@@ -84,6 +85,9 @@ struct TrackReviewView: View {
                             .allowsHitTesting(false)
                         if showHorizonTool {
                             horizonTool(in: geo.size)
+                        }
+                        if pickingBall {
+                            ballPicker(in: geo.size)
                         }
                     }
                 }
@@ -235,6 +239,48 @@ struct TrackReviewView: View {
             }
         }
         .shadow(color: .black.opacity(0.7), radius: 2)
+    }
+
+    // MARK: - Picking the ball
+
+    /// A full-picture tap target for pointing at the ball.
+    ///
+    /// This is the escape hatch that makes a cluttered clip measurable at all.
+    /// Deciding which of six hundred tracks is the ball is a heuristic on
+    /// footage like a phone lying in grass — every rule tried has picked the
+    /// pitch, the landing, or a patch of turf. A tap is not a heuristic. It
+    /// settles the one question the pipeline genuinely cannot answer, and the
+    /// track is then followed outward from that point by physics alone.
+    private func ballPicker(in size: CGSize) -> some View {
+        Rectangle()
+            .fill(.clear)
+            .contentShape(Rectangle())
+            .onTapGesture { location in
+                guard let buffer = VideoOverlayGeometry.bufferPoint(
+                    viewPoint: location, natural: naturalSize,
+                    transform: transform, in: size) else { return }
+                applyBallSeed(t: currentTime, x: Double(buffer.x), y: Double(buffer.y))
+            }
+            .overlay(alignment: .top) {
+                Text("TAP THE BALL")
+                    .font(Theme.label(11)).tracking(1.3)
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Theme.pass, in: Capsule())
+                    .padding(.top, 10)
+            }
+    }
+
+    /// Stamp the tap onto the swing and measure again from it.
+    private func applyBallSeed(t: Double, x: Double, y: Double) {
+        var updated = swing
+        updated.ballSeedT = t
+        updated.ballSeedX = x
+        updated.ballSeedY = y
+        model.update(updated)
+        model.reanalyze(updated)
+        pickingBall = false
+        dismiss()
     }
 
     // MARK: - Horizon
@@ -405,7 +451,31 @@ struct TrackReviewView: View {
                 otherTracksList
             }
 
-            if !showHorizonTool {
+            if !pickingBall, !showHorizonTool {
+                Button {
+                    pickingBall = true
+                    player?.pause()
+                } label: {
+                    Label(swing.ballSeedT == nil
+                          ? "Wrong thing tracked? Point at the ball"
+                          : "Ball picked by hand — point again",
+                          systemImage: "hand.tap")
+                        .font(.callout)
+                }
+                .foregroundStyle(Theme.pass)
+            }
+
+            if pickingBall {
+                VStack(spacing: 6) {
+                    Text("Scrub to a frame where you can see the ball, then tap it. The flight is followed out from there — no guessing which track is which.")
+                        .font(.caption).foregroundStyle(Theme.steel)
+                        .multilineTextAlignment(.center)
+                    Button("Cancel") { pickingBall = false }
+                        .buttonStyle(OutlineButtonStyle())
+                }
+            }
+
+            if !showHorizonTool, !pickingBall {
                 Button {
                     showHorizonTool = true
                     // Seeded from whatever tilt the swing already carries, so

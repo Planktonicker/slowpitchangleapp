@@ -208,6 +208,32 @@ plays full screen with everything the app measured drawn on it:
   never examined at all, so a ball out there is not a detection failure,
   it is a search that never went near it.
 
+### When it tracks the wrong thing: point at the ball
+
+Some clips are genuinely ambiguous to a computer. A phone low in the grass can
+give seventy ball-coloured blobs per frame, and the app then has to guess which
+of several hundred candidate tracks is the hit. Every automatic rule has a
+failure case: the longest track is the pitch hanging in frame, the fastest
+short one is noise, the roundest blob is a leaf.
+
+You can settle it in one tap.
+
+**Play with tracking overlaid → "Wrong thing tracked? Point at the ball"**.
+Scrub to any frame where you can see the ball clearly, tap it, and the app
+follows the flight outward from that point — forwards and backwards — using
+physics rather than guesswork. It then re-measures.
+
+The tap is remembered, so re-analysing (after setting the horizon, say) keeps
+following the ball you pointed at.
+
+Two honest outcomes worth knowing:
+
+- **"nothing was detected there"** means the ball was not *found* in that
+  frame, which is a different problem from the wrong track being chosen — fix
+  the colour window or the framing, not the selection.
+- If you tap something that isn't the ball, it will faithfully track that. It
+  does what you point at.
+
 ### The camera wasn't level — fixing it after the fact
 
 A clip **this app filmed** records its own tilt from the phone's motion sensor

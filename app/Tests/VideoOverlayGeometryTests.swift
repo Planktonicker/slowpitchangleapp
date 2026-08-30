@@ -109,6 +109,39 @@ final class VideoOverlayGeometryTests: XCTestCase {
         XCTAssertEqual(p.y, 480, accuracy: 1e-6)
     }
 
+    // MARK: - Tap, inverted
+
+    /// The tap that seeds a track has to land on the pixel the user saw. Any
+    /// error here points the ball-picker at the wrong object, which is worse
+    /// than not having it.
+    func testTapRoundTripsThroughTheTransform() {
+        let view = CGSize(width: 540, height: 960)
+        for transform in [CGAffineTransform.identity, quarterTurn] {
+            for buffer in [CGPoint(x: 100, y: 80), CGPoint(x: 1500, y: 900),
+                           CGPoint(x: 960, y: 540)] {
+                let onScreen = VideoOverlayGeometry.viewPoint(
+                    bufferPoint: buffer, natural: landscape,
+                    transform: transform, in: view)
+                guard let back = VideoOverlayGeometry.bufferPoint(
+                    viewPoint: onScreen, natural: landscape,
+                    transform: transform, in: view) else {
+                    XCTFail("round trip lost the point")
+                    continue
+                }
+                XCTAssertEqual(back.x, buffer.x, accuracy: 1e-6)
+                XCTAssertEqual(back.y, buffer.y, accuracy: 1e-6)
+            }
+        }
+    }
+
+    /// A tap in the letterbox bar is not a point in the picture.
+    func testTapOutsideThePictureIsRejected() {
+        let view = CGSize(width: 400, height: 400)   // 16:9 video, bars top and bottom
+        XCTAssertNil(VideoOverlayGeometry.bufferPoint(
+            viewPoint: CGPoint(x: 200, y: 10), natural: landscape,
+            transform: .identity, in: view))
+    }
+
     // MARK: - Lengths
 
     /// A ball diameter is a length in encoded pixels and has to shrink with the

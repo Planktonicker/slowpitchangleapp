@@ -52,6 +52,9 @@ final class SwingEntity {
     var cameraFovDeg: Double?
     var poseFilename: String?
     var traceFilename: String?
+    var ballSeedT: Double?
+    var ballSeedX: Double?
+    var ballSeedY: Double?
     var visionOrientationRaw: Int = 1
     /// `BodyMetrics` as JSON. A blob rather than five nullable columns: they
     /// are one measurement that is meaningful together, and the set will grow
@@ -98,6 +101,9 @@ final class SwingEntity {
         cameraFovDeg = dto.cameraFovDeg
         poseFilename = dto.poseFilename
         traceFilename = dto.traceFilename
+        ballSeedT = dto.ballSeedT
+        ballSeedX = dto.ballSeedX
+        ballSeedY = dto.ballSeedY
         visionOrientationRaw = dto.visionOrientationRaw
         bodyJSON = Self.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
@@ -138,6 +144,9 @@ final class SwingEntity {
         cameraFovDeg = dto.cameraFovDeg
         poseFilename = dto.poseFilename
         traceFilename = dto.traceFilename
+        ballSeedT = dto.ballSeedT
+        ballSeedX = dto.ballSeedX
+        ballSeedY = dto.ballSeedY
         visionOrientationRaw = dto.visionOrientationRaw
         bodyJSON = Self.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
@@ -180,6 +189,9 @@ final class SwingEntity {
         d.cameraFovDeg = cameraFovDeg
         d.poseFilename = poseFilename
         d.traceFilename = traceFilename
+        d.ballSeedT = ballSeedT
+        d.ballSeedX = ballSeedX
+        d.ballSeedY = ballSeedY
         d.visionOrientationRaw = visionOrientationRaw
         d.body = Self.decodeBody(bodyJSON)
         d.captureFlags = captureFlagsRaw.split(separator: "|")

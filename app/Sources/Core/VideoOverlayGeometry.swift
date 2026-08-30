@@ -57,6 +57,22 @@ enum VideoOverlayGeometry {
         return rect.width / display.width
     }
 
+    /// A point in the view, back to encoded buffer pixels — the inverse of
+    /// `viewPoint`. Returns nil for taps outside the picture (the letterbox
+    /// bars), which is a real answer: there is nothing there to point at.
+    static func bufferPoint(viewPoint p: CGPoint, natural: CGSize,
+                            transform: CGAffineTransform,
+                            in viewSize: CGSize) -> CGPoint? {
+        let display = displaySize(natural: natural, transform: transform)
+        let rect = videoRect(displaySize: display, in: viewSize)
+        guard rect.width > 0, rect.height > 0, rect.contains(p) else { return nil }
+        let dx = (p.x - rect.minX) * (display.width / rect.width)
+        let dy = (p.y - rect.minY) * (display.height / rect.height)
+        // Undo the preferred transform to land back in encoded coordinates.
+        guard transform.isInvertible else { return CGPoint(x: dx, y: dy) }
+        return CGPoint(x: dx, y: dy).applying(transform.inverted())
+    }
+
     /// Whether the transform turns the picture a quarter turn, so the
     /// displayed VERTICAL spans the buffer's width rather than its height.
     ///

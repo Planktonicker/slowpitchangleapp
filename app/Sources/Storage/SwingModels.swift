@@ -139,6 +139,12 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     /// the region searched. The one file that can tell "never looked there"
     /// apart from "looked and rejected it". See `DetectionTrace`.
     var traceFilename: String?
+    /// Where the user tapped the ball, if they did: clip time and buffer
+    /// pixels. Persisted so re-analysis keeps following the object they
+    /// pointed at rather than falling back to scoring.
+    var ballSeedT: Double?
+    var ballSeedX: Double?
+    var ballSeedY: Double?
     /// Which way was up in the recorded frames. Stored because re-analysis has
     /// to show Vision the same scene the capture did; guessing `.up` on a
     /// sideways clip finds no hitter at all.

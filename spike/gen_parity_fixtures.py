@@ -484,6 +484,15 @@ def main():
         "STITCH_SPEED_RATIO_MAX": sla.STITCH_SPEED_RATIO_MAX,
         "STITCH_MAX_ANGLE_DEG": sla.STITCH_MAX_ANGLE_DEG,
         "STITCH_VELOCITY_WINDOW": float(sla.STITCH_VELOCITY_WINDOW),
+        "SEED_OUTLIER_SIGMA": float(sla.SEED_OUTLIER_SIGMA),
+        "SEED_OUTLIER_MIN_PX": float(sla.SEED_OUTLIER_MIN_PX),
+        "SEED_MAX_TURN_DEG": float(sla.SEED_MAX_TURN_DEG),
+        "SEED_SPEED_RATIO_MAX": float(sla.SEED_SPEED_RATIO_MAX),
+        "SEED_MAX_COAST_FRAMES": float(sla.SEED_MAX_COAST_FRAMES),
+        "SEED_GATE_SPEED_MULT": float(sla.SEED_GATE_SPEED_MULT),
+        "SEED_GATE_PREDICTED_PX": float(sla.SEED_GATE_PREDICTED_PX),
+        "SEED_GATE_BASE_PX": float(sla.SEED_GATE_BASE_PX),
+        "SEED_SEARCH_RADIUS_PX": float(sla.SEED_SEARCH_RADIUS_PX),
             "MAX_RADIUS_PX_DEFAULT": sla.MAX_RADIUS_PX_DEFAULT,
             "BAT_BARREL_DIAMETER_M": sla.BAT_BARREL_DIAMETER_M,
             "CONTACT_PLAUSIBLE_M": sla.CONTACT_PLAUSIBLE_M,
@@ -515,6 +524,7 @@ def main():
         "select_track": [],
         "build_tracks": [],
         "stitch_tracks": [],
+        "seed_track": [],
     }
 
     for c in fit_cases():
@@ -613,6 +623,42 @@ def main():
         out["body_drift_gate"].append({
             "drift_m": d, "expected": sla.head_drift_plausible(d),
         })
+
+    # Seeded tracking: the ball's flight followed out from a tap. Deterministic
+    # layouts — a flight in ragged bursts among stationary clutter, plus the
+    # cases that must NOT invent a track.
+    def _seedcase(name, per_frame, seed_t, seed_x, seed_y):
+        tr = sla.track_from_seed(per_frame, 199.0, seed_t, seed_x, seed_y)
+        out["seed_track"].append({
+            "name": name,
+            "fps": 199.0,
+            "seed_t": seed_t, "seed_x": seed_x, "seed_y": seed_y,
+            "per_frame": {str(f): [{"frame": o.frame, "t": o.t, "x": o.x, "y": o.y,
+                                    "diameter_px": o.diameter_px, "area_px": o.area_px}
+                                   for o in obs] for f, obs in per_frame.items()},
+            "expected_len": 0 if tr is None else len(tr),
+            "expected_first_frame": None if tr is None else tr[0].frame,
+            "expected_last_frame": None if tr is None else tr[-1].frame,
+        })
+
+    seed_pf = {}
+    svx, svy = 6200.0 / 199.0, -1900.0 / 199.0
+    for f in range(147, 181):
+        x = 300.0 + svx * (f - 147)
+        y = 500.0 + svy * (f - 147) + 0.02 * (f - 147) ** 2
+        if (147 <= f <= 152) or (160 <= f <= 168) or (174 <= f <= 180):
+            seed_pf.setdefault(f, []).append(
+                sla.BallObservation(f, f / 199.0, x, y, 27.0, 460.0))
+    # Stationary clutter on a coarse grid, every frame in range.
+    for f in range(140, 190):
+        for i in range(12):
+            seed_pf.setdefault(f, []).append(sla.BallObservation(
+                f, f / 199.0, 100.0 + (i % 6) * 200.0, 560.0 + (i // 6) * 90.0,
+                11.0, 95.0))
+    _seedcase("flight_from_a_tap", seed_pf, 163 / 199.0,
+              300.0 + svx * 16, 500.0 + svy * 16 + 0.02 * 256)
+    _seedcase("tap_on_empty_grass_finds_nothing", seed_pf, 163 / 199.0, 60.0, 900.0)
+    _seedcase("tap_on_clutter_follows_clutter", seed_pf, 163 / 199.0, 100.0, 560.0)
 
     # Stitching: fragments of one flight, re-joined — and the joins that must
     # be REFUSED. Deterministic layouts (no randomness) mirroring the field
@@ -845,7 +891,8 @@ def main():
           f"{len(out['track_straightness'])} straightness cases, "
           f"{len(out['select_track'])} selection cases, "
           f"{len(out['build_tracks'])} track-building cases, "
-          f"{len(out['stitch_tracks'])} stitch cases")
+          f"{len(out['stitch_tracks'])} stitch cases, "
+          f"{len(out['seed_track'])} seeded-track cases")
 
 
 if __name__ == "__main__":

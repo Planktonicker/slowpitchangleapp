@@ -93,6 +93,24 @@ enum SLA {
     /// Points in the least-squares endpoint-velocity window. Enough to average
     /// detection noise down; few enough to stay local on a curving track.
     static let stitchVelocityWindow = 6
+
+    // MARK: - Seeded tracking
+    //
+    /// Following the ball out from a point a human pointed at. See
+    /// `track_from_seed` in `spike/sla_common.py`: automatic SELECTION is the
+    /// part that cannot be made reliable on cluttered footage, and it is the
+    /// part one tap settles outright. The gates are looser than the generic
+    /// builder's because the expensive ambiguity — which object is the ball —
+    /// is already answered.
+    static let seedSearchRadiusPx = 45.0
+    static let seedGateBasePx = 70.0
+    static let seedGatePredictedPx = 22.0
+    static let seedGateSpeedMult = 0.6
+    static let seedMaxCoastFrames = 8
+    static let seedSpeedRatioMax = 1.8
+    static let seedMaxTurnDeg = 25.0
+    static let seedOutlierMinPx = 4.0
+    static let seedOutlierSigma = 3.0
     static let minGravityTrackS = 0.20     // below this the gravity scale is unreliable
     static let scaleDisagreeTol = 0.08     // G2 tolerance
     static let diameterDriftTol = 0.10     // depth-motion (cosine error) flag threshold

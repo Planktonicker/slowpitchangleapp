@@ -217,6 +217,139 @@ enum TrackBuilder {
         }
     }
 
+    // MARK: - Seeded tracking
+
+    /// The detected candidate a tap refers to.
+    ///
+    /// Searches nearby frames outward in time, not only the exact one: a
+    /// playhead can sit between decoded frames, and the ball is detected in
+    /// only some of them. Mirrors `_seed_observation`.
+    static func seedObservation(perFrame: [Int: [BallObservation]],
+                                t: Double, x: Double, y: Double,
+                                radiusPx: Double = SLA.seedSearchRadiusPx) -> BallObservation? {
+        guard !perFrame.isEmpty else { return nil }
+        let frames = perFrame.keys.sorted()
+        let times = Dictionary(uniqueKeysWithValues: frames.map {
+            ($0, perFrame[$0]?.first?.t ?? 0)
+        })
+        let ordered = frames.sorted {
+            let da = abs((times[$0] ?? 0) - t), db = abs((times[$1] ?? 0) - t)
+            return da != db ? da < db : $0 < $1
+        }
+        for f in ordered.prefix(12) {
+            var best: BallObservation?
+            var bestD = radiusPx
+            for c in perFrame[f] ?? [] {
+                let d = ((c.x - x) * (c.x - x) + (c.y - y) * (c.y - y)).squareRoot()
+                if d < bestD { best = c; bestD = d }
+            }
+            if let best { return best }
+        }
+        return nil
+    }
+
+    /// Walk one direction in time from a known observation. Mirrors `_follow`.
+    private static func follow(perFrame: [Int: [BallObservation]],
+                               start: BallObservation, fps: Double,
+                               forward: Bool) -> [BallObservation] {
+        var chain = [start]
+        var frames = perFrame.keys.sorted()
+        if !forward { frames.reverse() }
+        let step = forward ? 1 : -1
+
+        for f in frames {
+            guard let last = chain.last else { break }
+            if (f - last.frame) * step <= 0 { continue }
+            let gap = abs(f - last.frame)
+            if gap > SLA.seedMaxCoastFrames { break }
+
+            var vx = 0.0, vy = 0.0
+            if chain.count >= 2 {
+                let prev = chain[chain.count - 2]
+                let dt = last.t - prev.t
+                if dt != 0 { vx = (last.x - prev.x) / dt; vy = (last.y - prev.y) / dt }
+            }
+            let dtPred = Double(gap * step) / fps
+            let predX = last.x + vx * dtPred
+            let predY = last.y + vy * dtPred
+            let speedPxFr = (vx * vx + vy * vy).squareRoot() / fps
+            let gate = chain.count >= 2
+                ? max(SLA.seedGatePredictedPx, SLA.seedGateSpeedMult * speedPxFr) * Double(gap)
+                : SLA.seedGateBasePx * Double(gap)
+            let speedNow = (vx * vx + vy * vy).squareRoot()
+
+            var best: BallObservation?
+            var bestD = gate
+            for c in perFrame[f] ?? [] {
+                let d = ((c.x - predX) * (c.x - predX) + (c.y - predY) * (c.y - predY)).squareRoot()
+                if d >= bestD { continue }
+                if speedNow > 1e-9 {
+                    let cvx = (c.x - last.x) / dtPred
+                    let cvy = (c.y - last.y) / dtPred
+                    let speedC = (cvx * cvx + cvy * cvy).squareRoot()
+                    if speedC <= 1e-9 { continue }
+                    let ratio = speedC / speedNow
+                    if ratio < 1.0 / SLA.seedSpeedRatioMax || ratio > SLA.seedSpeedRatioMax { continue }
+                    let cosang = (vx * cvx + vy * cvy) / (speedNow * speedC)
+                    if cosang < cos(SLA.seedMaxTurnDeg * .pi / 180) { continue }
+                }
+                best = c; bestD = d
+            }
+            if let best { chain.append(best) }
+        }
+        return chain
+    }
+
+    /// Drop observations that do not lie on the track's own ballistic fit.
+    /// Mirrors `_prune_to_ballistic`. Valid here and nowhere else: the tap
+    /// asserted this is ONE object in flight.
+    static func pruneToBallistic(_ track: [BallObservation], passes: Int = 2) -> [BallObservation] {
+        var out = track
+        for _ in 0..<passes {
+            guard out.count >= 5, let first = out.first else { return out }
+            let rel = out.map { $0.t - first.t }
+            let n = Double(out.count)
+            let meanT = rel.reduce(0, +) / n
+            let varT = rel.reduce(0.0) { $0 + ($1 - meanT) * ($1 - meanT) }
+            guard varT > 1e-12 else { return out }
+            var num = 0.0
+            for (i, o) in out.enumerated() { num += (rel[i] - meanT) * o.x }
+            let vx = num / varT
+            let x0 = out.reduce(0.0) { $0 + $1.x } / n - vx * meanT
+            let fit = Geometry.fitQuadratic(ts: rel, vs: out.map(\.y))
+            var res: [Double] = []
+            for (i, o) in out.enumerated() {
+                let px = x0 + vx * rel[i]
+                let py = fit.a * rel[i] * rel[i] + fit.b * rel[i] + fit.c
+                res.append(((o.x - px) * (o.x - px) + (o.y - py) * (o.y - py)).squareRoot())
+            }
+            let median = res.sorted()[res.count / 2]
+            let diameters = out.map(\.diameterPx).sorted()
+            let cap = max(SLA.seedOutlierMinPx, diameters[diameters.count / 2])
+            let limit = max(SLA.seedOutlierMinPx, min(SLA.seedOutlierSigma * median, cap))
+            let kept = zip(out, res).filter { $0.1 <= limit }.map(\.0)
+            if kept.count == out.count || kept.count < 5 {
+                return kept.count < 5 ? out : kept
+            }
+            out = kept
+        }
+        return out
+    }
+
+    /// The ball's track, followed both ways from a point a human pointed at.
+    ///
+    /// `nil` only when nothing was DETECTED near the tap — a genuine detection
+    /// failure, as distinct from the detector having found the ball and the
+    /// pipeline having chosen something else. Mirrors `track_from_seed`.
+    static func trackFromSeed(perFrame: [Int: [BallObservation]], fps: Double,
+                              t: Double, x: Double, y: Double) -> [BallObservation]? {
+        guard let seed = seedObservation(perFrame: perFrame, t: t, x: x, y: y) else { return nil }
+        let back = follow(perFrame: perFrame, start: seed, fps: fps, forward: false)
+        let fwd = follow(perFrame: perFrame, start: seed, fps: fps, forward: true)
+        let track = Array(back.dropFirst().reversed()) + fwd
+        return pruneToBallistic(track)
+    }
+
     /// Net displacement over path length, in 0...1.
     ///
     /// 1.0 is a straight line. A ball flight sits just under it — it curves,

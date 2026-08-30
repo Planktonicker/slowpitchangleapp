@@ -61,6 +61,12 @@ final class ClipDiagnostics {
     /// span is the signal that the corridor built on it is an extrapolation
     /// almost everywhere, and that a wrong hint could be steering the search.
     var hintSpanPx: Double?
+    /// The user pointed at the ball and the track was followed from there,
+    /// bypassing automatic selection entirely.
+    var usedBallSeed = false
+    /// They pointed, and nothing was DETECTED near the tap — which is a
+    /// detection failure, not a selection one, and the two want opposite fixes.
+    var ballSeedFoundNothing = false
 
     // Stage 2 — colour and shape
     /// Frames probed for raw colour coverage. A handful, spread through the
@@ -136,6 +142,11 @@ final class ClipDiagnostics {
             visionLine += String(format: " spanning %.0f px", span)
         }
         out.append("1 vision   " + visionLine)
+        if usedBallSeed {
+            out.append("           ball picked by hand — selection bypassed")
+        } else if ballSeedFoundNothing {
+            out.append("           ball picked by hand, but nothing was detected there")
+        }
 
         let framePixels = max(1, width * height)
         if probedFrames > 0 {

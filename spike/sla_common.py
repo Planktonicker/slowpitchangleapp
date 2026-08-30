@@ -506,6 +506,213 @@ def stitch_tracks(tracks: list[list[BallObservation]]) -> list[list[BallObservat
         del chains[best_j]
 
 
+# Seeded tracking: building the ball's track outward from a point a human
+# pointed at.
+#
+# This exists because automatic SELECTION is the part that cannot be made
+# reliable on cluttered footage, and it is the part a human can settle in one
+# tap. On a phone lying in the grass, a frame yields ~70 ball-coloured blobs;
+# the flight is detected but arrives as short bursts among them, and every
+# scoring rule tried — longest, speed*length, speed with straightness and
+# direction gates — is a heuristic guess at which of hundreds of tracks is the
+# ball. A tap is not a guess. It is a measurement of the one thing the
+# pipeline genuinely cannot infer.
+#
+# So the gates here are deliberately LOOSE compared to build_tracks. The
+# expensive ambiguity is already resolved: we know which object we are
+# following. What remains is only to follow it, and being timid about that
+# would throw away the certainty the tap just bought.
+SEED_SEARCH_RADIUS_PX = 45.0    # how near the tap a candidate must be to BE the ball
+SEED_GATE_BASE_PX = 70.0        # association gate before any velocity is known
+# ...and a far tighter one once it IS known. A constant-velocity prediction for
+# a ball is accurate to a few pixels per frame — gravity bends it by ~0.02
+# px/frame^2 at these scales, so the residual is detection noise, not physics.
+# Keeping the loose 70 px gate after the velocity was known let a blob 50 px
+# off the prediction win, and one such blob poisons the velocity estimate for
+# every step after it.
+SEED_GATE_PREDICTED_PX = 22.0
+SEED_GATE_SPEED_MULT = 0.6      # ...growing gently with the ball's own speed
+SEED_MAX_COAST_FRAMES = 8       # a ball may vanish this long and still be followed
+
+# Once the ball's velocity IS known, a candidate must be consistent with it —
+# proximity alone is not enough. Adversarial testing found the reason: walking
+# BACKWARD from a tap, the flight ends at contact, and the walk then latched
+# onto whatever grass sat near its next prediction, recomputed a near-zero
+# velocity from that, and strolled through clutter across the entire clip —
+# 459 frames for a 20-frame flight. Requiring the implied step velocity to
+# stay within a band of the current one terminates the walk exactly where the
+# ball stops existing, which is the correct answer at both ends: at contact
+# going back, and at the frame edge going forward.
+SEED_SPEED_RATIO_MAX = 1.8
+SEED_MAX_TURN_DEG = 25.0
+
+
+def _seed_observation(
+    per_frame: dict[int, list[BallObservation]],
+    seed_t: float,
+    seed_x: float,
+    seed_y: float,
+    radius_px: float = SEED_SEARCH_RADIUS_PX,
+) -> BallObservation | None:
+    """The detected candidate a tap refers to.
+
+    Searches the nearest frames outward in time, not just the exact one: a tap
+    lands on a playhead that may sit between decoded frames, and the ball is
+    only detected in some of them.
+    """
+    if not per_frame:
+        return None
+    frames = sorted(per_frame.keys())
+    times = {f: (per_frame[f][0].t if per_frame[f] else 0.0) for f in frames}
+    # Frames ordered by |t - seed_t|, then by frame number for determinism.
+    ordered = sorted(frames, key=lambda f: (abs(times[f] - seed_t), f))
+    for f in ordered[:12]:
+        best = None
+        best_d = radius_px
+        for c in per_frame[f]:
+            d = math.hypot(c.x - seed_x, c.y - seed_y)
+            if d < best_d:
+                best, best_d = c, d
+        if best is not None:
+            return best
+    return None
+
+
+def _follow(
+    per_frame: dict[int, list[BallObservation]],
+    start: BallObservation,
+    fps: float,
+    forward: bool,
+) -> list[BallObservation]:
+    """Walk one direction in time from a known observation, greedily."""
+    chain = [start]
+    frames = sorted(per_frame.keys())
+    if not forward:
+        frames = list(reversed(frames))
+    step = 1 if forward else -1
+
+    for f in frames:
+        if (f - chain[-1].frame) * step <= 0:
+            continue
+        gap = abs(f - chain[-1].frame)
+        if gap > SEED_MAX_COAST_FRAMES:
+            break
+        last = chain[-1]
+        if len(chain) >= 2:
+            prev = chain[-2]
+            dt = last.t - prev.t
+            vx = (last.x - prev.x) / dt if dt != 0 else 0.0
+            vy = (last.y - prev.y) / dt if dt != 0 else 0.0
+        else:
+            vx = vy = 0.0
+        dt_pred = gap * step / fps
+        pred_x = last.x + vx * dt_pred
+        pred_y = last.y + vy * dt_pred
+        speed_px_fr = math.hypot(vx, vy) / fps
+        if len(chain) >= 2:
+            gate = max(SEED_GATE_PREDICTED_PX, SEED_GATE_SPEED_MULT * speed_px_fr) * gap
+        else:
+            # Nothing known yet but the tap itself — reach further to find the
+            # ball's next sighting, then tighten immediately.
+            gate = SEED_GATE_BASE_PX * gap
+
+        speed_now = math.hypot(vx, vy)
+        best = None
+        best_d = gate
+        for c in per_frame[f]:
+            d = math.hypot(c.x - pred_x, c.y - pred_y)
+            if d >= best_d:
+                continue
+            if speed_now > 1e-9:
+                # The step this candidate implies, in the direction of travel.
+                cvx = (c.x - last.x) / dt_pred
+                cvy = (c.y - last.y) / dt_pred
+                speed_c = math.hypot(cvx, cvy)
+                if speed_c <= 1e-9:
+                    continue
+                ratio = speed_c / speed_now
+                if not (1.0 / SEED_SPEED_RATIO_MAX <= ratio <= SEED_SPEED_RATIO_MAX):
+                    continue
+                cosang = (vx * cvx + vy * cvy) / (speed_now * speed_c)
+                if cosang < math.cos(math.radians(SEED_MAX_TURN_DEG)):
+                    continue
+            best, best_d = c, d
+        if best is not None:
+            chain.append(best)
+    return chain
+
+
+# A seeded track is known to be ONE object in ballistic flight — the tap said
+# so. That justifies a check the generic pipeline cannot make: fit the physical
+# model (x linear in t, y quadratic in t) and drop points that do not lie on
+# it. Without this the walk keeps the few clutter blobs it grabbed at each end,
+# where the ball stops existing, and they drag the launch angle by degrees.
+SEED_OUTLIER_MIN_PX = 4.0       # never prune tighter than detection noise
+SEED_OUTLIER_SIGMA = 3.0        # ...or looser than this many typical residuals
+
+
+def _prune_to_ballistic(track: list[BallObservation], passes: int = 2) -> list[BallObservation]:
+    """Drop observations that do not lie on the track's own ballistic fit."""
+    out = list(track)
+    for _ in range(passes):
+        if len(out) < 5:
+            return out
+        ts = [o.t for o in out]
+        t0 = ts[0]
+        rel = [t - t0 for t in ts]
+        # x is linear in t, y is quadratic — the physical model, not a
+        # y-versus-x curve, which is ill-conditioned for a steep flight.
+        n = len(out)
+        mean_t = sum(rel) / n
+        var_t = sum((t - mean_t) ** 2 for t in rel)
+        if var_t <= 1e-12:
+            return out
+        vx = sum((rel[i] - mean_t) * out[i].x for i in range(n)) / var_t
+        x0 = sum(o.x for o in out) / n - vx * mean_t
+        coeffs, _rms = fit_quadratic(np.asarray(rel), np.asarray([o.y for o in out]))
+        res = []
+        for i, o in enumerate(out):
+            px = x0 + vx * rel[i]
+            py = float(np.polyval(coeffs, rel[i]))
+            res.append(math.hypot(o.x - px, o.y - py))
+        ordered = sorted(res)
+        median = ordered[len(ordered) // 2]
+        # Capped by the ball's own size: a detection more than one diameter off
+        # the flight it supposedly belongs to is a different object, however
+        # noisy the rest of the track happens to be.
+        diameters = sorted(o.diameter_px for o in out)
+        cap = max(SEED_OUTLIER_MIN_PX, diameters[len(diameters) // 2])
+        limit = max(SEED_OUTLIER_MIN_PX, min(SEED_OUTLIER_SIGMA * median, cap))
+        kept = [o for o, r in zip(out, res) if r <= limit]
+        if len(kept) == len(out) or len(kept) < 5:
+            return out if len(kept) < 5 else kept
+        out = kept
+    return out
+
+
+def track_from_seed(
+    per_frame: dict[int, list[BallObservation]],
+    fps: float,
+    seed_t: float,
+    seed_x: float,
+    seed_y: float,
+) -> list[BallObservation] | None:
+    """The ball's track, followed both ways from a point a human pointed at.
+
+    Returns None only when nothing was DETECTED near the tap — which is a
+    genuine detection failure and says so, as distinct from the detector
+    having found the ball and the pipeline having chosen something else.
+    """
+    seed = _seed_observation(per_frame, seed_t, seed_x, seed_y)
+    if seed is None:
+        return None
+    back = _follow(per_frame, seed, fps, forward=False)
+    fwd = _follow(per_frame, seed, fps, forward=True)
+    # back is newest-first from the seed; drop its duplicate seed and reverse.
+    track = list(reversed(back[1:])) + fwd
+    return _prune_to_ballistic(track)
+
+
 # How directed a track has to be before it is treated as a flight: the straight
 # line from first sighting to last, over the distance actually walked. A ball
 # in flight is essentially 1.0 — it curves, but it never turns back. Clutter

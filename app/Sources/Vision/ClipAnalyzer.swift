@@ -91,6 +91,16 @@ enum ClipAnalyzer {
         /// is itself wrong — a re-wrapped or re-timed file — where there is no
         /// signal left to measure and the user simply knows the answer.
         var fpsOverride: Double?
+        /// A point the user tapped on the ball, in buffer pixels and clip
+        /// time. When set, the track is followed out from HERE and automatic
+        /// selection is skipped entirely.
+        ///
+        /// This is the escape hatch that makes a cluttered clip measurable at
+        /// all. Choosing which of several hundred tracks is the ball is a
+        /// heuristic on footage like a phone lying in grass; a tap is a
+        /// measurement of the one thing the pipeline cannot infer.
+        var ballSeed: (t: Double, x: Double, y: Double)?
+
         /// Skip the Vision trajectory pass entirely. Detection is full-frame
         /// either way — the hint stopped constraining the search after it
         /// twice steered onto the wrong object — so all this saves now is the
@@ -272,6 +282,20 @@ enum ClipAnalyzer {
             tracks.sort { $0.count > $1.count }
             selected = tracks.first
         }
+        // A tap overrides every heuristic: follow the ball out from where the
+        // user pointed, and do not let scoring second-guess them.
+        if let seed = options.ballSeed {
+            let seeded = TrackBuilder.trackFromSeed(perFrame: perFrame, fps: fps,
+                                                    t: seed.t, x: seed.x, y: seed.y)
+            if let seeded, seeded.count >= 3 {
+                selected = seeded
+                tracks = [seeded] + tracks
+                diagnostics?.usedBallSeed = true
+            } else {
+                diagnostics?.ballSeedFoundNothing = true
+            }
+        }
+
         // Record what the builder produced and why the losers lost, BEFORE
         // everything but the winner is thrown away. This is the only place
         // that knowledge exists.

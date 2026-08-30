@@ -41,6 +41,23 @@ final class ParityTests: XCTestCase {
         var select_track: [SelectCase]
         var build_tracks: [BuildCase]
         var stitch_tracks: [StitchCase]
+        var seed_track: [SeedCase]
+    }
+
+    struct SeedCase: Decodable {
+        struct Obs: Decodable {
+            var frame: Int; var t: Double; var x: Double; var y: Double
+            var diameter_px: Double; var area_px: Double
+        }
+        var name: String
+        var fps: Double
+        var seed_t: Double
+        var seed_x: Double
+        var seed_y: Double
+        var per_frame: [String: [Obs]]
+        var expected_len: Int
+        var expected_first_frame: Int?
+        var expected_last_frame: Int?
     }
 
     struct StitchCase: Decodable {
@@ -284,6 +301,45 @@ final class ParityTests: XCTestCase {
     }
 
     // MARK: - Constants
+
+    /// Following the ball out from a tap — the path that makes a cluttered
+    /// clip measurable at all.
+    ///
+    /// Pinned including the two cases that must NOT invent an answer: a tap
+    /// on empty grass returns nothing (a detection failure, said plainly),
+    /// and a tap on clutter follows the clutter, because the user pointed at
+    /// it and the honest result is the one they asked for.
+    func testSeededTrackingMatchesReference() {
+        for (key, value) in [("SEED_SEARCH_RADIUS_PX", SLA.seedSearchRadiusPx),
+                             ("SEED_GATE_BASE_PX", SLA.seedGateBasePx),
+                             ("SEED_GATE_PREDICTED_PX", SLA.seedGatePredictedPx),
+                             ("SEED_GATE_SPEED_MULT", SLA.seedGateSpeedMult),
+                             ("SEED_MAX_COAST_FRAMES", Double(SLA.seedMaxCoastFrames)),
+                             ("SEED_SPEED_RATIO_MAX", SLA.seedSpeedRatioMax),
+                             ("SEED_MAX_TURN_DEG", SLA.seedMaxTurnDeg),
+                             ("SEED_OUTLIER_MIN_PX", SLA.seedOutlierMinPx),
+                             ("SEED_OUTLIER_SIGMA", SLA.seedOutlierSigma)] {
+            XCTAssertEqual(value, Self.fixtures.constants[key]!, accuracy: 1e-12, key)
+        }
+
+        let cases = Self.fixtures.seed_track
+        XCTAssertFalse(cases.isEmpty)
+        for c in cases {
+            var perFrame: [Int: [BallObservation]] = [:]
+            for (key, obs) in c.per_frame {
+                guard let f = Int(key) else { continue }
+                perFrame[f] = obs.map {
+                    BallObservation(frame: $0.frame, t: $0.t, x: $0.x, y: $0.y,
+                                    diameterPx: $0.diameter_px, areaPx: $0.area_px)
+                }
+            }
+            let track = TrackBuilder.trackFromSeed(perFrame: perFrame, fps: c.fps,
+                                                   t: c.seed_t, x: c.seed_x, y: c.seed_y)
+            XCTAssertEqual(track?.count ?? 0, c.expected_len, "seeded length \(c.name)")
+            XCTAssertEqual(track?.first?.frame, c.expected_first_frame, "seeded start \(c.name)")
+            XCTAssertEqual(track?.last?.frame, c.expected_last_frame, "seeded end \(c.name)")
+        }
+    }
 
     /// Re-joining fragments of one flight, and refusing the joins that would
     /// corrupt a measurement: pitch into hit (reverses at contact), descent
