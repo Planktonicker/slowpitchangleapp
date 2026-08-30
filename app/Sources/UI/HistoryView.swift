@@ -129,6 +129,19 @@ struct HistoryView: View {
                     // worked.
                     .disabled(model.swings.isEmpty)
                 }
+                // The last import's stage-by-stage report, on request rather
+                // than in the way. Present only while there is one, because a
+                // permanently greyed icon reads as a broken feature — and it
+                // is the ONLY copy for an import that produced no swing, which
+                // is exactly the case worth reading.
+                if model.lastDiagnostics != nil {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { sheet = .diagnostics } label: {
+                            Image(systemName: "doc.text.magnifyingglass")
+                        }
+                        .accessibilityLabel("Last analysis report")
+                    }
+                }
             }
             // ONE sheet modifier — see the note in StartView. Three stacked
             // on one view is not something SwiftUI reliably honours: the later
@@ -185,14 +198,20 @@ struct HistoryView: View {
             } message: { prompt in
                 Text(prompt.message)
             }
-            .onChange(of: model.lastDiagnostics) { _, report in
-                // Opened automatically. A report nobody looks at is the same as
-                // no report, and the moment it is worth reading is the moment
-                // the import just finished — especially when it found nothing.
-                // Only replace what is on screen if nothing is. Yanking the
-                // share sheet away to show a report is worse than waiting.
-                if report != nil, sheet == nil { sheet = .diagnostics }
-            }
+            // NOT opened automatically any more.
+            //
+            // It used to be, on the argument that a report nobody looks at is
+            // the same as no report. True, and it still threw a full-screen
+            // sheet in front of someone whose clip had just finished — every
+            // time, including the ordinary case where the swing measured fine
+            // and the report says "clean run". A sheet that appears on success
+            // is not evidence, it is an interruption, and the way to stop
+            // being interrupted was to stop importing.
+            //
+            // The report is now a button in the toolbar, lit only while there
+            // is one to read (see `reportButton`), and every swing that
+            // produced a record carries its own report on the swing screen.
+            // Nothing has become unreachable; it just waits to be asked.
         }
     }
 
