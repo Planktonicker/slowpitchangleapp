@@ -73,6 +73,21 @@ struct CaptureScreen: View {
         return .ready
     }
 
+    /// True while there is no picture to show and nothing on screen would work
+    /// if tapped. Deliberately not `status != .running`: a session that FAILED
+    /// is not warming up, and covering that with a spinner would hide the one
+    /// state that has a Retry button.
+    private var isWarmingCamera: Bool {
+        // Permission refused leaves the status at .idle forever. Without this
+        // the scrim would sit over the screen for good once the alert was
+        // dismissed, with nothing behind it that could ever clear it.
+        if permissionDenied { return false }
+        switch capture.status {
+        case .idle, .configuring: return true
+        case .running, .failed:   return false
+        }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -99,7 +114,19 @@ struct CaptureScreen: View {
                 } else {
                     hud
                 }
+
+                // Over everything, including setup. Negotiating a 240fps
+                // format with the camera takes a second or two and cannot be
+                // made faster; what it CAN stop doing is looking finished
+                // while it happens. A black viewfinder with live-looking
+                // controls on it reads as a broken app, and tapping the ball
+                // through it does nothing, because there is no frame yet.
+                if isWarmingCamera {
+                    LoadingScrim(title: "Starting the camera",
+                                 detail: "Setting up 240 frames a second. This takes a moment.")
+                }
             }
+            .animation(.easeInOut(duration: 0.2), value: isWarmingCamera)
             .navigationBarHidden(true)
             .task { await begin() }
             .onChange(of: scenePhase) { _, phase in

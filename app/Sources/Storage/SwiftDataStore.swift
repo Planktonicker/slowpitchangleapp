@@ -239,31 +239,64 @@ final class SwiftDataSwingStore: SwingStoring {
     }
 
     init(inMemory: Bool = false) throws {
+        try self.init(container: Self.makeContainer(inMemory: inMemory))
+    }
+
+    /// Take an already-opened container. The split exists so the expensive
+    /// half — opening the container, which checks the schema and the store
+    /// file — can happen off the main actor while a loading screen is up, and
+    /// only the cheap half, making a context, has to come back to it.
+    init(container: ModelContainer) {
+        self.container = container
+        self.context = ModelContext(container)
+    }
+
+    /// `nonisolated` on purpose: this is the part that runs off the main actor.
+    nonisolated static func makeContainer(inMemory: Bool = false) throws -> ModelContainer {
         let config = inMemory
             ? ModelConfiguration(isStoredInMemoryOnly: true)
             : ModelConfiguration(url: Self.storeURL)
-        container = try ModelContainer(for: SwingEntity.self, configurations: config)
-        context = ModelContext(container)
+        return try ModelContainer(for: SwingEntity.self, configurations: config)
     }
 
-    /// Open the store, rebuilding it if the existing file cannot be migrated.
+    /// A container plus whether the old store had to be thrown away.
     ///
-    /// Field units changed from feet/inches to metres/millimetres, which renames
-    /// stored properties — a schema change SwiftData cannot always migrate in
-    /// place. Losing a handful of pre-release test swings is a far better
-    /// outcome than an app that refuses to open, or one that silently drops to
-    /// memory-only and quietly stops saving anything.
-    static func openRecreatingIfNeeded() throws -> (store: SwiftDataSwingStore, wasReset: Bool) {
+    /// `@unchecked Sendable` rather than trusting `ModelContainer`'s own
+    /// conformance across SwiftData versions: this crosses an actor boundary
+    /// exactly once, from the task that opened it to the main actor that will
+    /// own it from then on, and nothing else ever touches it concurrently.
+    struct OpenedContainer: @unchecked Sendable {
+        let container: ModelContainer
+        let wasReset: Bool
+    }
+
+    /// Open the container off the main actor, rebuilding it if the file on disk
+    /// cannot be migrated.
+    ///
+    /// Field units changed from feet/inches to metres/millimetres, which
+    /// renames stored properties — a schema change SwiftData cannot always
+    /// migrate in place. Losing a handful of pre-release test swings is a far
+    /// better outcome than an app that refuses to open, or one that silently
+    /// drops to memory-only and quietly stops saving anything.
+    nonisolated static func openContainerRecreatingIfNeeded() throws -> OpenedContainer {
         do {
-            return (try SwiftDataSwingStore(), false)
+            return OpenedContainer(container: try makeContainer(), wasReset: false)
         } catch {
             let fm = FileManager.default
             for suffix in ["", "-shm", "-wal"] {
-                let url = URL(fileURLWithPath: storeURL.path + suffix)
-                try? fm.removeItem(at: url)
+                try? fm.removeItem(at: URL(fileURLWithPath: storeURL.path + suffix))
             }
-            return (try SwiftDataSwingStore(), true)
+            return OpenedContainer(container: try makeContainer(), wasReset: true)
         }
+    }
+
+    /// Open the store, rebuilding it if the existing file cannot be migrated.
+    /// The blocking form. `Boot` uses the two-part version so the container
+    /// opens off the main actor behind a loading screen; this stays for tests
+    /// and for anywhere a wait is not worth a screen.
+    static func openRecreatingIfNeeded() throws -> (store: SwiftDataSwingStore, wasReset: Bool) {
+        let opened = try openContainerRecreatingIfNeeded()
+        return (SwiftDataSwingStore(container: opened.container), opened.wasReset)
     }
 
     func all() throws -> [SwingDTO] {
