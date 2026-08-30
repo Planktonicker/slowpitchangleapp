@@ -105,7 +105,52 @@ it, in order of value:
 Readings taken before this is resolved should be treated as **~14% high in
 speed**. Launch angle is unaffected — it is an angle, and needs no scale.
 
-- Date: 2026-08-30  Disagreement: 14 % -> Pass? **NO** (tolerance 8%)
+### G0 second run — tee_06.mov: the error is SIZE-DEPENDENT
+
+A second drop, further back, so the ball is about 26 px instead of 37. This
+was shot to answer one question: is the bias the same percentage at two
+distances (then it is the diameter measurement) or does it change (then it is
+the optics)? It changes, and by a lot.
+
+Measured with the app's own colour window on both clips, against gravity:
+
+| clip | ball px (gravity) | raw colour mask | app's refined diameter | error |
+|---|---|---|---|---|
+| tee_05, ball 37 px | 37.00 | 35.00 (-5.4%) | 32.80 | **-11.4%** |
+| tee_06, ball 26 px | 26.24 | 24.00 (-8.5%) | 14.99 | **-42.8%** |
+
+Both falls are clean — parabola residuals of 0.55 px and 0.45 px over 342 and
+442 ms — so the reference is sound in both cases.
+
+**So `_subpixel_minor_diameter` degrades as the ball gets smaller, and no
+calibration constant can fix it.** A single factor would be right at one
+apparent size and wrong at every other. This is a measurement to repair, not
+a number to scale. Until it is repaired:
+
+- **Exit velocity is unreliable by an amount that depends on how big the ball
+  is in frame** — roughly 10% high when it fills 37 px, far worse when it is
+  small. Launch angle is unaffected; it is an angle and needs no scale.
+- **Film so the ball is as large in frame as the flight allows.** This has
+  moved from a nicety to a measurement requirement.
+
+Two candidate causes were tested and **disproven**, which is worth recording so
+they are not re-tried:
+
+1. *The edge search stops at an interior dip.* It does not. Sampling the alpha
+   profile across the ball on tee_06 gives a clean monotonic fall with a single
+   0.5 crossing; searching outside-in returns the same radius as inside-out.
+2. *The hue floor is too low, so skin is being tracked.* Skin IS being tracked
+   on tee_06 — the 121-frame "flight" the app reported at 76.9 degrees is the
+   hitter's leg, then shorts, then shoulder, confirmed frame by frame — but
+   raising the hue floor from 18 to 20, 22 or 24 does not change it. The
+   discriminator is something else.
+
+The app's verdict on tee_06 read "measured 77 degrees, which is not a hit —
+that is the ball going almost straight up. Whatever was tracked, it was not a
+struck ball." That is the honest-measurement machinery working: it refused the
+reading rather than reporting a swing.
+
+- Date: 2026-08-30  Disagreement: 14% (37 px ball) / 43% (26 px ball) -> Pass? **NO**
 
 ### G0b — The two-distance check (no truth needed at all)
 
