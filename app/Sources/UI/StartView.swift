@@ -57,9 +57,12 @@ struct StartView: View {
             // No NavigationStack wrappers: each of these already carries one,
             // and nesting them gives two title bars and a back button that
             // goes nowhere.
-            .sheet(isPresented: $showSwings) { HistoryView() }
-            .sheet(isPresented: $showSettings) { SettingsView() }
-            .sheet(isPresented: $showTrends) { TrendsView() }
+            // `isModal` on all three: presented as sheets there is no tab bar
+            // to leave by, and these screens had no Done button of their own —
+            // a swipe-down was the only way out and nothing said so.
+            .sheet(isPresented: $showSwings) { HistoryView(isModal: true) }
+            .sheet(isPresented: $showSettings) { SettingsView(isModal: true) }
+            .sheet(isPresented: $showTrends) { TrendsView(isModal: true) }
             .sheet(isPresented: $showRounds) { RoundsView() }
         }
         .tint(Theme.yellow)

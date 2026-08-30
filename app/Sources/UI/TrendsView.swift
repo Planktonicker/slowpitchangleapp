@@ -6,6 +6,13 @@ import Charts
 import SwiftUI
 
 struct TrendsView: View {
+    /// Shown as a sheet from the start screen and as a tab inside a round.
+    /// A sheet needs a way out and a tab must not have one — this is set by
+    /// the caller rather than read from the environment, because a screen
+    /// PUSHED inside a sheet also counts as presented, and would then offer a
+    /// Done button that closed the sheet it was pushed from.
+    var isModal = false
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var model: AppModel
     @State private var setting: SwingSetting?
     @State private var highConfidenceOnly = true
@@ -32,6 +39,13 @@ struct TrendsView: View {
                 }
             }
             .navigationTitle("Trends")
+            .toolbar {
+                if isModal {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }.fontWeight(.bold)
+                    }
+                }
+            }
             .scrollContentBackground(.hidden)
             .background(Theme.black)
             .toolbar {

@@ -64,7 +64,11 @@ struct SwingDetailView: View {
                 .tint(Theme.steel)
             }
             if model.isInSession { Section("Round") { roundMembership } }
-            Section { actions }
+            Section {
+                actions
+            } footer: {
+                Text("\"Export everything\" is the clip, ball track, pose track, the detector's full candidate trace and the stage-by-stage report — the whole evidence set for one swing. The track CSV is the format analyze_swing.py reads, so a suspicious reading can be re-run on the Mac against the reference implementation.")
+            }
         }
         .navigationTitle(swing.clipFilename ?? "Swing")
         .navigationBarTitleDisplayMode(.inline)
@@ -506,7 +510,10 @@ struct SwingDetailView: View {
                 Label("In this round", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(Theme.pass)
                 Spacer()
+                // `.borderless`, or the whole row becomes this button's tap
+                // target and merely looking at the row removes the swing.
                 Button("Remove") { model.removeFromSession(swing) }
+                    .buttonStyle(.borderless)
                     .foregroundStyle(Theme.steel)
             }
             .font(.callout)
@@ -523,60 +530,57 @@ struct SwingDetailView: View {
         }
     }
 
-    private var actions: some View {
-        VStack(spacing: 10) {
-            Button {
-                model.reanalyze(swing)
-            } label: {
-                Label("Re-analyze with current settings", systemImage: "arrow.clockwise")
-            }
-            Button {
-                model.reanalyze(swing, forceFallback: true)
-            } label: {
-                Label("Re-analyze without Vision", systemImage: "eye.slash")
-            }
-            // The artefact that leaves the phone. A raw 240fps clip plays in a
-            // third of a second and shows nothing; this is the version a coach
-            // can actually watch.
-            if swing.clipFilename != nil {
-                if let progress = exporting {
-                    HStack {
-                        ProgressView(value: progress).tint(Theme.yellow)
-                        Text("\(Int(progress * 100))%")
-                            .font(.caption).monospacedDigit().foregroundStyle(Theme.steel)
-                    }
-                } else {
-                    Button { exportSlowMo() } label: {
-                        Label("Export slow-motion with overlay", systemImage: "film")
-                    }
+    /// Each action is its OWN row.
+    ///
+    /// They used to sit in one VStack inside one Section, which in a List is a
+    /// single row containing four buttons — and a row has one tap target, so
+    /// pressing any of them ran whichever one SwiftUI decided the row meant.
+    /// Every button on this screen did the same thing, which is the most
+    /// confusing kind of broken: it looks like four choices and behaves like
+    /// one. A Section whose children are the buttons themselves gives each its
+    /// own row and its own tap.
+    @ViewBuilder private var actions: some View {
+        Button { model.reanalyze(swing) } label: {
+            Label("Re-analyze with current settings", systemImage: "arrow.clockwise")
+        }
+        Button { model.reanalyze(swing, forceFallback: true) } label: {
+            Label("Re-analyze without Vision", systemImage: "eye.slash")
+        }
+        // The artefact that leaves the phone. A raw 240fps clip plays in a
+        // third of a second and shows nothing; this is the version a coach can
+        // actually watch.
+        if swing.clipFilename != nil {
+            if let progress = exporting {
+                HStack {
+                    ProgressView(value: progress).tint(Theme.yellow)
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption).monospacedDigit().foregroundStyle(Theme.steel)
                 }
-                if let exportError {
-                    Text(exportError).font(.caption).foregroundStyle(Theme.fail)
-                }
-            }
-            // Everything about this one swing, in one share.
-            //
-            // The pieces were always on the phone and each needed a different
-            // screen to get at: the clip and CSV here, the stage report only
-            // on the last IMPORT, the frames behind that, the trace nowhere at
-            // all. Asking somebody to assemble five files from four screens is
-            // how a bug report ends up being a screenshot instead — and a
-            // screenshot is the one form of evidence that cannot be re-run.
-            // The report for THIS swing, not for the last import. It used to
-            // be reachable only from the history screen's menu and only ever
-            // showed the most recent imported clip — so on a live session the
-            // one screen that names the stage that failed described a
-            // different swing entirely, or nothing at all.
-            if swing.diagnosticsFilename != nil {
-                Button { openReport() } label: {
-                    Label("Analysis report", systemImage: "doc.text.magnifyingglass")
+            } else {
+                Button { exportSlowMo() } label: {
+                    Label("Export slow-motion with overlay", systemImage: "film")
                 }
             }
-            Button { shareAuditBundle() } label: {
-                Label("Export everything for this swing", systemImage: "shippingbox")
+        }
+        // The report for THIS swing, not for the last import. It used to be
+        // reachable only from the history screen's menu and only ever showed
+        // the most recent imported clip — so during a live session the one
+        // screen that names the failing stage described a different swing.
+        if swing.diagnosticsFilename != nil {
+            Button { openReport() } label: {
+                Label("Analysis report", systemImage: "doc.text.magnifyingglass")
             }
-            Text("Clip, ball track, pose track, the detector's full candidate trace, and the stage-by-stage report — the whole evidence set for one swing. The track CSV is the format analyze_swing.py reads, so a suspicious reading can be re-run on the Mac against the reference implementation.")
-                .font(.caption).foregroundStyle(.secondary)
+        }
+        // Everything about this one swing, in one share. The pieces were always
+        // on the phone and each needed a different screen to get at; asking
+        // somebody to assemble five files from four screens is how a bug report
+        // ends up being a screenshot instead, and a screenshot is the one form
+        // of evidence that cannot be re-run.
+        Button { shareAuditBundle() } label: {
+            Label("Export everything for this swing", systemImage: "shippingbox")
+        }
+        if let exportError {
+            Text(exportError).font(.caption).foregroundStyle(Theme.fail)
         }
     }
 

@@ -6,6 +6,13 @@ import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    /// Shown as a sheet from the start screen and as a tab inside a round.
+    /// A sheet needs a way out and a tab must not have one — this is set by
+    /// the caller rather than read from the environment, because a screen
+    /// PUSHED inside a sheet also counts as presented, and would then offer a
+    /// Done button that closed the sheet it was pushed from.
+    var isModal = false
+    @Environment(\.dismiss) private var dismiss
     @State private var showTriggerCalibration = false
     @State private var showDeleteConfirm = false
 
@@ -96,6 +103,13 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .toolbar {
+                if isModal {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") { dismiss() }.fontWeight(.bold)
+                    }
+                }
+            }
             .sheet(isPresented: $showTriggerCalibration) {
                 TriggerCalibrationView(capture: model.capture).environmentObject(model)
             }
