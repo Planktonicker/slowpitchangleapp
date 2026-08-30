@@ -414,7 +414,8 @@ final class AppModel: ObservableObject {
             await MainActor.run {
                 self.lastDiagnostics = report
                 self.finishImport(stored: stored, setting: setting,
-                                  analysis: finalAnalysis, failure: finalFailure)
+                                  analysis: finalAnalysis, failure: finalFailure,
+                                  report: report)
                 // Back on, so returning to the Capture tab does not find a dead
                 // preview and no explanation for it.
                 if wasRunning { self.startCapture() }
@@ -464,7 +465,8 @@ final class AppModel: ObservableObject {
     private func writeTracks(for analysis: ClipAnalysis,
                              clipName: String?,
                              setting: SwingSetting,
-                             into dto: inout SwingDTO) {
+                             into dto: inout SwingDTO,
+                             report: String? = nil) {
         guard let clipName else { return }
         let base = (clipName as NSString).deletingPathExtension
 
@@ -505,10 +507,21 @@ final class AppModel: ObservableObject {
             try? data.write(to: ClipStore.trackURL(named: traceName), options: .atomic)
             dto.traceFilename = traceName
         }
+
+        // The stage-by-stage report, for every swing and not only for imports.
+        // A live-captured swing is precisely the one that cannot be re-run to
+        // find out what happened — the moment is gone — so if the report is
+        // going to exist anywhere it has to be written at capture time.
+        if let report, let data = report.data(using: .utf8) {
+            let name = base + ".report.txt"
+            try? data.write(to: ClipStore.trackURL(named: name), options: .atomic)
+            dto.diagnosticsFilename = name
+        }
     }
 
     private func finishImport(stored: URL, setting: SwingSetting,
-                              analysis: ClipAnalysis?, failure: String?) {
+                              analysis: ClipAnalysis?, failure: String?,
+                              report: String? = nil) {
         analysisProgress = nil
         guard let analysis else {
             // Kept, not deleted. A clip the pipeline made nothing of is exactly
@@ -530,7 +543,8 @@ final class AppModel: ObservableObject {
         // pass assumed, and so the horizon tool has a focal length to work
         // with. Assumed, not measured — hence the flag above.
         dto.cameraFovDeg = settings.importFovDeg
-        writeTracks(for: analysis, clipName: name, setting: setting, into: &dto)
+        writeTracks(for: analysis, clipName: name, setting: setting,
+                    into: &dto, report: report)
         do {
             try store.save(dto)
             reload()
@@ -576,6 +590,11 @@ final class AppModel: ObservableObject {
         options.trackBody = settings.trackBody
 
         analysisProgress = 0
+        // A report for every swing, not only for imports. A live-captured
+        // swing is the one that cannot be re-run to find out what happened,
+        // because the moment is gone — so if the evidence is going to exist at
+        // all it has to be gathered on the pass that measures it.
+        let diagnostics = ClipDiagnostics()
 
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
@@ -592,17 +611,22 @@ final class AppModel: ObservableObject {
                         audioT: output.contactOffset,
                         distanceM: wasManual ? nil : placement.distanceM),
                     options: options,
+                    diagnostics: diagnostics,
                     progress: { p in
                         Task { @MainActor [weak self] in self?.analysisProgress = p }
                     }
                 )
             } catch {
                 failure = error.localizedDescription
+                diagnostics.failure = failure
             }
             let finalAnalysis = analysis
             let finalFailure = failure
+            let finalReport = diagnostics.report(detector: options.detector)
             await MainActor.run {
+                self.lastDiagnostics = finalReport
                 self.finishClip(output: output,
+                                report: finalReport,
                                 setting: setting,
                                 placement: placement,
                                 droppedFrames: droppedDuringClip,
@@ -614,6 +638,7 @@ final class AppModel: ObservableObject {
     }
 
     private func finishClip(output: ClipRecorder.Output,
+                            report: String?,
                             setting: SwingSetting,
                             placement: PlacementWizard.Placement,
                             droppedFrames: Bool,
@@ -632,7 +657,8 @@ final class AppModel: ObservableObject {
             dto = SwingDTO(analysis: analysis, setting: setting,
                            clipFilename: clipName, autoTriggered: autoTriggered)
             confirmBall(analysis, into: &dto)
-            writeTracks(for: analysis, clipName: clipName, setting: setting, into: &dto)
+            writeTracks(for: analysis, clipName: clipName, setting: setting,
+                        into: &dto, report: report)
         } else {
             // A clip where tracking failed still counts — it is a G1 miss, and
             // dropping it would flatter the trackability number.

@@ -34,6 +34,8 @@ struct SwingDetailView: View {
     @State private var showDetail = false
     @State private var exporting: Double?
     @State private var exportError: String?
+    @State private var showReport = false
+    @State private var reportText = ""
 
     var body: some View {
         List {
@@ -77,6 +79,10 @@ struct SwingDetailView: View {
             Task { await load() }
         }
         .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }
+        .sheet(isPresented: $showReport) {
+            DiagnosticsView(report: reportText,
+                            clipURL: swing.clipFilename.map { ClipStore.clipURL(named: $0) })
+        }
         .fullScreenCover(isPresented: $showReview) { TrackReviewView(swing: swing) }
     }
 
@@ -519,16 +525,28 @@ struct SwingDetailView: View {
                     Text(exportError).font(.caption).foregroundStyle(Theme.fail)
                 }
             }
-            Button {
-                var urls: [URL] = []
-                if let clip = swing.clipFilename { urls.append(ClipStore.clipURL(named: clip)) }
-                if let csv = swing.trackCSVFilename { urls.append(ClipStore.trackURL(named: csv)) }
-                shareURLs = urls
-                showShare = !urls.isEmpty
-            } label: {
-                Label("Share clip and track CSV", systemImage: "square.and.arrow.up")
+            // Everything about this one swing, in one share.
+            //
+            // The pieces were always on the phone and each needed a different
+            // screen to get at: the clip and CSV here, the stage report only
+            // on the last IMPORT, the frames behind that, the trace nowhere at
+            // all. Asking somebody to assemble five files from four screens is
+            // how a bug report ends up being a screenshot instead — and a
+            // screenshot is the one form of evidence that cannot be re-run.
+            // The report for THIS swing, not for the last import. It used to
+            // be reachable only from the history screen's menu and only ever
+            // showed the most recent imported clip — so on a live session the
+            // one screen that names the stage that failed described a
+            // different swing entirely, or nothing at all.
+            if swing.diagnosticsFilename != nil {
+                Button { openReport() } label: {
+                    Label("Analysis report", systemImage: "doc.text.magnifyingglass")
+                }
             }
-            Text("The track CSV is in the format analyze_swing.py reads, so a suspicious reading can be re-run on the Mac against the reference implementation.")
+            Button { shareAuditBundle() } label: {
+                Label("Export everything for this swing", systemImage: "shippingbox")
+            }
+            Text("Clip, ball track, pose track, the detector's full candidate trace, and the stage-by-stage report — the whole evidence set for one swing. The track CSV is the format analyze_swing.py reads, so a suspicious reading can be re-run on the Mac against the reference implementation.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -566,6 +584,41 @@ struct SwingDetailView: View {
             }
         }
         player = AVPlayer(url: url)
+    }
+
+    private func openReport() {
+        guard let name = swing.diagnosticsFilename,
+              let text = try? String(contentsOf: ClipStore.trackURL(named: name),
+                                     encoding: .utf8) else {
+            exportError = "The report for this swing is no longer on disk."
+            return
+        }
+        reportText = text
+        showReport = true
+    }
+
+    /// Every file this swing produced, in one share sheet.
+    ///
+    /// Missing pieces are skipped rather than reported: a swing with no pose
+    /// track is a swing the body pass was off for, which the record already
+    /// says, and a share sheet is the wrong place to learn it.
+    private func shareAuditBundle() {
+        var urls: [URL] = []
+        if let clip = swing.clipFilename {
+            let u = ClipStore.clipURL(named: clip)
+            if FileManager.default.fileExists(atPath: u.path) { urls.append(u) }
+        }
+        for name in [swing.trackCSVFilename, swing.poseFilename,
+                     swing.traceFilename, swing.diagnosticsFilename] {
+            guard let name else { continue }
+            let u = ClipStore.trackURL(named: name)
+            if FileManager.default.fileExists(atPath: u.path) { urls.append(u) }
+        }
+        shareURLs = urls
+        showShare = !urls.isEmpty
+        if urls.isEmpty {
+            exportError = "Nothing was kept for this swing — clips are off in Settings, or storage was cleared."
+        }
     }
 
     /// Render the overlay into a shareable file.
