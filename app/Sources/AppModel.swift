@@ -41,6 +41,8 @@ final class AppModel: ObservableObject {
             capture.requireHitterToTrigger = settings.requireHitter
             capture.visionOrientationOverride = settings.visionOrientation.orientation
             capture.triggerThresholdDb = settings.triggerDb
+            capture.preRollS = settings.preRollS
+            capture.postRollS = settings.postRollS
         }
     }
 
@@ -107,12 +109,73 @@ final class AppModel: ObservableObject {
         capture.requireHitterToTrigger = settings.requireHitter
         capture.visionOrientationOverride = settings.visionOrientation.orientation
         capture.triggerThresholdDb = settings.triggerDb
+        capture.preRollS = settings.preRollS
+        capture.postRollS = settings.postRollS
         reload()
     }
 
     // MARK: - Session
 
     private var cancellables = Set<AnyCancellable>()
+
+    /// The round in progress, or nil when the app is sitting on the start
+    /// screen. Everything about the capture screen keys off this: there is no
+    /// camera running, and no reason to run one, until a hitter has said what
+    /// they are about to do.
+    @Published private(set) var session: Session?
+
+    /// Set when a round has just ended, so the summary can be shown once and
+    /// then dismissed. Kept separate from `session` because the round is over —
+    /// nothing should be able to record into it.
+    @Published var finishedSession: SessionSummary?
+
+    var isInSession: Bool { session != nil }
+
+    /// Swings taken in the round so far, newest first. Drives the live count on
+    /// the capture screen; the end-of-round collation is `SessionSummary`.
+    var sessionSwings: [SwingDTO] {
+        guard let id = session?.id else { return [] }
+        return swings.filter { $0.sessionID == id }
+            .sorted { $0.capturedAt > $1.capturedAt }
+    }
+
+    func startSession(mode: SessionMode) {
+        session = Session(mode: mode)
+        currentSetting = mode.swingSetting
+        finishedSession = nil
+        sessionSwingCount = 0
+        hitterGateDisabledForSession = false
+        // The camera is NOT started here. `CaptureView.begin()` asks for
+        // permission first and starts it after, and starting a 240fps session
+        // before that returns is how the first run of the app produces an
+        // error banner instead of a permission prompt.
+    }
+
+    /// End the round and collate it.
+    ///
+    /// Deliberately does NOT wait for analysis still in flight. A hitter who
+    /// has finished should not be held at a spinner, and the summary is built
+    /// from the store, so a swing that lands a few seconds later is in the
+    /// round's history regardless — it simply is not in the sheet they were
+    /// shown. The alternative, blocking the end of a round on a background
+    /// pass, trades a real annoyance for a cosmetic completeness.
+    func endSession() {
+        guard let s = session else { return }
+        var closed = s
+        closed.endedAt = Date()
+        session = nil
+        capture.isArmed = false
+        capture.stop()
+        finishedSession = SessionSummary.build(session: closed, swings: swings)
+    }
+
+    /// Discard a round that recorded nothing, without showing a summary of
+    /// nothing. Called when the hitter backs out of setup.
+    func abandonSession() {
+        session = nil
+        capture.isArmed = false
+        capture.stop()
+    }
 
     func startCapture() {
         capture.configureAndStart()
@@ -584,6 +647,7 @@ final class AppModel: ObservableObject {
         dto.captureFlags = placement.captureFlags
             + (hitterGateDisabledForSession ? [.hitterGateDisabled] : [])
             + (droppedFrames ? [.framesDropped] : [])
+        dto.sessionID = session?.id
         sessionSwingCount += 1
 
         do {

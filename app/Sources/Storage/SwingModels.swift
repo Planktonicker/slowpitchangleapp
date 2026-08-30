@@ -161,6 +161,12 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     /// an off-level tripod honest instead of merely absent.
     var captureFlags: [CaptureFlag] = []
 
+    /// The round this swing belongs to, if it was taken inside one. `nil` for
+    /// imported clips and for anything captured before sessions existed —
+    /// those still appear in the full history, they just have no round to be
+    /// collated into.
+    var sessionID: UUID?
+
     var notes: String?
 
     /// High confidence means the measurement is clean *and* it was taken in
@@ -180,8 +186,9 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     init() {}
 
     init(analysis: ClipAnalysis, setting: SwingSetting, clipFilename: String?,
-         autoTriggered: Bool = true) {
+         autoTriggered: Bool = true, sessionID: UUID? = nil) {
         self.setting = setting
+        self.sessionID = sessionID
         self.clipFilename = clipFilename
         self.autoTriggered = autoTriggered
         self.fps = analysis.fps

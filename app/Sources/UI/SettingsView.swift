@@ -40,10 +40,10 @@ struct SettingsView: View {
                     Text("15 dB is the pass/fail gate the validation uses, not a good working threshold for any particular place — too high for a quiet garden, too low for a cage. Calibrating listens to the background, records a few real hits, and puts the number between them. It also says when no threshold can work here, which is worth knowing before a session rather than after.")
                         .font(.caption).foregroundStyle(.secondary)
                     stepper("Pre-roll", value: $model.settings.preRollS,
-                            range: 0.25...2.0, step: 0.25, unit: "s")
+                            range: 0.25...SLA.maxPreRollS, step: 0.25, unit: "s")
                     stepper("Post-roll", value: $model.settings.postRollS,
                             range: 0.5...3.0, step: 0.25, unit: "s")
-                    Text("Pre-roll has to cover the bat's approach — that footage is what the attack angle is measured from.")
+                    Text("Pre-roll covers the swing, not just the barrel: load and stride are what the body numbers are measured from, and the incoming pitch is what confirms the contact instant — the pitch and hit paths cross within a few milliseconds of each other, which is tighter than the audio gets. Post-roll only has to outlast the ball's time in frame, which on real clips is under a fifth of a second; past that it is 240 frames a second of an empty field.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 

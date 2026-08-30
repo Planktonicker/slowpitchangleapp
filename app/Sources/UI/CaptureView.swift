@@ -220,12 +220,17 @@ struct CaptureScreen: View {
                 HStack(alignment: .bottom, spacing: 12) {
                     bug
                     Spacer(minLength: 0)
-                    actionCluster.frame(width: 264)
+                    VStack(spacing: 4) {
+                        actionCluster
+                        endSessionButton
+                    }
+                    .frame(width: 264)
                 }
             } else {
                 VStack(spacing: 10) {
                     bug.frame(maxWidth: .infinity, alignment: .leading)
                     actionCluster
+                    endSessionButton
                 }
             }
         }
@@ -236,9 +241,36 @@ struct CaptureScreen: View {
                  label: bugLabel,
                  value: bugValue,
                  qualifier: bugQualifier,
-                 subline: "\(model.sessionSwingCount) swings",
+                 subline: sessionSubline,
                  height: Self.controlHeight,
                  onTap: { showStatus = true })
+    }
+
+    /// Round progress, in the words a hitter uses. "3 swings this round" says
+    /// the app is working; "0 swings" while armed says it is not, and that is
+    /// the single most useful thing the HUD can tell somebody standing sixty
+    /// feet away from their phone.
+    private var sessionSubline: String {
+        let n = model.sessionSwingCount
+        guard let mode = model.session?.mode else { return "\(n) swings" }
+        if n == 0 { return mode.title.lowercased() + " · no swings yet" }
+        return "\(n) swing\(n == 1 ? "" : "s") this round"
+    }
+
+    /// Ending the round is deliberately not a big slab and deliberately not
+    /// hidden. It sits under the primary action, at text weight: nobody needs
+    /// to find it in a hurry, and nothing goes wrong if it is missed — but a
+    /// round that cannot be finished is a round that never gets collated, and
+    /// the collation is the point.
+    private var endSessionButton: some View {
+        Button {
+            model.endSession()
+        } label: {
+            Text("End session")
+                .font(Theme.label(12)).tracking(1)
+        }
+        .foregroundStyle(Theme.steel)
+        .padding(.top, 2)
     }
 
     private var actionCluster: some View {

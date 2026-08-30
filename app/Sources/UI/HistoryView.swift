@@ -14,19 +14,33 @@ struct HistoryView: View {
     @State private var showPhotoPicker = false
     @State private var showDiagnostics = false
 
+    /// Inside a round this screen is "this round", not "everything ever".
+    ///
+    /// A hitter checking that the app is working wants the last three swings,
+    /// not a scroll through every clip since the project started; and the tab
+    /// is labelled "This round", so showing anything else would be a lie in the
+    /// most literal sense. Outside a round it is the full history, filterable.
+    private var sessionScoped: [SwingDTO] {
+        guard let id = model.session?.id else { return model.swings }
+        return model.swings.filter { $0.sessionID == id }
+    }
+
     private var visible: [SwingDTO] {
-        guard let filter else { return model.swings }
-        return model.swings.filter { $0.setting == filter }
+        guard let filter else { return sessionScoped }
+        return sessionScoped.filter { $0.setting == filter }
     }
 
     var body: some View {
         NavigationStack {
             Group {
-                if model.swings.isEmpty {
+                if sessionScoped.isEmpty {
                     ContentUnavailableView {
-                        Label("No swings yet", systemImage: "figure.baseball")
+                        Label(model.isInSession ? "No swings yet this round" : "No swings yet",
+                              systemImage: "figure.baseball")
                     } description: {
-                        Text("Set the camera up on the Capture tab, arm it, and hit. Clips are kept so anything that looks wrong can be re-run later.")
+                        Text(model.isInSession
+                             ? "Arm the camera on the Capture tab and hit. Every clip is kept — including the ones that measure nothing, because those are the ones worth looking at."
+                             : "Start a session, set the camera up, arm it, and hit. Clips are kept so anything that looks wrong can be re-run later.")
                     } actions: {
                         Button("Import from Photos") { showPhotoPicker = true }
                             .buttonStyle(.borderedProminent)
@@ -35,7 +49,7 @@ struct HistoryView: View {
                     list
                 }
             }
-            .navigationTitle("Swings")
+            .navigationTitle(model.isInSession ? "This round" : "Swings")
             .scrollContentBackground(.hidden)
             .background(Theme.black)
             .toolbar {
@@ -69,7 +83,7 @@ struct HistoryView: View {
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
-                    .disabled(model.swings.isEmpty)
+                    .disabled(visible.isEmpty)
                 }
             }
             .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }

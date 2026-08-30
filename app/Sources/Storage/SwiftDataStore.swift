@@ -64,6 +64,12 @@ final class SwingEntity {
     /// Pipe-separated `CaptureFlag` raw values, same encoding as `flagsRaw`.
     var captureFlagsRaw: String = ""
 
+    /// The round this swing was taken in. Optional so every already-stored
+    /// swing keeps loading — SwiftData gives a new optional column nil rather
+    /// than refusing the store, and a swing with no round is exactly what a
+    /// pre-sessions swing is.
+    var sessionID: UUID?
+
     var notes: String?
 
     init(dto: SwingDTO) {
@@ -107,6 +113,7 @@ final class SwingEntity {
         visionOrientationRaw = dto.visionOrientationRaw
         bodyJSON = Self.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
+        sessionID = dto.sessionID
         notes = dto.notes
     }
 
@@ -150,6 +157,7 @@ final class SwingEntity {
         visionOrientationRaw = dto.visionOrientationRaw
         bodyJSON = Self.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
+        sessionID = dto.sessionID
         notes = dto.notes
     }
 
@@ -196,6 +204,7 @@ final class SwingEntity {
         d.body = Self.decodeBody(bodyJSON)
         d.captureFlags = captureFlagsRaw.split(separator: "|")
             .compactMap { CaptureFlag(rawValue: String($0)) }
+        d.sessionID = sessionID
         d.notes = notes
         return d
     }

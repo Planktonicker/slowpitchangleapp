@@ -99,6 +99,31 @@ final class CaptureController: NSObject, ObservableObject {
         set { trigger.thresholdDb = newValue }
     }
 
+    /// Seconds kept before and after contact. Synced from Settings for the
+    /// same reason the threshold is: both sliders moved a stored number that
+    /// the capture path never read, so the recorded window was always the
+    /// compile-time default no matter what the screen said.
+    ///
+    /// Pre-roll has to cover the swing the body metrics are measured from —
+    /// load, stride, then the barrel's approach — and the incoming pitch,
+    /// which is what independently confirms the contact instant. Post-roll only
+    /// has to outlast the ball's time in frame; past that it is storage for
+    /// nothing. The ring is sized to the largest pre-roll the slider allows so
+    /// the setting can be raised mid-session without restarting capture.
+    var preRollS: Double = SLA.preRollS {
+        didSet {
+            let v = min(max(preRollS, 0.25), SLA.maxPreRollS)
+            // pipelineQueue, not sessionQueue: that is the serial queue the
+            // rings are appended and trimmed on, and SampleRing is explicitly
+            // not thread-safe.
+            pipelineQueue.async { [weak self] in
+                self?.videoRing.maxDuration = v
+                self?.audioRing.maxDuration = v + 0.5
+            }
+        }
+    }
+    var postRollS: Double = SLA.postRollS
+
     /// Fired on the main queue once a swing has been written to disk.
     var onClip: ((ClipRecorder.Output) -> Void)?
     var onError: ((String) -> Void)?
@@ -740,7 +765,7 @@ final class CaptureController: NSObject, ObservableObject {
         recorder.begin(videoRing: videoRing.samples,
                        audioRing: audioRing.samples,
                        contactPTS: contactPTS,
-                       postRoll: SLA.postRollS)
+                       postRoll: postRollS)
         DispatchQueue.main.async { self.isRecordingClip = true }
     }
 

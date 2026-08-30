@@ -212,8 +212,20 @@ enum SLA {
     static let targetHeight = 1080
     /// Seconds of video kept before the contact trigger fires. The bat is
     /// visible in this window, which is what Phase 3 attack angle needs.
-    static let preRollS = 0.75
-    static let postRollS = 1.50
+    /// Pre-roll covers the swing, not just the barrel: load and stride are
+    /// what the body metrics are measured from, and the incoming pitch is what
+    /// independently confirms the contact instant — on a field clip the pitch
+    /// track and the hit track cross within 4 ms of each other, which is a
+    /// tighter contact time than the audio gives.
+    static let preRollS = 1.50
+    /// Post-roll only has to outlast the ball's time in frame. Measured on two
+    /// field clips the flight lasted 79 ms and 146 ms; two seconds is generous
+    /// margin, and every second past that is storage bought for nothing —
+    /// at 240fps it is 240 more frames of an empty field.
+    static let postRollS = 2.00
+    /// The pre-roll ring is sized to this, so the setting can be raised
+    /// mid-session without tearing down a running capture.
+    static let maxPreRollS = 3.0
     /// Contact impulse must stand this far above the rolling noise floor.
     /// Matches `PASS_DB` in `spike/check_audio_trigger.py` (G5).
     static let triggerDb = 15.0
