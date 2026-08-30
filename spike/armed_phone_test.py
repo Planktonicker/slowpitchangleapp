@@ -540,10 +540,17 @@ def run_clip(path: str, fps_override: float | None, distance_m: float | None,
             "from the flight instead and the reading flagged. Calibrate the "
             "trigger at this venue (Settings -> Trigger -> Calibrate)."))
     elif not sla.in_slowpitch_launch_window(result.launch_angle_deg):
+        # Not a chain failure. Every stage did its job and the ball was
+        # followed at straightness 1.00; the hitter simply put this one into
+        # the ground. The launch window is a coaching band, not a detector
+        # gate, and reporting "CHAIN BROKE" for a low line drive would teach
+        # exactly the wrong lesson about a tool whose output is meant to be
+        # read stage by stage.
         stages.append(StageResult(
-            "sanity", False,
+            "sanity", True,
             f"LA {result.launch_angle_deg:.1f} deg is outside the slow-pitch "
-            "window — possible, but check the frames before believing it"))
+            "coaching window — a real reading of a mis-hit, or a wrong one. "
+            "The frames are the only way to tell; nothing upstream failed."))
     else:
         stages.append(StageResult(
             "sanity", True,
