@@ -268,6 +268,13 @@ enum ClipAnalyzer {
             tracks.sort { $0.count > $1.count }
             selected = tracks.first
         }
+        // Record what the builder produced and why the losers lost, BEFORE
+        // everything but the winner is thrown away. This is the only place
+        // that knowledge exists.
+        trace.tracksBuilt = tracks.count
+        trace.trackSummaries = Self.summarise(tracks: tracks, selected: selected,
+                                              direction: options.direction)
+
         guard let track = selected, track.count >= 3 else {
             throw ClipAnalysisError.noBallTrack
         }
@@ -427,6 +434,54 @@ enum ClipAnalyzer {
     /// Decode every frame once, handing back (sampleBuffer, frameIndex,
     /// presentationSeconds). Frame time comes from the PTS rather than
     /// `index / fps`, so a dropped frame does not shift everything after it.
+    /// Summarise every candidate track, worst-case truncated, with the
+    /// selector's own reason for passing each one over.
+    static func summarise(tracks: [[BallObservation]],
+                          selected: [BallObservation]?,
+                          direction: TrackBuilder.Direction) -> [DetectionTrace.TrackSummary] {
+        var out: [DetectionTrace.TrackSummary] = []
+        for tr in tracks {
+            guard let first = tr.first, let last = tr.last else { continue }
+            let dt = last.t - first.t
+            let dx = last.x - first.x, dy = last.y - first.y
+            let speed = dt > 0 ? (dx * dx + dy * dy).squareRoot() / dt : 0
+            let straight = TrackBuilder.straightness(tr)
+            let isSelected = selected.map { $0.first?.frame == first.frame
+                && $0.last?.frame == last.frame && $0.count == tr.count } ?? false
+
+            // The selector's gates, in the order it applies them.
+            var reason = ""
+            if !isSelected {
+                if tr.count < SLA.minTrackFrames {
+                    reason = "only \(tr.count) frames, needs \(SLA.minTrackFrames)"
+                } else if dt <= 0 {
+                    reason = "no elapsed time"
+                } else if straight < SLA.trackStraightnessMin {
+                    reason = String(format: "wanders — straightness %.2f, needs %.2f",
+                                    straight, SLA.trackStraightnessMin)
+                } else if direction != .auto,
+                          (dx > 0) != (direction == .right) {
+                    reason = "travels the wrong way for a hit"
+                } else {
+                    reason = "slower than the chosen track"
+                }
+            }
+
+            let stride = max(1, tr.count / DetectionTrace.trackPointLimit)
+            let pts = stride == 1 ? tr : tr.enumerated().compactMap {
+                $0.offset % stride == 0 ? $0.element : nil
+            }
+            out.append(.init(frames: tr.count, startT: first.t, endT: last.t,
+                             speedPxS: speed, straightness: straight,
+                             selected: isSelected, rejectedBecause: reason,
+                             points: pts.map { .init(x: $0.x, y: $0.y) }))
+        }
+        // Fastest first, but never drop the winner.
+        out.sort { $0.selected != $1.selected ? $0.selected
+                                              : $0.speedPxS > $1.speedPxS }
+        return Array(out.prefix(DetectionTrace.trackSummaryLimit))
+    }
+
     // MARK: - Frame rate
 
     /// What the clip's own sample timing says its frame rate is.

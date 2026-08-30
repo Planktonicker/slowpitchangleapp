@@ -26,6 +26,19 @@ enum TrackBuilder {
             let cands = perFrame[f] ?? []
             var claimed = [Bool](repeating: false, count: cands.count)
 
+            // Every (track, candidate) pair inside its gate, then assign the
+            // CLOSEST pairs first — not the first track's best, then the
+            // second track's best, and so on.
+            //
+            // Track order used to decide it. On a cluttered frame that lets a
+            // stationary false positive — predicting its own last position and
+            // carrying the full base gate — claim a ball passing within it,
+            // purely because that clutter track happened to be seeded earlier.
+            // Sorting by distance settles the confident pairs first and needs
+            // no new threshold to do it. Ties break on track then candidate
+            // index, so this is deterministic and matches `build_tracks` in
+            // `spike/sla_common.py` exactly.
+            var pairs: [(d: Double, ti: Int, ci: Int)] = []
             for ti in active.indices {
                 let obs = active[ti]
                 guard let last = obs.last else { continue }
@@ -46,17 +59,21 @@ enum TrackBuilder {
                 let speedPxPerFrame = (vx * vx + vy * vy).squareRoot() / fps
                 let gate = max(baseGatePx, 2.5 * speedPxPerFrame) * Double(gap)
 
-                var bestI = -1
-                var bestD = gate
-                for (i, c) in cands.enumerated() where !claimed[i] {
+                for (ci, c) in cands.enumerated() {
                     let d = ((c.x - predX) * (c.x - predX)
                              + (c.y - predY) * (c.y - predY)).squareRoot()
-                    if d < bestD { bestI = i; bestD = d }
+                    if d < gate { pairs.append((d, ti, ci)) }
                 }
-                if bestI >= 0 {
-                    active[ti].append(cands[bestI])
-                    claimed[bestI] = true
-                }
+            }
+            pairs.sort {
+                $0.d != $1.d ? $0.d < $1.d
+                    : ($0.ti != $1.ti ? $0.ti < $1.ti : $0.ci < $1.ci)
+            }
+            var matchedTracks = Set<Int>()
+            for p in pairs where !matchedTracks.contains(p.ti) && !claimed[p.ci] {
+                active[p.ti].append(cands[p.ci])
+                claimed[p.ci] = true
+                matchedTracks.insert(p.ti)
             }
 
             // Retire tracks that coasted too long.

@@ -39,6 +39,22 @@ final class ParityTests: XCTestCase {
         var trigger_calibration: [TriggerCalCase]
         var track_straightness: [StraightnessCase]
         var select_track: [SelectCase]
+        var build_tracks: [BuildCase]
+    }
+
+    struct BuildCase: Decodable {
+        struct Obs: Decodable {
+            var frame: Int; var t: Double; var x: Double; var y: Double
+            var diameter_px: Double; var area_px: Double
+        }
+        var name: String
+        var fps: Double
+        var per_frame: [String: [Obs]]
+        var expected_track_count: Int
+        var expected_longest: Int
+        var expected_selected_len: Int
+        var expected_selected_first_x: Double?
+        var expected_selected_last_x: Double?
     }
 
     struct SelectCase: Decodable {
@@ -254,6 +270,40 @@ final class ParityTests: XCTestCase {
     }
 
     // MARK: - Constants
+
+    /// Linking candidates into tracks, on the frame layout that actually
+    /// failed in the field: a ball crossing at 30-odd px per frame through a
+    /// lawn of stationary clutter blobs, dozens of which sit inside the
+    /// association gate of its path.
+    ///
+    /// Pinned because a ball that survives detection and then fails to LINK is
+    /// indistinguishable, from outside, from one that was never detected.
+    func testTrackBuildingMatchesReference() {
+        let cases = Self.fixtures.build_tracks
+        XCTAssertFalse(cases.isEmpty)
+        for c in cases {
+            var perFrame: [Int: [BallObservation]] = [:]
+            for (key, obs) in c.per_frame {
+                guard let f = Int(key) else { continue }
+                perFrame[f] = obs.map {
+                    BallObservation(frame: $0.frame, t: $0.t, x: $0.x, y: $0.y,
+                                    diameterPx: $0.diameter_px, areaPx: $0.area_px)
+                }
+            }
+            let built = TrackBuilder.buildTracks(perFrame: perFrame, fps: c.fps)
+            XCTAssertEqual(built.count, c.expected_track_count, "track count \(c.name)")
+            XCTAssertEqual(built.map(\.count).max() ?? 0, c.expected_longest,
+                           "longest track \(c.name)")
+
+            let picked = TrackBuilder.selectOutboundTrack(built, direction: .right)
+            XCTAssertEqual(picked?.count ?? 0, c.expected_selected_len,
+                           "selected length \(c.name)")
+            if let first = c.expected_selected_first_x, let last = c.expected_selected_last_x {
+                assertClose(picked?.first?.x ?? .nan, first, "selected start \(c.name)")
+                assertClose(picked?.last?.x ?? .nan, last, "selected end \(c.name)")
+            }
+        }
+    }
 
     /// Which track in a clip is the hit.
     ///

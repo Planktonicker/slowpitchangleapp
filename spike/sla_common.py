@@ -294,7 +294,28 @@ def build_tracks(
         cands = list(per_frame[f])
         claimed = [False] * len(cands)
 
-        for tr in active:
+        # Every (track, candidate) pair inside its gate, then assign the
+        # CLOSEST pairs first — not the first track's best, then the second
+        # track's best, and so on.
+        #
+        # Track order used to decide it, and on a cluttered frame that hands
+        # the ball to the grass. A stationary false positive predicts its own
+        # last position and carries the 40 px base gate; a ball crossing at 30+
+        # px per frame passes within that of dozens of them. Whichever clutter
+        # track happened to be seeded first would claim the ball, the real
+        # track would coast and die, and the ball would end up as a couple of
+        # stolen points inside a blob that never moved. It only became fatal
+        # when the search went full-frame and candidate counts went from a
+        # handful to seventy-odd per frame, which is exactly when a ball in
+        # plain sight started reading as "found here, none used".
+        #
+        # Sorting by distance fixes it without any new threshold: the ball
+        # matches its own prediction within a few pixels, and no clutter track
+        # gets to bid before that pair is settled. Ties break on track index
+        # then candidate index, so this stays deterministic and the Swift port
+        # can reproduce it exactly.
+        pairs: list[tuple[float, int, int]] = []
+        for ti, tr in enumerate(active):
             obs = tr["obs"]
             gap = f - obs[-1].frame
             if gap <= 0 or gap > max_coast_frames + 1:
@@ -310,17 +331,19 @@ def build_tracks(
             pred_y = obs[-1].y + vy * gap / fps
             speed_px_fr = math.hypot(vx, vy) / fps
             gate = max(base_gate_px, 2.5 * speed_px_fr) * gap
-
-            best_i, best_d = -1, gate
-            for i, c in enumerate(cands):
-                if claimed[i]:
-                    continue
+            for ci, c in enumerate(cands):
                 d = math.hypot(c.x - pred_x, c.y - pred_y)
-                if d < best_d:
-                    best_i, best_d = i, d
-            if best_i >= 0:
-                obs.append(cands[best_i])
-                claimed[best_i] = True
+                if d < gate:
+                    pairs.append((d, ti, ci))
+
+        pairs.sort()
+        matched_tracks: set[int] = set()
+        for _d, ti, ci in pairs:
+            if ti in matched_tracks or claimed[ci]:
+                continue
+            active[ti]["obs"].append(cands[ci])
+            claimed[ci] = True
+            matched_tracks.add(ti)
 
         # retire tracks that coasted too long
         still = []

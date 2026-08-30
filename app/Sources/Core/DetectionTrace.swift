@@ -57,6 +57,45 @@ struct DetectionTrace: Codable, Sendable, Equatable {
     /// was found; after it, it means nothing was SAVED.
     var truncatedAtT: Double?
 
+    /// One candidate track the builder produced, summarised.
+    ///
+    /// The track alone answers "what was measured". These answer the question
+    /// that actually gets asked when a measurement is wrong — "the ball IS
+    /// being tracked, why wasn't it chosen?" — which nothing in the app could
+    /// answer, because every track except the winner was discarded before
+    /// anyone could look at it. Twice now a plausible cause has been fixed on
+    /// reasoning alone and turned out not to be the cause; this is what stops
+    /// the third guess.
+    struct TrackSummary: Codable, Sendable, Equatable {
+        struct Point: Codable, Sendable, Equatable { var x: Double; var y: Double }
+        var frames: Int
+        var startT: Double
+        var endT: Double
+        /// Net displacement over elapsed time — the number selection scores on.
+        var speedPxS: Double
+        /// Net displacement over distance walked. Below the threshold this is
+        /// clutter that never travelled.
+        var straightness: Double
+        /// Whether this is the track the measurement came from.
+        var selected: Bool
+        /// Why it lost, in the selector's own terms. Empty for the winner.
+        var rejectedBecause: String
+        /// Subsampled polyline, enough to see the shape.
+        var points: [Point]
+    }
+
+    /// Every candidate track worth drawing, best-scoring first. Capped: past a
+    /// couple of dozen the picture is noise, and the ones that matter are the
+    /// fastest few plus whichever won.
+    var trackSummaries: [TrackSummary] = []
+    static let trackSummaryLimit = 20
+    static let trackPointLimit = 32
+
+    /// How many tracks the builder produced in total, before this list was cut
+    /// down. A large number with nothing following the ball is a different
+    /// finding from a small number.
+    var tracksBuilt = 0
+
     var hasSearchRegion: Bool {
         searchedX0 != nil && searchedY0 != nil && searchedX1 != nil && searchedY1 != nil
     }

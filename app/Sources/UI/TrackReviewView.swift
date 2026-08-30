@@ -42,6 +42,7 @@ struct TrackReviewView: View {
     @State private var showTrail = true
     @State private var showSkeleton = true
     @State private var showRejects = true
+    @State private var showOtherTracks = true
     /// Where the user says the true horizon is, as a fraction down the
     /// picture. `nil` until the tool is opened.
     @State private var horizonFraction: Double?
@@ -144,6 +145,24 @@ struct TrackReviewView: View {
                         .strokeBorder(Theme.warn.opacity(0.9), lineWidth: 1.5)
                         .frame(width: d, height: d)
                         .position(map(o.x, o.y))
+                }
+            }
+
+            // Every OTHER track the builder produced. This is the layer that
+            // answers "the ball IS being tracked, why wasn't it chosen?" —
+            // if one of these follows the ball, the fault is in selection; if
+            // none does, it is in linking. Nothing else in the app could tell
+            // those apart.
+            if showOtherTracks {
+                ForEach(Array(trace.trackSummaries.enumerated()), id: \.offset) { _, t in
+                    if !t.selected, t.points.count >= 2 {
+                        Path { p in
+                            p.move(to: map(t.points[0].x, t.points[0].y))
+                            for q in t.points.dropFirst() { p.addLine(to: map(q.x, q.y)) }
+                        }
+                        .stroke(Theme.steel.opacity(0.55),
+                                style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                    }
                 }
             }
 
@@ -379,6 +398,11 @@ struct TrackReviewView: View {
                 toggleChip("Path", isOn: $showTrail, colour: Theme.yellow)
                 toggleChip("Body", isOn: $showSkeleton, colour: Theme.yellow)
                 toggleChip("Rejected", isOn: $showRejects, colour: Theme.warn)
+                toggleChip("Tracks", isOn: $showOtherTracks, colour: Theme.steel)
+            }
+
+            if showOtherTracks, !trace.trackSummaries.isEmpty {
+                otherTracksList
             }
 
             if !showHorizonTool {
@@ -449,6 +473,35 @@ struct TrackReviewView: View {
             .font(Theme.label(10))
             .foregroundStyle(missingTrackFile ? Theme.warn : Theme.steel)
         }
+    }
+
+    /// The candidate tracks, fastest first, each with the selector's own
+    /// reason for passing it over. Reading this beside the picture is what
+    /// turns "it didn't pick the ball" into a specific, fixable statement.
+    private var otherTracksList: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("\(trace.tracksBuilt) tracks built — top by speed")
+                .font(Theme.label(10)).tracking(1.1)
+                .foregroundStyle(Theme.steel)
+            ForEach(Array(trace.trackSummaries.prefix(4).enumerated()), id: \.offset) { _, t in
+                HStack(spacing: 6) {
+                    Text(t.selected ? "USED" : "—")
+                        .font(Theme.label(9))
+                        .foregroundStyle(t.selected ? Theme.pass : Theme.steel)
+                        .frame(width: 34, alignment: .leading)
+                    Text(String(format: "%d fr  %.0f px/s  str %.2f",
+                                t.frames, t.speedPxS, t.straightness))
+                        .font(Theme.numeral(11))
+                    Spacer(minLength: 4)
+                    Text(t.rejectedBecause)
+                        .font(Theme.label(9))
+                        .foregroundStyle(Theme.warn)
+                        .lineLimit(1)
+                }
+                .foregroundStyle(t.selected ? Theme.pass : .white.opacity(0.75))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// A swing that measured frames but has no track file on disk is a

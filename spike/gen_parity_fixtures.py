@@ -507,6 +507,7 @@ def main():
         "trigger_calibration": [],
         "track_straightness": [],
         "select_track": [],
+        "build_tracks": [],
     }
 
     for c in fit_cases():
@@ -605,6 +606,47 @@ def main():
         out["body_drift_gate"].append({
             "drift_m": d, "expected": sla.head_drift_plausible(d),
         })
+
+    # Track BUILDING, on the frame layout that actually failed: a ball
+    # crossing at 32 px/frame through a field of stationary clutter blobs.
+    # Association used to be decided by track order, so a grass track seeded
+    # earlier claimed the ball as it passed within its 40 px base gate.
+    def build_case():
+        per_frame = {}
+        for f in range(40):
+            t = f / 199.0
+            obs = []
+            # The ball, entering left and crossing fast.
+            bx, by = 120 + 32.0 * f, 300 - 1.2 * f
+            obs.append(sla.BallObservation(frame=f, t=t, x=bx, y=by,
+                                           diameter_px=27.0, area_px=460.0))
+            # Stationary clutter on a grid, jittering a pixel or two — the
+            # lawn. Several of these sit within 40 px of the ball's path.
+            for gx in range(150, 1300, 90):
+                for gy in (296, 340):
+                    obs.append(sla.BallObservation(
+                        frame=f, t=t,
+                        x=gx + (1 if f % 2 else -1),
+                        y=gy + (1 if f % 3 else -1),
+                        diameter_px=11.0, area_px=95.0))
+            per_frame[f] = obs
+        return per_frame
+
+    bc = build_case()
+    built = sla.build_tracks(bc, fps=199.0)
+    picked = sla.select_outbound_track(built, fps=199.0, direction="right")
+    out["build_tracks"].append({
+        "name": "ball_through_clutter",
+        "fps": 199.0,
+        "per_frame": {str(f): [{"frame": o.frame, "t": o.t, "x": o.x, "y": o.y,
+                                "diameter_px": o.diameter_px, "area_px": o.area_px}
+                               for o in obs] for f, obs in bc.items()},
+        "expected_track_count": len(built),
+        "expected_longest": max((len(t) for t in built), default=0),
+        "expected_selected_len": 0 if picked is None else len(picked),
+        "expected_selected_first_x": None if picked is None else picked[0].x,
+        "expected_selected_last_x": None if picked is None else picked[-1].x,
+    })
 
     # Track selection: which of several tracks in a clip is the HIT.
     #
@@ -713,7 +755,8 @@ def main():
           f"{len(out['body_angles']) + len(out['body_tilts']) + len(out['body_distances']) + len(out['body_strides'])} body cases, "
           f"{len(out['trigger_calibration'])} trigger-calibration cases, "
           f"{len(out['track_straightness'])} straightness cases, "
-          f"{len(out['select_track'])} selection cases")
+          f"{len(out['select_track'])} selection cases, "
+          f"{len(out['build_tracks'])} track-building cases")
 
 
 if __name__ == "__main__":
