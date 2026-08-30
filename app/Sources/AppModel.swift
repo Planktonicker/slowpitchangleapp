@@ -353,6 +353,53 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Write the ball track and the pose track beside the clip, and point the
+    /// record at them.
+    ///
+    /// Shared because it was not. Only the live-capture path wrote these, so
+    /// every IMPORTED swing was saved with no track file and no pose file at
+    /// all — which is invisible everywhere except the one screen that needs
+    /// them: "Play with tracking overlaid" opened on a perfectly good clip,
+    /// with the ball plainly in shot, and reported "0 tracked frames / no body
+    /// track". The detector had done its job; the evidence was simply never
+    /// kept. Import is also the path most likely to be measuring footage
+    /// somebody is suspicious of, so it is the last place to discard it.
+    private func writeTracks(for analysis: ClipAnalysis,
+                             clipName: String?,
+                             setting: SwingSetting,
+                             into dto: inout SwingDTO) {
+        guard let clipName else { return }
+        let base = (clipName as NSString).deletingPathExtension
+
+        // The exact format `analyze_swing.py` reads, so any suspicious reading
+        // can be re-run on the Mac.
+        let csv = TrackCSV.serialize(
+            track: analysis.track,
+            fps: analysis.fps,
+            meta: [("clip", clipName),
+                   ("contact_time", String(format: "%.6f", analysis.contactTime)),
+                   ("setting", setting.rawValue),
+                   ("source", "SwingLab on-device")]
+        )
+        if let data = csv.data(using: .utf8) {
+            let name = base + ".csv"
+            try? data.write(to: ClipStore.trackURL(named: name), options: .atomic)
+            dto.trackCSVFilename = name
+        }
+
+        // The pose track, beside it. Same reason the ball track is kept: when a
+        // body number looks wrong, the frames it came from are the only way to
+        // find out why. JSON rather than the CSV the Python reads — sla_common
+        // has no pose stage, so there is nothing on the Mac to feed a CSV to.
+        if !analysis.pose.isEmpty {
+            let name = base + ".pose.json"
+            if let data = try? JSONEncoder().encode(analysis.pose) {
+                try? data.write(to: ClipStore.trackURL(named: name), options: .atomic)
+                dto.poseFilename = name
+            }
+        }
+    }
+
     private func finishImport(stored: URL, setting: SwingSetting,
                               analysis: ClipAnalysis?, failure: String?) {
         analysisProgress = nil
@@ -371,6 +418,7 @@ final class AppModel: ObservableObject {
         var dto = SwingDTO(analysis: analysis, setting: setting,
                            clipFilename: name, autoTriggered: false)
         dto.captureFlags = [.importedClip]
+        writeTracks(for: analysis, clipName: name, setting: setting, into: &dto)
         do {
             try store.save(dto)
             reload()
@@ -455,36 +503,7 @@ final class AppModel: ObservableObject {
         if let analysis {
             dto = SwingDTO(analysis: analysis, setting: setting,
                            clipFilename: clipName, autoTriggered: autoTriggered)
-            // Write the track in the exact format `analyze_swing.py` reads, so
-            // any suspicious reading can be re-run on the Mac.
-            if let clipName {
-                let trackName = (clipName as NSString).deletingPathExtension + ".csv"
-                let csv = TrackCSV.serialize(
-                    track: analysis.track,
-                    fps: analysis.fps,
-                    meta: [("clip", clipName),
-                           ("contact_time", String(format: "%.6f", analysis.contactTime)),
-                           ("setting", setting.rawValue),
-                           ("source", "SwingLab on-device")]
-                )
-                if let data = csv.data(using: .utf8) {
-                    try? data.write(to: ClipStore.trackURL(named: trackName), options: .atomic)
-                    dto.trackCSVFilename = trackName
-                }
-
-                // The pose track, beside it. Same reason the ball track is
-                // kept: when a body number looks wrong, the frames it came
-                // from are the only way to find out why. JSON rather than the
-                // CSV the Python reads — sla_common has no pose stage, so
-                // there is nothing on the Mac to feed a CSV to yet.
-                if !analysis.pose.isEmpty {
-                    let poseName = (clipName as NSString).deletingPathExtension + ".pose.json"
-                    if let data = try? JSONEncoder().encode(analysis.pose) {
-                        try? data.write(to: ClipStore.trackURL(named: poseName), options: .atomic)
-                        dto.poseFilename = poseName
-                    }
-                }
-            }
+            writeTracks(for: analysis, clipName: clipName, setting: setting, into: &dto)
         } else {
             // A clip where tracking failed still counts — it is a G1 miss, and
             // dropping it would flatter the trackability number.

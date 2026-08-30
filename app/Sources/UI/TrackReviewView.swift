@@ -237,13 +237,38 @@ struct TrackReviewView: View {
                 }
             }
             HStack {
-                Text("\(track.count) tracked frames")
+                Text(trackSummary)
                 Spacer()
-                Text(pose.isEmpty ? "no body track" : "\(pose.count) pose samples")
+                Text(poseSummary)
             }
             .font(Theme.label(10))
-            .foregroundStyle(Theme.steel)
+            .foregroundStyle(missingTrackFile ? Theme.warn : Theme.steel)
         }
+    }
+
+    /// A swing that measured frames but has no track file on disk is a
+    /// DIFFERENT fault from one whose tracker found nothing, and saying "0
+    /// tracked frames" for both sent somebody looking at a perfectly good clip
+    /// wondering why the ball in plain sight was not detected. It had been —
+    /// the evidence just was not written, which for a long time was true of
+    /// every imported swing.
+    private var missingTrackFile: Bool {
+        track.isEmpty && swing.trackedFrames > 0
+    }
+
+    private var trackSummary: String {
+        if missingTrackFile {
+            return "measured \(swing.trackedFrames) frames — but no track file was saved with this swing, so there is nothing to draw. Re-import the clip."
+        }
+        return track.isEmpty ? "the tracker found no ball anywhere in this clip"
+                             : "\(track.count) tracked frames"
+    }
+
+    private var poseSummary: String {
+        if pose.isEmpty {
+            return swing.body == nil ? "no body track" : "body measured, track not saved"
+        }
+        return "\(pose.count) pose samples"
     }
 
     private func stepButton(_ symbol: String, frames: Int) -> some View {
