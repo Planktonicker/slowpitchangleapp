@@ -57,7 +57,20 @@ struct HorizonGuide: View {
                     if let fraction, fraction > -0.15, fraction < 1.15 {
                         horizonLine(fraction: fraction, tiltDeg: tiltDeg, w: w, h: h)
                     } else {
-                        offFrameMarker(tiltDeg: tiltDeg, w: w, h: h)
+                        // Level is not in the picture. ONE mark, on the
+                        // target band, carrying the direction it went off in.
+                        //
+                        // It used to be pinned to the edge the horizon left
+                        // by, which is exactly where the control panels live —
+                        // it landed on the level chip, which was already
+                        // saying the same thing in words, and the two printed
+                        // over each other. Mid-frame is the one region no
+                        // panel occupies in either orientation, and the band
+                        // is already there.
+                        if let lo = bandLo, let hi = bandHi {
+                            bandLabel(centre: (lo + hi) / 2, up: tiltDeg < 0,
+                                      w: w, h: h, colour: colour(for: tiltDeg))
+                        }
                     }
                 }
             }
@@ -99,22 +112,26 @@ struct HorizonGuide: View {
         .animation(.easeOut(duration: 0.15), value: y)
     }
 
-    /// Level is not in the picture. Say which way it went and by how much —
-    /// an edge-pinned line would read as "nearly there".
-    private func offFrameMarker(tiltDeg: Double, w: CGFloat, h: CGFloat) -> some View {
-        let up = tiltDeg < 0
-        return VStack(spacing: 3) {
-            Image(systemName: up ? "arrow.down" : "arrow.up")
-                .font(.system(size: 17, weight: .black))
-            Text(String(format: "LEVEL IS OFF FRAME — AIMING %@ %.0f°",
-                        up ? "UP" : "DOWN", abs(tiltDeg)))
+    /// Where level belongs, and which way the camera has to swing to bring it
+    /// there. Drawn on the target band, which is mid-frame by construction.
+    ///
+    /// No angle in the text. The level chip and the framing guide's own banner
+    /// both state it already, and a third copy is not a third reading — it is
+    /// the same one, in the way.
+    private func bandLabel(centre: Double, up: Bool, w: CGFloat, h: CGFloat,
+                           colour: Color) -> some View {
+        HStack(spacing: 5) {
+            // Points where the horizon went, which is the way to tilt back.
+            Image(systemName: up ? "chevron.down" : "chevron.up")
+                .font(.system(size: 11, weight: .black))
+            Text("LEVEL IS OFF FRAME — AIM HERE")
                 .font(Theme.label(10)).tracking(1.2)
         }
-        .foregroundStyle(Theme.fail)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 8))
-        .position(x: w * 0.5, y: up ? h * 0.86 : h * 0.14)
+        .foregroundStyle(.white)
+        .padding(.horizontal, 9).padding(.vertical, 4)
+        .background(colour.opacity(0.9), in: Capsule())
+        .shadow(color: .black.opacity(0.6), radius: 3)
+        .position(x: w * 0.5, y: CGFloat(min(max(centre, 0.05), 0.95)) * h)
     }
 
     private func label(for tiltDeg: Double) -> String {

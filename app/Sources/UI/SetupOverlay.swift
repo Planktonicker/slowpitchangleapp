@@ -48,33 +48,49 @@ struct SetupOverlay: View {
         GeometryReader { geo in
             let isLandscape = geo.size.width > geo.size.height
             ZStack {
-                // Drawn UNDER the framing guide on purpose: the guide is the
-                // instruction and the horizon is the condition that
-                // instruction assumes, so the batter is drawn over it rather
-                // than sliced by it.
-                HorizonGuide(
-                    tiltDeg: wizard.level.hasReading ? wizard.level.tiltDeg : nil,
-                    visibleVerticalHalfDeg: CameraPose.visibleVerticalHalfAngleDeg(
-                        horizontalFovDeg: capture.fieldOfViewDeg,
-                        isLandscape: isLandscape,
-                        screenAspect: Double(geo.size.width / max(1, geo.size.height))),
-                    toleranceDeg: wizard.level.tiltToleranceDeg,
-                    correctableMaxDeg: SLA.tiltCorrectableMaxDeg)
+                // Nothing to guide against until there is a picture.
+                //
+                // The camera takes a moment to configure, and until it does the
+                // preview is black — at which point drawing the batter, the
+                // flight arrow, the horizon band and a red "AIM LEVEL FIRST"
+                // banner over the void reads as a broken app rather than a
+                // starting one. The phone is usually flat on a table while it
+                // starts, so the steep tilt it warns about is real, correctly
+                // measured, and about nothing the user is doing.
+                if capture.status == .running {
+                    // Drawn UNDER the framing guide on purpose: the guide is
+                    // the instruction and the horizon is the condition that
+                    // instruction assumes, so the batter is drawn over it
+                    // rather than sliced by it.
+                    HorizonGuide(
+                        tiltDeg: wizard.level.hasReading ? wizard.level.tiltDeg : nil,
+                        visibleVerticalHalfDeg: CameraPose.visibleVerticalHalfAngleDeg(
+                            horizontalFovDeg: capture.fieldOfViewDeg,
+                            isLandscape: isLandscape,
+                            screenAspect: Double(geo.size.width / max(1, geo.size.height))),
+                        toleranceDeg: wizard.level.tiltToleranceDeg,
+                        correctableMaxDeg: SLA.tiltCorrectableMaxDeg)
 
-                // The guide is drawn into the part of the frame the panels do
-                // not cover. Without this the ball-flight arrow and its label
-                // ran straight under the distance card in landscape, so the
-                // one thing the guide exists to say was the one thing hidden.
-                framingGuide(
-                    // Only while the card is open. Collapsed, the column is a
-                    // header and a button in the bottom corner, and fencing off
-                    // 45% of the width for it shrank the flight arrow to a stub.
-                    rightInset: isLandscape && !cardCollapsed
-                        ? Double((Self.panelWidth + 28) / max(1, geo.size.width)) : 0,
-                    // Height of the top control block, so the flight arc passes
-                    // under the bubble level instead of through it.
-                    topInset: Double(Self.topBlockHeight(isLandscape: isLandscape)
-                                     / max(1, geo.size.height)))
+                    // The guide is drawn into the part of the frame the panels
+                    // do not cover. Without this the ball-flight arrow and its
+                    // label ran straight under the distance card in landscape,
+                    // so the one thing the guide exists to say was the one
+                    // thing hidden.
+                    framingGuide(
+                        // Only while the card is open. Collapsed, the column is
+                        // a header and a button in the bottom corner, and
+                        // fencing off 45% of the width for it shrank the flight
+                        // arrow to a stub.
+                        rightInset: isLandscape && !cardCollapsed
+                            ? Double((Self.panelWidth + 28) / max(1, geo.size.width)) : 0,
+                        // Height of the top control block, so the flight arc
+                        // passes under the bubble level instead of through it.
+                        topInset: Double(Self.topBlockHeight(isLandscape: isLandscape)
+                                         / max(1, geo.size.height)),
+                        bottomInset: bottomInset(in: geo.size, isLandscape: isLandscape))
+                } else {
+                    startingUpCard
+                }
 
                 if isLandscape {
                     VStack(spacing: 10) {
@@ -170,6 +186,36 @@ struct SetupOverlay: View {
     /// has to know it too — it draws around the panel, not under it.
     private static let panelWidth: CGFloat = 300
 
+    /// Shown in place of the whole guide while the session comes up.
+    private var startingUpCard: some View {
+        VStack(spacing: 10) {
+            ProgressView().tint(Theme.yellow)
+            Text("Starting the camera…")
+                .font(Theme.label(13)).tracking(1.1)
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 18).padding(.vertical, 14)
+        .background(.black.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
+        .allowsHitTesting(false)
+    }
+
+    /// Fraction of the frame the bottom controls cover.
+    ///
+    /// Zero in landscape: the panels are a column down one side there, and the
+    /// guide already dodges them with `rightInset`. In portrait they are the
+    /// distance card and the arm button stacked across the full width, which
+    /// is most of the lower half — and the guide's own captions were being
+    /// drawn underneath them, showing through the panel's translucency as
+    /// upside-down-looking text mixed into the body copy.
+    private func bottomInset(in size: CGSize, isLandscape: Bool) -> Double {
+        guard !isLandscape else { return 0 }
+        // Card (collapsed or open) plus the arm slab plus padding, in points
+        // for the same reason `topBlockHeight` is: a fraction of a landscape
+        // height is a very different thing from a fraction of a portrait one.
+        let points: CGFloat = cardCollapsed ? 170 : 330
+        return Double(points / max(1, size.height))
+    }
+
     /// Vertical space the close/title/level block occupies at the top. Points,
     /// not a fraction: it is the same stack of controls in both orientations,
     /// and a fraction of a 393pt landscape height is a very different thing
@@ -239,9 +285,11 @@ struct SetupOverlay: View {
     /// a ball flying at the camera is foreshortened, reads slow, and gets
     /// flagged for depth motion. Hence hitter near one edge, tee in front of
     /// them, and most of the frame left empty for the ball to travel through.
-    private func framingGuide(rightInset: Double, topInset: Double) -> some View {
+    private func framingGuide(rightInset: Double, topInset: Double,
+                              bottomInset: Double) -> some View {
         GeometryReader { geo in
-            guideDrawing(in: geo.size, rightInset: rightInset, topInset: topInset)
+            guideDrawing(in: geo.size, rightInset: rightInset,
+                         topInset: topInset, bottomInset: bottomInset)
         }
         // Critical: the whole point of the overlay is that taps reach the
         // preview underneath so the user can tap the ball.
@@ -255,7 +303,8 @@ struct SetupOverlay: View {
     /// `rightInset` and `topInset` are the fractions of the frame the control
     /// panels cover. Everything the guide draws stays out of them, so nothing
     /// has to be nudged by hand when a panel changes size.
-    private func guideDrawing(in size: CGSize, rightInset: Double, topInset: Double) -> some View {
+    private func guideDrawing(in size: CGSize, rightInset: Double,
+                              topInset: Double, bottomInset: Double) -> some View {
         let w = size.width, h = size.height
         let isLandscape = w > h
         let flip = model.settings.hitterOnLeft ? 1.0 : -1.0
@@ -370,7 +419,14 @@ struct SetupOverlay: View {
             }
             .foregroundStyle(ink)
             .shadow(color: .black.opacity(0.9), radius: 3)
-            .position(pt(centreX, min(0.95, footY + 0.045)))
+            // Clamped above the bottom panel. The FIGURE is never moved to fit
+            // — its size and position are the distance check, and shifting it
+            // would quietly change what the user is calibrating against — but
+            // the caption is only a caption, so it rides up onto the legs
+            // rather than disappearing behind a translucent card and reading
+            // through the body text underneath it.
+            .position(pt(centreX,
+                         min(footY + 0.045, 1 - bottomInset - 0.02)))
 
             // The one line that would have saved the first field trip. It sits
             // ON the guide rather than in the advisory list, because the guide
@@ -608,7 +664,11 @@ struct SetupOverlay: View {
             }
         }
         .padding(12)
-        .background(.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 14))
+        // Nearly opaque, not 0.65. This card carries several lines of body
+        // copy, and the framing guide is drawn behind it — at 0.65 the guide's
+        // captions read straight through the paragraph, which looked like the
+        // text had been printed twice.
+        .background(.black.opacity(0.94), in: RoundedRectangle(cornerRadius: 14))
         // Swallow taps: without this, tapping the card would fall through to
         // the preview and be read as "the ball is here".
         .contentShape(Rectangle())

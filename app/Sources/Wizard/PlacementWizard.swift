@@ -84,12 +84,27 @@ final class PlacementWizard: ObservableObject {
     /// moved.
     func noteHitterFeet(_ fraction: Double) {
         guard fraction.isFinite else { return }
-        guard let previous = hitterFeetFraction else {
+        guard let previous = smoothedFeet else {
+            smoothedFeet = fraction
             hitterFeetFraction = fraction
             return
         }
-        hitterFeetFraction = previous + (fraction - previous) * 0.25
+        let next = previous + (fraction - previous) * 0.25
+        smoothedFeet = next
+        // Published only on a change worth seeing. The pose arrives at 10 Hz
+        // and an EMA moves on every single sample, so assigning straight to
+        // the @Published property republished this object — and with it the
+        // whole setup overlay, every Path in the framing guide included — ten
+        // times a second, forever, while a hitter stood in frame. A twentieth
+        // of a percent of frame height is about a centimetre of camera height
+        // at five metres: below the resolution of anything that reads it.
+        if let shown = hitterFeetFraction, abs(next - shown) < 0.0005 { return }
+        hitterFeetFraction = next
     }
+
+    /// The running average, kept off the published property so smoothing does
+    /// not itself become a source of view invalidation.
+    private var smoothedFeet: Double?
 
     // MARK: - Scale sources
 
@@ -141,6 +156,7 @@ final class PlacementWizard: ObservableObject {
         measuredPxPerM = nil
         lastBallDiameterPx = nil
         hitterFeetFraction = nil
+        smoothedFeet = nil
         scaleSource = .none
     }
 
