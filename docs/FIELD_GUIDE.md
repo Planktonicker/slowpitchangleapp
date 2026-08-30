@@ -49,9 +49,10 @@ yellow **skeleton** draws over the person.
 ### B2 — The ball detector (this is the one that has been failing)
 Put a softball on a chair across the room, 4–6 m away. Tap it **on the screen**.
 
-**Check:** a ring appears where you tapped and turns **green**, the card says
-**"Ball found — N px across"**, and a distance appears: "≈ x.x m" with a chip —
-"Good" (4.5–6 m), "Workable" (3.5–8.5 m), or "Move".
+**Check:** the ring where you tapped turns **green** and the card collapses to
+one Distance row: **"≈ x.x m"** with a chip — "Good" (4.5–6 m), "Workable"
+(3.5–8.5 m), or "Move". Tap the Distance row to expand it and see
+**"Ball found — N px across"**. (Chips render in CAPITALS on screen.)
 - Ring stays amber and a message appears → **the message is the instruction**.
   Do what it says ("move it onto a different-coloured surface", "move it into
   the light", …) and tap again.
@@ -61,7 +62,9 @@ Put a softball on a chair across the room, 4–6 m away. Tap it **on the screen*
   line says which gate rejected it, and guessing fights the diagnosis.
 
 ### B3 — The trigger
-Watch the thin bar just above the bottom buttons and **clap hard** near the phone.
+**Close setup first (the X, top left)** — the bar and the status tile only
+exist on the main screen. Then watch the thin bar just above the bottom buttons
+and **clap hard** near the phone.
 
 **Check:** the bar jumps past the small white notch.
 - Nothing moves → tap the black status tile (bottom-left) → **Status** sheet →
@@ -69,11 +72,17 @@ Watch the thin bar just above the bottom buttons and **clap hard** near the phon
   screenshot that sheet and send it.
 
 ### B4 — The whole chain
-Close setup (X). Tap **"2 · Arm"**. Walk away, clap hard once.
+Tap **"2 · Arm"**. **Step into the camera's view** and clap hard once —
+the trigger deliberately ignores sounds when nobody has been in frame for
+~1.5 s, so a clap from behind the phone is eaten and "N ignored" counts up
+(that is the gate working, not a bug).
 
 **Check:** the button flashes red **"Stop"** (recording), then a swing card
-appears. It will say **"No ball track in that clip"** — that is CORRECT for a
-clap: it proves trigger → record → analyse runs end to end. Tap "Stop" to disarm.
+appears saying **"No ball track in that clip"** — CORRECT for a clap: it proves
+trigger → record → analyse runs end to end. Tap "Stop" to disarm.
+- No recording, "N ignored" climbing → you were out of frame. Either step in,
+  or for this test flip Settings → Trigger → "Only trigger with a person in
+  frame" off (and back on after).
 
 When B1–B4 all pass, the app's machinery works. What remains unproven is
 detection on *real footage* — Part C.
@@ -105,6 +114,8 @@ side-on, 4–6 m away — or use footage you already have.
 | "candidates were found but never linked into a flight…" | Something ball-coloured everywhere confuses tracking | Frames: one mid-flight frame + report → Claude |
 | "…metadata read fine but not one frame decoded…" | Hardware decoder was busy | Close other camera apps, force-quit SwingLab, retry the import once. Still failing → report to Claude |
 | "a track was built but analysis rejected it…" | Detection fine, physics rejected it | Copy report → Claude |
+| "measured, but off a short track — treat the number as provisional." | Worked, but on few frames — numbers shaky | Copy report → Claude; don't move on from Part C on this alone |
+| "clip could not be decoded at all" | File unreadable (format/corrupt), not a busy decoder | Re-import via "From Photos"; still failing → report → Claude |
 
 4. **Always tap "Copy" and paste the whole report to Claude**, success or
    failure. It is a few hundred bytes and it is the only evidence that matters.
@@ -140,8 +151,9 @@ garden, too low for a cage.
 2. Phone **landscape**, roughly level. Open SwingLab.
 3. Setup opens itself (or tap **"SET UP"**, top right). Match the scene to the
    yellow batter outline: hitter where the figure stands, ball on the tee circle.
-4. Level chip should read **"Level ✓"** or "…corrected". "Too steep" → raise
-   the tripod instead of aiming up.
+4. Level chip should read **"Level ✓"** or end in **"— corrected ✓"**. Ending
+   in **"— too steep"** or **"— lens unknown"** → raise the tripod and level
+   the phone instead of aiming it up.
 5. Hitter steps in → **"Hitter detected ✓"**.
 6. Ball on the tee → **tap it on screen** → **"Ball found"**, distance chip
    **"Good"**.
@@ -154,13 +166,17 @@ Hit. The app records by itself and the swing card appears in a few seconds with
 ### Is it capturing correctly? Three checks
 - **Numbers plausible?** Launch angle between −10° and 50°, exit velo roughly
   60–140 km/h (40–90 mph). Wildly outside → screenshot the card → Claude.
-- **Any amber chips on the card?** Tap the card to see what each flag means.
+- **Any amber chips on the card?** Tap the **chip itself** — each one pops up
+  what it means.
   A flagged number is a labelled number, not a wrong one — but flags on *every*
   swing mean something systematic; send a screenshot.
 - **Chips at the top of the screen?** "N ignored" climbing means the hitter
-  gate is eating triggers — check the hitter chip in setup; after ~20 s the app
-  itself offers **"Trust the audio trigger"**, take it. "N dropped" means the
-  phone is struggling — close other apps, let it cool.
+  gate is eating triggers. If the app has seen NO hitter at all since arming,
+  after ~20 s it offers **"Trust the audio trigger"** — take it. If "N ignored"
+  keeps climbing *without* that offer, flip Settings → Trigger → "Only trigger
+  with a person in frame" off yourself (those swings get flagged, which is
+  fine). "N dropped" means the phone is struggling — close other apps, let it
+  cool.
 
 ### Captures nothing at all?
 Clap test (B3). Bar moves but no capture → Status sheet → is "Ignored — no
