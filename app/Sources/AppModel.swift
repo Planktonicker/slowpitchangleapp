@@ -455,15 +455,73 @@ final class AppModel: ObservableObject {
     /// All three absences arrive as `.importedClip` on the swing, rather than
     /// as numbers that look like every other swing's.
     func importClip(from picked: URL) {
+        // Security-scoped access has to survive the checks below AND the copy,
+        // and the checks are async — so the scope is opened here and closed in
+        // the task rather than by a `defer` that would fire first.
         let needsScope = picked.startAccessingSecurityScopedResource()
-        defer { if needsScope { picked.stopAccessingSecurityScopedResource() } }
+        Task { @MainActor [weak self] in
+            defer { if needsScope { picked.stopAccessingSecurityScopedResource() } }
+            guard let self else { return }
 
-        do {
-            importCopiedClip(at: try ClipStore.importClip(from: picked))
-        } catch {
-            banner = Banner(kind: .error,
-                            text: "Could not read that file: \(error.localizedDescription)")
+            // Checked BEFORE the copy, not after the analysis.
+            //
+            // A file that is not a readable video used to be copied into the
+            // store, handed to the analyzer, decoded until the reader gave up,
+            // and reported as "Nothing measurable in that clip" — which reads
+            // as a detection failure on a real swing. It is not; it is a file
+            // with no video in it, and saying so costs one metadata load.
+            if let problem = await Self.importProblem(with: picked) {
+                self.banner = Banner(kind: .warning, text: problem)
+                return
+            }
+            // ...and a file already in the store is not measured twice.
+            if let dupe = await Self.duplicateOf(picked) {
+                self.banner = Banner(kind: .warning, text: dupe)
+                return
+            }
+            do {
+                self.importCopiedClip(at: try ClipStore.importClip(from: picked))
+            } catch {
+                self.banner = Banner(kind: .error,
+                                     text: "Could not read that file: \(error.localizedDescription)")
+            }
         }
+    }
+
+    /// Why this file cannot be measured, or `nil` if it can be.
+    ///
+    /// Metadata only — no decoding — so it costs nothing next to the three
+    /// full passes it saves when the answer is "there is no video here".
+    static func importProblem(with url: URL) async -> String? {
+        let asset = AVURLAsset(url: url)
+        guard let readable = try? await asset.load(.isReadable), readable else {
+            return "That file could not be opened as a video. If it came from another app, try exporting it again — a placeholder or a still-downloading iCloud file looks like this."
+        }
+        guard let tracks = try? await asset.loadTracks(withMediaType: .video),
+              tracks.first != nil else {
+            return "That file has no video track — there is nothing in it to measure. Audio-only recordings and Live Photos both look like this."
+        }
+        guard let duration = try? await asset.load(.duration).seconds,
+              duration.isFinite, duration > 0.05 else {
+            return "That clip is empty or too short to hold a swing. A hit ball is in frame for a fraction of a second, but the clip still has to contain it."
+        }
+        return nil
+    }
+
+    /// A message naming the clip this one duplicates, or `nil` if it is new.
+    ///
+    /// Size first because it is free, then duration to confirm — two different
+    /// recordings agreeing on both is not something worth guarding against.
+    /// The answer points at re-measuring rather than at importing again: a
+    /// second copy of a clip already measured adds a duplicate swing to the
+    /// history, doubles what it costs on a phone that fills quickly at 240fps,
+    /// and skews G1, G4 and G5, all to produce the number already on screen.
+    static func duplicateOf(_ url: URL) async -> String? {
+        guard let existing = ClipStore.existingClipMatchingSize(of: url) else { return nil }
+        let a = try? await AVURLAsset(url: url).load(.duration).seconds
+        let b = try? await AVURLAsset(url: existing).load(.duration).seconds
+        guard let a, let b, abs(a - b) < 0.05 else { return nil }
+        return "Already imported — this is the same clip as \(existing.lastPathComponent), which is in Swings. To measure it again with the current settings, open it there and tap re-measure; importing it a second time would only add a duplicate."
     }
 
     /// Analyse a clip already sitting in the store.
@@ -480,6 +538,25 @@ final class AppModel: ObservableObject {
         // of the work.
         Task { @MainActor [weak self] in
             guard let self else { return }
+            // Both checks again here, because the Photos path does not come
+            // through `importClip` — `PhotoClipPicker` writes the original
+            // recording straight into the store and calls this. Cheap enough
+            // to repeat: metadata loads, no decoding.
+            //
+            // The file is already on disk by the time we get here, and it is
+            // ours, so a rejected clip is removed rather than left behind. The
+            // Files path checks before copying so it never reaches this with
+            // one to clean up.
+            if let problem = await Self.importProblem(with: stored) {
+                try? FileManager.default.removeItem(at: stored)
+                self.banner = Banner(kind: .warning, text: problem)
+                return
+            }
+            if let dupe = await Self.duplicateOf(stored) {
+                try? FileManager.default.removeItem(at: stored)
+                self.banner = Banner(kind: .warning, text: dupe)
+                return
+            }
             if let prompt = await Self.lengthWarning(for: stored) {
                 self.longClipPrompt = prompt
             } else {

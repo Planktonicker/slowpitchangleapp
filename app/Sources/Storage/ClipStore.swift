@@ -85,6 +85,26 @@ enum ClipStore {
         return dst
     }
 
+    /// A clip already in the store with the same byte count as `source`.
+    ///
+    /// Size alone, deliberately. A content hash would be exact and would mean
+    /// reading every stored clip end to end — hundreds of megabytes of 240fps
+    /// video — to answer a question asked before an import. Two different
+    /// recordings agreeing to the byte is vanishingly unlikely, and the caller
+    /// confirms with duration before saying anything, so the cost of the rare
+    /// collision is one extra `AVAsset` load rather than a wrong answer.
+    static func existingClipMatchingSize(of source: URL) -> URL? {
+        let bytes = size(of: source)
+        guard bytes > 0 else { return nil }
+        let fm = FileManager.default
+        let names = (try? fm.contentsOfDirectory(atPath: clipsDirectory.path)) ?? []
+        for name in names {
+            let url = clipsDirectory.appendingPathComponent(name)
+            if url.path != source.path, size(of: url) == bytes { return url }
+        }
+        return nil
+    }
+
     static func delete(clipNamed name: String?) {
         guard let name else { return }
         try? FileManager.default.removeItem(at: clipURL(named: name))

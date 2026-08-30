@@ -213,6 +213,25 @@ struct HistoryView: View {
             // produced a record carries its own report on the swing screen.
             // Nothing has become unreachable; it just waits to be asked.
         }
+        // The banner, again, when this screen is a sheet.
+        //
+        // `RootView` hosts one as a safe-area inset, and a sheet covers it —
+        // so every message this screen produces (a repeat import, a file with
+        // no video in it, a failed read) was being drawn underneath the sheet
+        // that caused it, which is indistinguishable from the app ignoring the
+        // tap. Same reasoning as the long-clip alert two modifiers up, which
+        // was moved here for exactly this.
+        //
+        // Only when modal: as a tab inside a round this view is NOT covering
+        // RootView, and hosting a second one there would show the banner twice.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if isModal, let banner = model.banner {
+                BannerView(banner: banner) { model.banner = nil }
+                    .padding(.top, 6)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: model.banner)
     }
 
     /// Import is slow — three decode passes over a 240fps clip — and it happens

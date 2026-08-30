@@ -66,6 +66,10 @@ struct TrackReviewView: View {
     @State private var horizonFraction: Double?
     @State private var showHorizonTool = false
     @State private var pickingBall = false
+    /// Playback rate. Not a preference so much as the point of the screen:
+    /// this is 240fps footage of an event that lasts a tenth of a second, and
+    /// at 1x the whole flight is over in about the time it takes to look up.
+    @State private var speed: Float = 0.25
     /// Set when THIS screen asked for a re-measure, so the record landing back
     /// in the store closes the screen rather than merely redrawing it.
     ///
@@ -495,11 +499,13 @@ struct TrackReviewView: View {
                         // — routine on a screen whose clips run under two
                         // seconds, and it read as a dead button. Rewind first.
                         let now = player.currentTime().seconds
+                        // `rate`, not `play()`: play() always resumes at 1x and
+                        // would silently throw the chosen speed away.
                         if durationS > 0, now >= durationS - 0.02 {
                             player.seek(to: .zero, toleranceBefore: .zero,
-                                        toleranceAfter: .zero) { _ in player.play() }
+                                        toleranceAfter: .zero) { _ in player.rate = speed }
                         } else {
-                            player.play()
+                            player.rate = speed
                         }
                     }
                 } label: {
@@ -511,6 +517,8 @@ struct TrackReviewView: View {
                 stepButton("forward.frame.fill", frames: 1)
             }
             .foregroundStyle(Theme.yellow)
+
+            speedRow
 
             if showHorizonTool {
                 horizonBar
@@ -743,6 +751,48 @@ struct TrackReviewView: View {
             Image(systemName: symbol).font(.system(size: 19, weight: .semibold))
                 .frame(width: 44, height: 40)
         }
+    }
+
+    /// Playback speed, defaulting to quarter rate.
+    ///
+    /// Defaulting BELOW 1x on purpose. Every other player defaults to real
+    /// time because real time is what its content was shot at; this one is
+    /// showing 240fps footage of a contact that lasts a few milliseconds, and
+    /// at 1x the ball crosses the frame in under a fifth of a second — which
+    /// is why the frame-step buttons beside this existed and were the only way
+    /// to see anything. They still do the fine work; this is for watching the
+    /// flight as a flight.
+    private var speedRow: some View {
+        HStack(spacing: 8) {
+            Text("SPEED")
+                .font(Theme.label(10)).foregroundStyle(Theme.steel)
+            ForEach(Self.speeds, id: \.self) { s in
+                Button {
+                    speed = s
+                    // Applied live, so changing speed mid-playback does not
+                    // mean stopping and starting again.
+                    if player?.timeControlStatus == .playing { player?.rate = s }
+                } label: {
+                    Text(Self.speedLabel(s))
+                        .font(Theme.label(11)).tracking(1.1)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(speed == s ? Theme.yellow.opacity(0.25) : .clear,
+                                    in: Capsule())
+                        .overlay(Capsule().strokeBorder(
+                            speed == s ? Theme.yellow : Theme.steel.opacity(0.5), lineWidth: 1.5))
+                        .foregroundStyle(speed == s ? Theme.yellow : Theme.steel)
+                }
+            }
+        }
+    }
+
+    /// No faster than 1x. Above real time nothing on this screen is legible,
+    /// and a control offering a setting that cannot be read is a control that
+    /// only ever gets pressed once.
+    private static let speeds: [Float] = [0.1, 0.25, 0.5, 1.0]
+
+    private static func speedLabel(_ s: Float) -> String {
+        s == 1.0 ? "1×" : String(format: "%g×", Double(s))
     }
 
     private func toggleChip(_ title: String, isOn: Binding<Bool>, colour: Color) -> some View {
