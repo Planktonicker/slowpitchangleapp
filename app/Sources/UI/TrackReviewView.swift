@@ -481,6 +481,11 @@ struct TrackReviewView: View {
             if !pickingBall, !showHorizonTool, !model.isAnalyzing {
                 Button {
                     pickingBall = true
+                    // Candidates ON: these amber rings are the only things a
+                    // tap can land on, so aiming at one instead of at the
+                    // ball's own pixels is the difference between the seed
+                    // working and finding nothing.
+                    showRejects = true
                     player?.pause()
                 } label: {
                     Label(swing.ballSeedT == nil
@@ -494,7 +499,7 @@ struct TrackReviewView: View {
 
             if pickingBall {
                 VStack(spacing: 6) {
-                    Text("Scrub to a frame where you can see the ball, then tap it. The flight is followed out from there — no guessing which track is which.")
+                    Text("Scrub to a frame where you can see the ball, then tap it — aim for the amber ring on it. If the ball has no ring on any frame it was never detected, which is a colour or size problem rather than a tracking one.")
                         .font(.caption).foregroundStyle(Theme.steel)
                         .multilineTextAlignment(.center)
                     Button("Cancel") { pickingBall = false }

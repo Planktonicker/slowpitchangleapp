@@ -697,7 +697,12 @@ final class AppModel: ObservableObject {
             } catch {
                 await MainActor.run {
                     self.analysisProgress = nil
-                    self.banner = AppModel.Banner(kind: .error, text: error.localizedDescription)
+                    // A seed that found nothing keeps the swing exactly as it
+                    // was rather than replacing it with a worse answer, and
+                    // says which end of the pipeline to look at.
+                    let kind: Banner.Kind =
+                        (error as? ClipAnalysisError) == .noBallAtSeed ? .warning : .error
+                    self.banner = AppModel.Banner(kind: kind, text: error.localizedDescription)
                 }
             }
         }

@@ -384,8 +384,11 @@ enum TrackBuilder {
     /// failure, as distinct from the detector having found the ball and the
     /// pipeline having chosen something else. Mirrors `track_from_seed`.
     static func trackFromSeed(perFrame: [Int: [BallObservation]], fps: Double,
-                              t: Double, x: Double, y: Double) -> [BallObservation]? {
-        guard let seed = seedObservation(perFrame: perFrame, t: t, x: x, y: y) else { return nil }
+                              t: Double, x: Double, y: Double,
+                              frameWidthPx: Double = 1920) -> [BallObservation]? {
+        guard let seed = seedObservation(perFrame: perFrame, t: t, x: x, y: y,
+                                         radiusPx: SLA.seedSearchRadius(frameWidthPx: frameWidthPx))
+        else { return nil }
         let back = follow(perFrame: perFrame, start: seed, fps: fps, forward: false)
         let fwd = follow(perFrame: perFrame, start: seed, fps: fps, forward: true)
         let track = Array(back.dropFirst().reversed()) + fwd

@@ -108,7 +108,15 @@ enum SLA {
     /// part one tap settles outright. The gates are looser than the generic
     /// builder's because the expensive ambiguity — which object is the ball —
     /// is already answered.
+    /// How near the tap a candidate must be to BE the ball — frame-relative,
+    /// because a fixed 45 px is a target 14 POINTS wide on a phone while a
+    /// fingertip is about 44. See `seed_search_radius_px` in sla_common.py.
     static let seedSearchRadiusPx = 45.0
+    static let seedSearchRadiusFrac = 0.06
+
+    static func seedSearchRadius(frameWidthPx: Double) -> Double {
+        max(seedSearchRadiusPx, frameWidthPx * seedSearchRadiusFrac)
+    }
     static let seedGateBasePx = 70.0
     static let seedGatePredictedPx = 22.0
     static let seedGateSpeedMult = 0.6

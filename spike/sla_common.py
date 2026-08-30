@@ -597,7 +597,17 @@ def stitch_tracks(tracks: list[list[BallObservation]]) -> list[list[BallObservat
 # expensive ambiguity is already resolved: we know which object we are
 # following. What remains is only to follow it, and being timid about that
 # would throw away the certainty the tap just bought.
-SEED_SEARCH_RADIUS_PX = 45.0    # how near the tap a candidate must be to BE the ball
+# How near the tap a candidate must be to BE the ball.
+#
+# Frame-relative, because the fixed 45 px this started as was a target 14
+# POINTS wide on a phone — a clip 1280 px across is shown about 390 pt wide, so
+# one clip pixel is a third of a point, and the ball itself is 8 pt. A fingertip
+# is around 44 pt. Tapping the ball dead-centre by eye still landed outside the
+# radius, found nothing, and fell back to the automatic pick, which was the
+# grass the tap existed to overrule. The floor stays for tiny frames; the
+# fraction is what makes it reachable.
+SEED_SEARCH_RADIUS_PX = 45.0
+SEED_SEARCH_RADIUS_FRAC = 0.06   # of frame width — about 22 pt on screen
 SEED_GATE_BASE_PX = 70.0        # association gate before any velocity is known
 # ...and a far tighter one once it IS known. A constant-velocity prediction for
 # a ball is accurate to a few pixels per frame — gravity bends it by ~0.02
@@ -620,6 +630,11 @@ SEED_MAX_COAST_FRAMES = 8       # a ball may vanish this long and still be follo
 # going back, and at the frame edge going forward.
 SEED_SPEED_RATIO_MAX = 1.8
 SEED_MAX_TURN_DEG = 25.0
+
+
+def seed_search_radius_px(frame_width_px: float) -> float:
+    """Tap tolerance for this frame size."""
+    return max(SEED_SEARCH_RADIUS_PX, frame_width_px * SEED_SEARCH_RADIUS_FRAC)
 
 
 def _seed_observation(
@@ -771,6 +786,7 @@ def track_from_seed(
     seed_t: float,
     seed_x: float,
     seed_y: float,
+    frame_width_px: float = 1920.0,
 ) -> list[BallObservation] | None:
     """The ball's track, followed both ways from a point a human pointed at.
 
@@ -778,7 +794,8 @@ def track_from_seed(
     genuine detection failure and says so, as distinct from the detector
     having found the ball and the pipeline having chosen something else.
     """
-    seed = _seed_observation(per_frame, seed_t, seed_x, seed_y)
+    seed = _seed_observation(per_frame, seed_t, seed_x, seed_y,
+                             seed_search_radius_px(frame_width_px))
     if seed is None:
         return None
     back = _follow(per_frame, seed, fps, forward=False)

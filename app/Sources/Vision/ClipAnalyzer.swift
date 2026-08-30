@@ -29,10 +29,15 @@ struct ClipAnalysis: Sendable {
     var trace = DetectionTrace()
 }
 
-enum ClipAnalysisError: LocalizedError {
+/// `Equatable` so callers can react to a specific failure — a hand-picked ball
+/// that found nothing is a different situation from a clip that would not
+/// decode, and they want different words.
+enum ClipAnalysisError: LocalizedError, Equatable {
     case noVideoTrack
     case readerFailed(String)
     case noBallTrack
+    /// A ball was picked by hand and nothing was detected there.
+    case noBallAtSeed
 
     var errorDescription: String? {
         switch self {
@@ -40,6 +45,8 @@ enum ClipAnalysisError: LocalizedError {
             return "That clip has no video track."
         case .readerFailed(let why):
             return "Could not read the clip: \(why)"
+        case .noBallAtSeed:
+            return "No ball was detected where you tapped. That is a DETECTION problem, not a tracking one — the colour or size gates are excluding it there. Try a frame where the ball is against the sky or the trees rather than the grass, or widen the ball colour range in Settings."
         case .noBallTrack:
             return "No ball flight found in this clip. Check that the ball is optic yellow and in frame, or widen the colour range in Settings."
         }
@@ -286,15 +293,27 @@ enum ClipAnalyzer {
         // user pointed, and do not let scoring second-guess them.
         if let seed = options.ballSeed {
             let seeded = TrackBuilder.trackFromSeed(perFrame: perFrame, fps: fps,
-                                                    t: seed.t, x: seed.x, y: seed.y)
+                                                    t: seed.t, x: seed.x, y: seed.y,
+                                                    frameWidthPx: Double(width))
             if let seeded, seeded.count >= 3 {
                 selected = seeded
                 tracks = [seeded] + tracks
                 trace.usedBallSeed = true
                 diagnostics?.usedBallSeed = true
             } else {
+                // Nothing detected near the tap. Do NOT quietly fall back to
+                // the automatic pick: the user tapped precisely BECAUSE that
+                // pick was wrong, and handing it back with a fresh timestamp
+                // is the pipeline overruling the one input it cannot infer.
+                // Failing says the true thing — the ball was not DETECTED
+                // there, which is a colour or size problem, not a selection
+                // one, and wants a different fix.
                 trace.ballSeedFoundNothing = true
                 diagnostics?.ballSeedFoundNothing = true
+                trace.tracksBuilt = tracks.count
+                trace.trackSummaries = Self.summarise(tracks: tracks, selected: nil,
+                                                      direction: options.direction)
+                throw ClipAnalysisError.noBallAtSeed
             }
         }
 
