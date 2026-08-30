@@ -736,10 +736,16 @@ struct SwingDetailView: View {
 
         Task {
             do {
-                let out = try await OverlayVideoExporter.export(
-                    clip: url, track: observations, pose: pose, batPath: batPath,
-                    contactTime: contact, options: options,
-                    progress: { p in Task { @MainActor in exporting = p } })
+                // Through the decoder-contention retry: exporting mid-round
+                // decodes the clip while the 240fps session may hold the
+                // hardware decoder, and dying with "cannot read" when a
+                // one-shot camera pause fixes it would be a poor trade.
+                let out = try await model.runFreeingDecoderIfNeeded {
+                    try await OverlayVideoExporter.export(
+                        clip: url, track: observations, pose: pose, batPath: batPath,
+                        contactTime: contact, options: options,
+                        progress: { p in Task { @MainActor in exporting = p } })
+                }
                 await MainActor.run {
                     exporting = nil
                     sheet = .share([out])

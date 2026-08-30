@@ -686,6 +686,47 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: - Hardware decoder contention
+
+    /// Run a decode-heavy job, and if it fails while the camera is running,
+    /// free the hardware decoder and try once more.
+    ///
+    /// The capture session CAN hold the decoder — the documented "Operation
+    /// Interrupted after zero frames", which the import path avoids by
+    /// stopping the camera first. The live path cannot do that up front: it
+    /// analyzes the swing that just happened while staying armed for the next
+    /// one, and stopping the session between pitches would be worse than the
+    /// failure. Field evidence also says decode-while-capturing usually works
+    /// (live swings have measured). So the camera is only stopped when the
+    /// failure actually occurs, the job retried once, and the session — and
+    /// the armed state a round expects — restored after.
+    private func retryingWithFreeDecoder<T: Sendable>(
+        _ body: @Sendable () async throws -> T) async throws -> T {
+        do { return try await body() }
+        catch {
+            let (running, armed) = await MainActor.run {
+                (capture.status == .running, capture.isArmed)
+            }
+            guard running else { throw error }
+            await MainActor.run { self.stopCapture() }
+            await capture.quiesce()
+            defer {
+                Task { @MainActor in
+                    self.startCapture()
+                    if armed { self.capture.isArmed = true }
+                }
+            }
+            return try await body()
+        }
+    }
+
+    /// The overlay exporter and other view-driven decoders use the same
+    /// retry, so a mid-round export does not die on decoder contention.
+    func runFreeingDecoderIfNeeded<T: Sendable>(
+        _ body: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await retryingWithFreeDecoder(body)
+    }
+
     // MARK: - Clip handling
 
     func handleClip(_ output: ClipRecorder.Output, autoTriggered: Bool) {
@@ -720,21 +761,23 @@ final class AppModel: ObservableObject {
             var analysis: ClipAnalysis?
             var failure: String?
             do {
-                analysis = try await ClipAnalyzer.analyze(
-                    url: output.url,
-                    // Not the trigger time. The trigger fires when the crack
-                    // reaches the phone, one sound-travel-time after contact —
-                    // three frames at 240fps from a normal tripod distance,
-                    // measured against a field clip. See `contactTimeFromAudio`.
-                    contactTime: SLA.contactTimeFromAudio(
-                        audioT: output.contactOffset,
-                        distanceM: wasManual ? nil : placement.distanceM),
-                    options: options,
-                    diagnostics: diagnostics,
-                    progress: { p in
-                        Task { @MainActor [weak self] in self?.analysisProgress = p }
-                    }
-                )
+                analysis = try await self.retryingWithFreeDecoder {
+                    try await ClipAnalyzer.analyze(
+                        url: output.url,
+                        // Not the trigger time. The trigger fires when the crack
+                        // reaches the phone, one sound-travel-time after contact —
+                        // three frames at 240fps from a normal tripod distance,
+                        // measured against a field clip. See `contactTimeFromAudio`.
+                        contactTime: SLA.contactTimeFromAudio(
+                            audioT: output.contactOffset,
+                            distanceM: wasManual ? nil : placement.distanceM),
+                        options: options,
+                        diagnostics: diagnostics,
+                        progress: { p in
+                            Task { @MainActor [weak self] in self?.analysisProgress = p }
+                        }
+                    )
+                }
             } catch {
                 failure = error.localizedDescription
                 diagnostics.failure = failure
@@ -864,7 +907,8 @@ final class AppModel: ObservableObject {
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             do {
-                let analysis = try await ClipAnalyzer.analyze(
+                let analysis = try await self.retryingWithFreeDecoder {
+                    try await ClipAnalyzer.analyze(
                     url: url,
                     // Only a LIVE swing's contact time is a measurement — the
                     // audio trigger. On an import the stored value is just the
@@ -880,6 +924,7 @@ final class AppModel: ObservableObject {
                     progress: { p in
                         Task { @MainActor [weak self] in self?.analysisProgress = p }
                     })
+                }
                 await MainActor.run {
                     var updated = SwingDTO(analysis: analysis,
                                            setting: swing.setting,
