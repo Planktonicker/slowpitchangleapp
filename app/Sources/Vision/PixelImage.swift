@@ -96,12 +96,42 @@ enum HSVConvert {
         return (h / 2, s, v)
     }
 
+    /// Exactly `fromBGR` followed by the three range tests, with the tests
+    /// reordered so the cheap ones run first.
+    ///
+    /// Not an approximation — the same arithmetic, short-circuited. Value and
+    /// saturation each cost a couple of comparisons and at most one divide;
+    /// hue costs a three-way branch, a second divide and a wrap. The old
+    /// version computed hue for every pixel and then usually threw it away,
+    /// because on a frame of grass, sky, dirt and skin almost everything fails
+    /// on brightness or saturation first. At two million pixels a frame and
+    /// several hundred frames a clip, that ordering was most of the runtime of
+    /// the full-frame fallback.
     @inline(__always)
     static func inRange(b: Double, g: Double, r: Double,
                         lo: HSVBounds, hi: HSVBounds) -> Bool {
-        let (h, s, v) = fromBGR(b: b, g: g, r: r)
+        let v = max(r, max(g, b))
+        guard v >= lo.v, v <= hi.v else { return false }
+
+        let minC = min(r, min(g, b))
+        let delta = v - minC
+        let s = v > 0 ? delta * 255.0 / v : 0
+        guard s >= lo.s, s <= hi.s else { return false }
+
+        // Grey pixels have no hue; `fromBGR` reports 0 for them, so match that
+        // rather than inventing a different answer for the degenerate case.
+        var h: Double = 0
+        if delta > 0 {
+            if v == r {
+                h = 60 * (g - b) / delta
+            } else if v == g {
+                h = 120 + 60 * (b - r) / delta
+            } else {
+                h = 240 + 60 * (r - g) / delta
+            }
+            if h < 0 { h += 360 }
+        }
+        h /= 2
         return h >= lo.h && h <= hi.h
-            && s >= lo.s && s <= hi.s
-            && v >= lo.v && v <= hi.v
     }
 }

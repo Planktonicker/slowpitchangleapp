@@ -48,9 +48,17 @@ targets:
         # build error, and it is a missing icon, not a broken catalogue.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
-        # Release builds get optimised: the fallback detector walks every
-        # pixel of every frame, and -Onone makes that unusably slow.
-        SWIFT_OPTIMIZATION_LEVEL[config=Release]: "-O"
+        # Optimised in BOTH configurations, Debug included.
+        #
+        # The detector walks every pixel of every frame — about two million per
+        # frame at 1080p — and at -Onone each of those is an unspecialised call
+        # with retain/release traffic around it. The difference is not a few
+        # percent: a two-second 240fps clip goes from minutes to seconds. Since
+        # this app is tested by running it in a field rather than by stepping
+        # through it in lldb, losing some debuggability is the right side of
+        # that trade. Turn it back to -Onone temporarily if you ever do need to
+        # step through the pipeline.
+        SWIFT_OPTIMIZATION_LEVEL: "-O"
     info:
       path: SwingLab-Info.plist
       properties:
@@ -78,6 +86,12 @@ targets:
           library directly is the only way to get the ORIGINAL slow-motion
           recording — every other route hands over a 30fps render of it, and a
           240fps clip measured as 30fps is wrong by a factor of eight.
+        # "All interface orientations must be supported unless the app requires
+        # full screen." It does: this is a camera instrument on a tripod, and
+        # there is no sensible Split View or Slide Over presentation of a
+        # viewfinder. Declaring it is also what allows the orientation list
+        # below to omit upside-down.
+        UIRequiresFullScreen: true
         # Filming is landscape; browsing results is comfortable in portrait.
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

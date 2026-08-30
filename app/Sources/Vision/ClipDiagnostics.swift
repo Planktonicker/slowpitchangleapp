@@ -38,6 +38,10 @@ final class ClipDiagnostics {
     var fpsWasOverridden = false
     /// Set when the radius gates were rescaled for a non-1080p clip.
     var radiusScale: Double?
+    /// Wall-clock seconds for the whole analysis. Reported because "it takes
+    /// forever" and "it takes eleven seconds" are different bug reports, and
+    /// only one of them is actionable.
+    var elapsedS: Double?
 
     // Stage 1 — Vision's trajectory hint
     var hintPoints: Int?
@@ -86,6 +90,10 @@ final class ClipDiagnostics {
         out.append(String(format: "clip     %dx%d  %.1fs  %.0f fps%@  %d frames decoded",
                           width, height, durationS, fps,
                           fpsWasOverridden ? " (overridden)" : "", framesDecoded))
+        if let elapsed = elapsedS {
+            out.append(String(format: "took     %.1fs (%.0f ms per decoded frame)",
+                              elapsed, 1000 * elapsed / Double(max(1, framesDecoded))))
+        }
         out.append(String(format: "hsv      lo %.0f/%.0f/%.0f  hi %.0f/%.0f/%.0f  radius %.0f-%.0f px",
                           detector.hsvLo.h, detector.hsvLo.s, detector.hsvLo.v,
                           detector.hsvHi.h, detector.hsvHi.s, detector.hsvHi.v,

@@ -6,6 +6,7 @@ import AVFoundation
 import CoreMedia
 import Foundation
 import ImageIO
+import QuartzCore
 import Vision
 
 struct ClipAnalysis: Sendable {
@@ -113,6 +114,7 @@ enum ClipAnalyzer {
                         options: Options = Options(),
                         diagnostics: ClipDiagnostics? = nil,
                         progress: (@Sendable (Double) -> Void)? = nil) async throws -> ClipAnalysis {
+        let startedAt = CFAbsoluteTimeGetCurrent()
         let asset = AVURLAsset(url: url)
         guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else {
             throw ClipAnalysisError.noVideoTrack
@@ -144,7 +146,7 @@ enum ClipAnalyzer {
             let detector = TrajectoryDetector(imageWidth: width, imageHeight: height)
             try forEachSampleBuffer(asset: asset, track: videoTrack) { sb, _, t in
                 detector.process(sampleBuffer: sb)
-                if duration > 0 { progress?(min(0.45, 0.45 * t / duration)) }
+                if duration > 0 { progress?(min(0.35, 0.35 * t / duration)) }
             }
             hint = detector.hint()
             diagnostics?.hintPoints = hint.map { $0.pointsPx.count }
@@ -198,7 +200,7 @@ enum ClipAnalyzer {
                     diagnostics?.batTapeFrames += 1
                 }
             }
-            if duration > 0 { progress?(0.45 + min(0.5, 0.5 * t / duration)) }
+            if duration > 0 { progress?(0.35 + min(0.45, 0.45 * t / duration)) }
         }
 
         // --- build the track ---
@@ -272,7 +274,8 @@ enum ClipAnalyzer {
                                   orientation: options.visionOrientation,
                                   width: width, height: height,
                                   tiltDeg: options.tiltDeg, focalPx: focalPx,
-                                  cx: cx, cy: cy, diagnostics: diagnostics)
+                                  cx: cx, cy: cy, diagnostics: diagnostics,
+                                  duration: duration, progress: progress)
             body = BodyAnalyzer.analyze(track: pose,
                                         contactTime: effectiveContact,
                                         scaleMPerPx: metrics.scaleBallMPerPx,
@@ -282,6 +285,7 @@ enum ClipAnalyzer {
         diagnostics?.exitVeloMph = metrics.exitVeloMph
         diagnostics?.scaleMPerPx = metrics.scaleBallMPerPx
         diagnostics?.flags = metrics.flags.map(\.rawValue)
+        diagnostics?.elapsedS = CFAbsoluteTimeGetCurrent() - startedAt
         progress?(1.0)
 
         return ClipAnalysis(metrics: metrics,
@@ -310,7 +314,9 @@ enum ClipAnalyzer {
                                    width: Int, height: Int,
                                    tiltDeg: Double, focalPx: Double,
                                    cx: Double, cy: Double,
-                                   diagnostics: ClipDiagnostics? = nil) throws -> [PoseObservation] {
+                                   diagnostics: ClipDiagnostics? = nil,
+                                   duration: Double = 0,
+                                   progress: (@Sendable (Double) -> Void)? = nil) throws -> [PoseObservation] {
         let frameStride = max(1, Int((fps / max(1, sampleHz)).rounded()))
         var out: [PoseObservation] = []
         // One request object reused across frames: allocating a fresh
@@ -319,6 +325,10 @@ enum ClipAnalyzer {
         let request = VNDetectHumanBodyPoseRequest()
 
         try forEachSampleBuffer(asset: asset, track: track) { sb, index, t in
+            // Reported from inside the pass, not around it. This is the third
+            // walk over the file and it used to sit silently at 95% for its
+            // whole duration, which reads as the app having hung.
+            if duration > 0 { progress?(0.80 + min(0.19, 0.19 * t / duration)) }
             guard index % frameStride == 0,
                   let pb = CMSampleBufferGetImageBuffer(sb) else { return }
             diagnostics?.poseFramesSampled += 1
