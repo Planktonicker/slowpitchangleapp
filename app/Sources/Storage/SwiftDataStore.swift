@@ -259,8 +259,11 @@ final class SwiftDataSwingStore: SwingStoring {
         return base.appendingPathComponent("SwingLab.store")
     }
 
-    init(inMemory: Bool = false) throws {
-        try self.init(container: Self.makeContainer(inMemory: inMemory))
+    /// `convenience`, because it delegates: in a class only a convenience
+    /// initializer may call another initializer on the same type. The
+    /// designated one is `init(container:)`.
+    convenience init(inMemory: Bool = false) throws {
+        self.init(container: try Self.makeContainer(inMemory: inMemory))
     }
 
     /// Take an already-opened container. The split exists so the expensive
