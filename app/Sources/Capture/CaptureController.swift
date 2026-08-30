@@ -787,11 +787,18 @@ final class CaptureController: NSObject, ObservableObject {
             return
         }
         trigger.isArmed = false
+        // Which way the buffer must turn for display, as a matrix on the
+        // file. `visionOrientationForFrames` already answers "which way is
+        // up" for the pose gate; this writes the same answer where players
+        // and the analyzer can read it.
+        let turns = VideoOrientation.quarterTurns(from: visionOrientationForFrames)
         recorder.begin(videoRing: videoRing.samples,
                        audioRing: audioRing.samples,
                        contactPTS: contactPTS,
                        postRoll: postRollS,
-                       manual: !gated)
+                       manual: !gated,
+                       displayTransform: CGAffineTransform(
+                           rotationAngle: CGFloat(turns) * .pi / 2))
         DispatchQueue.main.async { self.isRecordingClip = true }
     }
 

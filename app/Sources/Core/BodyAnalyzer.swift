@@ -149,7 +149,7 @@ enum BodyAnalyzer {
                                         contactX: Double(a1.x),
                                         scaleMPerPx: scale)
         }
-        if let h0 = headPoint(load), let h1 = headPoint(contact) {
+        if let (h0, h1) = headPair(load, contact) {
             let drift = planarDistanceM(h0, h1, scaleMPerPx: scale)
             // Withheld rather than shown when it is too large to be a swing:
             // an implausible number in a feedback screen is worse than a dash,
@@ -163,15 +163,22 @@ enum BodyAnalyzer {
         return out
     }
 
-    /// Nose if the model has it, neck otherwise.
+    /// Nose at both ends if the model has it at both ends; neck at both ends
+    /// otherwise.
     ///
     /// A helmet and a turned head both cost the nose joint regularly, and the
-    /// neck moves with the head for this purpose. Falling back keeps the metric
-    /// available; mixing the two *within* one swing would not, so both ends of
-    /// the measurement must resolve to the same joint — hence the check.
-    private static func headPoint(_ obs: PoseObservation) -> CGPoint? {
-        obs.point(.nose) ?? obs.point(.neck)
+    /// neck moves with the head for this purpose. Falling back keeps the
+    /// metric available; mixing the two WITHIN one swing does not — nose at
+    /// load against neck at contact adds the ~20 cm anatomical offset as
+    /// phantom head movement, which is exactly the losing-the-nose case. The
+    /// old code's comment claimed this check existed; now it does.
+    private static func headPair(_ a: PoseObservation,
+                                 _ b: PoseObservation) -> (CGPoint, CGPoint)? {
+        if let n0 = a.point(.nose), let n1 = b.point(.nose) { return (n0, n1) }
+        if let k0 = a.point(.neck), let k1 = b.point(.neck) { return (k0, k1) }
+        return nil
     }
+
 
     private static func nearest(_ sorted: [PoseObservation], to t: Double) -> PoseObservation? {
         sorted.min { abs($0.t - t) < abs($1.t - t) }

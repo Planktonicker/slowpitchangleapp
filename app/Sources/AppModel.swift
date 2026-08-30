@@ -866,7 +866,16 @@ final class AppModel: ObservableObject {
             do {
                 let analysis = try await ClipAnalyzer.analyze(
                     url: url,
-                    contactTime: swing.contactTime > 0 ? swing.contactTime : nil,
+                    // Only a LIVE swing's contact time is a measurement — the
+                    // audio trigger. On an import the stored value is just the
+                    // first point of the PREVIOUS track, and on the tap-the-ball
+                    // recovery flow that previous track is the wrong object by
+                    // definition: feeding its start back in as "contact" made
+                    // the analyzer extrapolate the corrected fit a second past
+                    // its own data and filter out tracks starting before a
+                    // contact that never happened.
+                    contactTime: !swing.captureFlags.contains(.importedClip)
+                        && swing.contactTime > 0 ? swing.contactTime : nil,
                     options: options,
                     progress: { p in
                         Task { @MainActor [weak self] in self?.analysisProgress = p }

@@ -180,6 +180,19 @@ enum ClipAnalyzer {
         diagnostics?.containerFps = nominalFPS > 1 ? Double(nominalFPS) : nil
         diagnostics?.frameIntervalIrregularFraction = timing?.irregularFraction
 
+        // Which way the buffer must turn to be the picture a person sees.
+        // From the container's display matrix when it carries one; otherwise
+        // from the capture-time Vision orientation — the app's OWN recordings
+        // are written straight from the encoder with no matrix at all, so a
+        // phone mounted the other way up produced clips whose buffer was
+        // upside down and whose transform said it was not. Every signed
+        // number (launch angle above all) is measured after this turn.
+        var quarterTurns = VideoOrientation.quarterTurns(preferredTransform)
+        if quarterTurns == 0 {
+            quarterTurns = VideoOrientation.quarterTurns(from: options.visionOrientation)
+        }
+        diagnostics?.videoQuarterTurns = quarterTurns
+
         var options = options
         if options.scaleDetectorRadiiToFrameWidth, width > 0,
            width != SLA.targetWidth {
@@ -227,10 +240,14 @@ enum ClipAnalyzer {
         // the gate is the difference between ~130 candidates a frame on grassy
         // footage and a handful. See `MotionMask`.
         var previousLuma: MotionMask.Luma?
-        // The bat window is only known once contact is known. When the caller
-        // did not supply one, fall back to Vision's flight start.
-        let assumedContact = contactTime ?? hint?.startTime
-        let batWindow: ClosedRange<Double>? = assumedContact.map {
+        // The bat window exists only when contact is genuinely known — the
+        // audio trigger on a live capture. It used to fall back to Vision's
+        // flight start, and Vision's flight is structurally the PITCH, so on
+        // imports the tape was collected a second before contact and the
+        // quadratic fit then EXTRAPOLATED to t=0: a fabricated attack angle,
+        // bat speed and smash factor from a cluster of glove-coloured pixels.
+        // No contact, no bat panel — absent, not invented.
+        let batWindow: ClosedRange<Double>? = contactTime.map {
             ($0 - options.bat.windowS)...($0 + 0.005)
         }
 
@@ -302,13 +319,29 @@ enum ClipAnalyzer {
         var tracks = TrackBuilder.stitchTracks(fragments)
         diagnostics?.tracksBuilt = tracks.count
         diagnostics?.bestTrackFrames = tracks.map(\.count).max() ?? 0
+        // Selection happens in DISPLAY space. `direction` means which way the
+        // hit crosses the picture a person sees; on a clip whose buffer is
+        // turned, a buffer-space vx points the other way (180) or sideways
+        // (90), and the direction gate then rejects the hit and hands back the
+        // pitch. The chosen index maps straight back to the raw track, which
+        // stays in buffer pixels for the overlay.
+        let uprightTracks = tracks.map {
+            VideoOrientation.rotate(track: $0, width: width, height: height,
+                                    quarterTurns: quarterTurns)
+        }
+        func pickIndex(direction: TrackBuilder.Direction) -> Int? {
+            guard let t = TrackBuilder.selectOutboundTrack(uprightTracks,
+                                                           direction: direction,
+                                                           contactTime: contactTime)
+            else { return nil }
+            return uprightTracks.firstIndex(of: t)
+        }
         // The contact instant, when the caller knows it, is what keeps the
         // incoming pitch out of the answer — see `selectOutboundTrack`. It is
         // known on every live capture (the audio trigger, corrected for the
         // speed of sound) and unknown on most imports, where selection falls
         // back to speed as before.
-        var selected = TrackBuilder.selectOutboundTrack(tracks, direction: options.direction,
-                                                        contactTime: contactTime)
+        var selected = pickIndex(direction: options.direction).map { tracks[$0] }
 
         // Last resort, when the requested direction matched nothing. This used
         // to take the LONGEST track, which on a swing clip is reliably the
@@ -318,8 +351,7 @@ enum ClipAnalyzer {
         // with the direction constraint dropped keeps the "fastest coherent
         // track" rule and gives up only the thing that actually failed.
         if selected == nil, !tracks.isEmpty {
-            selected = TrackBuilder.selectOutboundTrack(tracks, direction: .auto,
-                                                        contactTime: contactTime)
+            selected = pickIndex(direction: .auto).map { tracks[$0] }
         }
         if selected == nil, !tracks.isEmpty {
             tracks.sort { $0.count > $1.count }
@@ -381,14 +413,20 @@ enum ClipAnalyzer {
         // almost straight UP — and the pipeline then correctly refused it as
         // impossible. The tracking was perfect. The frame it was measured in
         // was not the frame anybody sees.
-        let turns = VideoOrientation.quarterTurns(preferredTransform)
+        let turns = quarterTurns
         let display = VideoOrientation.displaySize(width: width, height: height,
                                                    quarterTurns: turns)
         let upright = VideoOrientation.rotate(track: track, width: width, height: height,
                                               quarterTurns: turns)
-        diagnostics?.videoQuarterTurns = turns
 
-        let focalPx = TiltRectifier.focalPx(widthPx: Double(display.width),
+        // Focal length from the BUFFER width. The horizontal field of view
+        // describes the sensor's landscape span, which is the buffer's long
+        // axis whatever the display turn — computing it from display.width
+        // made the focal wrong by the aspect ratio (~1.78x) on quarter-turned
+        // clips, so tilt rectification injected bias instead of removing it.
+        // A pinhole's focal in pixels is the same in every direction, so one
+        // number serves the rotated frame too.
+        let focalPx = TiltRectifier.focalPx(widthPx: Double(width),
                                             fovDeg: options.fieldOfViewDeg)
         let cx = Double(display.width) / 2, cy = Double(display.height) / 2
         let measured = TiltRectifier.rectify(track: upright,
@@ -448,14 +486,39 @@ enum ClipAnalyzer {
         var pose: [PoseObservation] = []
         var body: BodyMetrics?
         if options.trackBody {
+            // Vision must be shown the frames upright or it finds nobody. The
+            // capture path records the orientation; imports never had one, so
+            // fall back to the container's turn — .up on a 180 clip is how the
+            // body pass silently returned nothing for a hitter in plain view.
+            let poseOrientation = options.visionOrientation == .up
+                ? VideoOrientation.imageOrientation(quarterTurns: turns)
+                : options.visionOrientation
             pose = try detectPose(asset: asset, track: videoTrack,
                                   fps: fps, sampleHz: options.poseSampleHz,
-                                  orientation: options.visionOrientation,
+                                  orientation: poseOrientation,
                                   width: width, height: height,
-                                  tiltDeg: options.tiltDeg, focalPx: focalPx,
-                                  cx: cx, cy: cy, diagnostics: diagnostics,
+                                  diagnostics: diagnostics,
                                   duration: duration, progress: progress)
-            body = BodyAnalyzer.analyze(track: pose,
+            // Raw joints are what is STORED and DRAWN — the overlay sits on the
+            // original frames, the same split the ball and bat use. Only the
+            // copy the numbers come from is rotated and rectified; measuring
+            // from the rectified copy while drawing it raw is how the skeleton
+            // floated beside the hitter on any off-level clip.
+            let poseMeasured = VideoOrientation.rotate(pose: pose,
+                                                       width: width, height: height,
+                                                       quarterTurns: turns)
+                .map { obs -> PoseObservation in
+                    guard options.tiltDeg != 0, focalPx > 0 else { return obs }
+                    var joints: [PoseJoint: PosePoint] = [:]
+                    for (j, pt) in obs.joints {
+                        let r = TiltRectifier.rectify(x: pt.x, y: pt.y,
+                                                      tiltDeg: options.tiltDeg,
+                                                      focalPx: focalPx, cx: cx, cy: cy)
+                        joints[j] = PosePoint(x: r.x, y: r.y, confidence: pt.confidence)
+                    }
+                    return PoseObservation(frame: obs.frame, t: obs.t, joints: joints)
+                }
+            body = BodyAnalyzer.analyze(track: poseMeasured,
                                         contactTime: effectiveContact,
                                         scaleMPerPx: metrics.scaleBallMPerPx,
                                         ballDirectionX: metrics.vxPxS)
@@ -494,8 +557,6 @@ enum ClipAnalyzer {
                                    sampleHz: Double,
                                    orientation: CGImagePropertyOrientation,
                                    width: Int, height: Int,
-                                   tiltDeg: Double, focalPx: Double,
-                                   cx: Double, cy: Double,
                                    diagnostics: ClipDiagnostics? = nil,
                                    duration: Double = 0,
                                    progress: (@Sendable (Double) -> Void)? = nil) throws -> [PoseObservation] {
@@ -536,10 +597,11 @@ enum ClipAnalyzer {
                     let px = VisionGeometry.imagePoint(fromVision: p.location,
                                                        orientation: orientation,
                                                        width: width, height: height)
-                    let r = TiltRectifier.rectify(x: Double(px.x), y: Double(px.y),
-                                                  tiltDeg: tiltDeg, focalPx: focalPx,
-                                                  cx: cx, cy: cy)
-                    joints[joint] = PosePoint(x: r.x, y: r.y,
+                    // Raw buffer pixels, deliberately. Rotation and tilt
+                    // rectification happen in the caller, on the MEASURED copy
+                    // only — what this returns is stored and drawn on the
+                    // original frames.
+                    joints[joint] = PosePoint(x: Double(px.x), y: Double(px.y),
                                               confidence: Double(p.confidence))
                 }
                 guard joints.count >= 4 else { continue }

@@ -42,6 +42,7 @@ final class ClipRecorder {
     private var videoFormat: CMFormatDescription?
     private var audioFormat: CMFormatDescription?
     private var startedManually = false
+    private var displayTransform: CGAffineTransform = .identity
     private let queue = DispatchQueue(label: "swinglab.cliprecorder")
 
     /// Begin a clip. `videoRing`/`audioRing` are the pre-roll, oldest first.
@@ -49,7 +50,8 @@ final class ClipRecorder {
                audioRing: [CMSampleBuffer],
                contactPTS: CMTime,
                postRoll: Double,
-               manual: Bool) {
+               manual: Bool,
+               displayTransform: CGAffineTransform = .identity) {
         guard !isRecording else { return }
         videoSamples = videoRing
         audioSamples = audioRing
@@ -59,6 +61,7 @@ final class ClipRecorder {
         videoFormat = videoRing.first.flatMap { CMSampleBufferGetFormatDescription($0) }
         audioFormat = audioRing.first.flatMap { CMSampleBufferGetFormatDescription($0) }
         startedManually = manual
+        self.displayTransform = displayTransform
         isRecording = true
     }
 
@@ -101,6 +104,7 @@ final class ClipRecorder {
         let start = startPTS
         let contact = contactPTS
         let manual = startedManually
+        let transform = displayTransform
         videoSamples.removeAll()
         audioSamples.removeAll()
 
@@ -116,6 +120,13 @@ final class ClipRecorder {
                 let vIn = AVAssetWriterInput(mediaType: .video,
                                              outputSettings: nil,
                                              sourceFormatHint: vFmt)
+                // The display matrix. Samples are passthrough straight from the
+                // encoder, so without this a phone mounted the other way up
+                // writes a file whose buffer is upside down and whose
+                // container says it is not — every player shows it inverted
+                // and the analyzer needs a capture-time hint to know. With it,
+                // the file itself carries the truth, like every camera app's.
+                vIn.transform = transform
                 vIn.expectsMediaDataInRealTime = false
                 guard writer.canAdd(vIn) else { throw RecorderError.cannotAddInput }
                 writer.add(vIn)

@@ -55,6 +55,45 @@ enum VideoOrientation {
         }
     }
 
+    /// Quarter turns implied by a capture-time Vision orientation, for clips
+    /// whose container carries NO display matrix — the app's own recordings,
+    /// which are written straight from the encoder. The capture path records
+    /// which way Vision had to be shown the frames; that is the same fact.
+    static func quarterTurns(from orientation: CGImagePropertyOrientation) -> Int {
+        switch orientation {
+        case .right, .rightMirrored: return 1
+        case .down, .downMirrored:   return 2
+        case .left, .leftMirrored:   return 3
+        default:                     return 0
+        }
+    }
+
+    /// ...and back the other way, for telling Vision how to look at a buffer
+    /// whose container DOES carry a display matrix.
+    static func imageOrientation(quarterTurns q: Int) -> CGImagePropertyOrientation {
+        switch ((q % 4) + 4) % 4 {
+        case 1:  return .right
+        case 2:  return .down
+        case 3:  return .left
+        default: return .up
+        }
+    }
+
+    /// A pose track. Confidences are untouched for the same reason diameters
+    /// are — they are not coordinates.
+    static func rotate(pose: [PoseObservation],
+                       width: Int, height: Int, quarterTurns q: Int) -> [PoseObservation] {
+        guard q != 0 else { return pose }
+        return pose.map { obs in
+            var joints: [PoseJoint: PosePoint] = [:]
+            for (j, pt) in obs.joints {
+                let p = point(x: pt.x, y: pt.y, width: width, height: height, quarterTurns: q)
+                joints[j] = PosePoint(x: p.x, y: p.y, confidence: pt.confidence)
+            }
+            return PoseObservation(frame: obs.frame, t: obs.t, joints: joints)
+        }
+    }
+
     /// A whole track. Diameters are untouched — a length does not rotate.
     static func rotate(track: [BallObservation],
                        width: Int, height: Int, quarterTurns q: Int) -> [BallObservation] {
