@@ -3,8 +3,8 @@
 // Full terms in LICENSE at the repository root. No warranty.
 
 import AVFoundation
-import AVKit
 import SwiftUI
+import UIKit
 
 /// The clip, played back with everything the app measured drawn on top of it.
 ///
@@ -141,8 +141,10 @@ struct TrackReviewView: View {
         }
     }
 
+    /// `map` is `@escaping` because `ForEach` stores its content closure rather
+    /// than calling it inline, so the mapper has to outlive this call.
     private func skeleton(_ observation: PoseObservation,
-                          map: (Double, Double) -> CGPoint) -> some View {
+                          map: @escaping (Double, Double) -> CGPoint) -> some View {
         ZStack {
             ForEach(Array(PoseJoint.segments.enumerated()), id: \.offset) { _, segment in
                 Path { p in
