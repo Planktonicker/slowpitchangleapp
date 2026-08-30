@@ -54,6 +54,10 @@ final class CaptureController: NSObject, ObservableObject {
     }
     /// Audio impulses that fired with nobody in frame and were ignored.
     @Published private(set) var suppressedTriggerCount = 0
+    /// The clip just recorded contained an impulse much louder than the one
+    /// that triggered it — so the trigger heard something that was not the
+    /// hit. Read and cleared by `AppModel` when the clip is filed.
+    @Published var lastClipHeardLouderImpulse = false
     /// Non-nil while the system holds the camera (phone call, another app).
     @Published private(set) var interruptionMessage: String?
     /// What the ball-measurement gates saw on the last tap. Shown in setup so a
@@ -215,8 +219,10 @@ final class CaptureController: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        trigger.onContact = { [weak self] pts in
-            self?.pipelineQueue.async { self?.startClip(contactPTS: pts, gated: true) }
+        trigger.onContact = { [weak self] pts, db in
+            self?.pipelineQueue.async {
+                self?.startClip(contactPTS: pts, gated: true, triggerDb: db)
+            }
         }
         presenceGate.onPresenceChange = { [weak self] present in
             self?.hitterPresent = present
@@ -786,7 +792,12 @@ final class CaptureController: NSObject, ObservableObject {
     /// can consult it without a cross-thread read of a @Published var.
     private var pipelineIsArmed = false
 
-    private func startClip(contactPTS: CMTime, gated: Bool) {
+    /// How loud the impulse that started the current clip was, over the
+    /// rolling floor. `-infinity` for a manual clip, which had no impulse.
+    private var clipTriggerDb: Double = -.infinity
+
+    private func startClip(contactPTS: CMTime, gated: Bool,
+                           triggerDb: Double = -.infinity) {
         guard !recorder.isRecording else { return }
         guard !videoRing.isEmpty else { return }
         // Belt and braces with the trigger's own armed flag. The flag alone
@@ -804,6 +815,10 @@ final class CaptureController: NSObject, ObservableObject {
             return
         }
         trigger.isArmed = false
+        clipTriggerDb = triggerDb
+        // Zeroed here so the peak measured over this clip is the peak DURING
+        // it, not one inherited from the wait before it.
+        _ = trigger.consumePeakSinceArm()
         // Which way the buffer must turn for display, as a matrix on the
         // file. `visionOrientationForFrames` already answers "which way is
         // up" for the pose gate; this writes the same answer where players
@@ -822,6 +837,25 @@ final class CaptureController: NSObject, ObservableObject {
     private func finishClip() {
         clipCounter += 1
         let url = ClipStore.newClipURL(index: clipCounter)
+        // Was anything in this clip much louder than the thing that started
+        // it? If so the trigger did not hear the hit, and the contact time on
+        // this clip is the time of something else.
+        //
+        // The trigger is disarmed for the whole of a clip, so it cannot fire
+        // on the real crack and cannot re-centre itself — and re-centring
+        // would be the wrong fix anyway, because the loudest sound in a swing
+        // clip is not always the bat: a ball into a chain-link fence 1.2 s
+        // later can beat it, and moving contact FORWARD onto that is worse
+        // than leaving it early. So this records rather than corrects. The
+        // analyzer already recovers the reading (CONTACT_TIME_REJECTED); what
+        // this adds is the reason, at capture time, while the venue is still
+        // in front of the person who can fix it.
+        let clipPeakDb = trigger.consumePeakSinceArm()
+        let heardLouder = clipTriggerDb.isFinite && clipPeakDb.isFinite
+            && clipPeakDb >= clipTriggerDb + SLA.retriggerMarginDb
+        if heardLouder {
+            DispatchQueue.main.async { self.lastClipHeardLouderImpulse = true }
+        }
         recorder.finish(url: url) { [weak self] result in
             guard let self else { return }
             DispatchQueue.main.async {

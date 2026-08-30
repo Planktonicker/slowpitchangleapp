@@ -736,6 +736,11 @@ final class AppModel: ObservableObject {
         // swing recorded under them.
         let capturedSessionID = session?.id
         let capturedGateOff = hitterCheckIsOff
+        // Read and cleared here, for the same reason as the two above: the
+        // controller sets it as the clip closes, and the next clip's trigger
+        // would otherwise inherit this one's verdict.
+        let capturedWrongSound = capture.lastClipHeardLouderImpulse
+        capture.lastClipHeardLouderImpulse = false
         let setting = currentSetting
         let placement = wizard.placement
         let droppedDuringClip = capture.droppedFrameCount > dropsAtClipStart
@@ -794,7 +799,8 @@ final class AppModel: ObservableObject {
                                 failure: finalFailure,
                                 autoTriggered: autoTriggered && !wasManual,
                                 sessionID: capturedSessionID,
-                                gateWasOff: capturedGateOff)
+                                gateWasOff: capturedGateOff,
+                                triggeredOnWrongSound: capturedWrongSound)
             }
         }
     }
@@ -808,7 +814,8 @@ final class AppModel: ObservableObject {
                             failure: String?,
                             autoTriggered: Bool,
                             sessionID: UUID?,
-                            gateWasOff: Bool) {
+                            gateWasOff: Bool,
+                            triggeredOnWrongSound: Bool) {
         analysisProgress = nil
 
         let clipName = settings.keepClips
@@ -843,6 +850,7 @@ final class AppModel: ObservableObject {
         dto.captureFlags = placement.captureFlags
             + (gateWasOff ? [.hitterGateDisabled] : [])
             + (droppedFrames ? [.framesDropped] : [])
+            + (triggeredOnWrongSound ? [.triggeredOnWrongSound] : [])
         dto.sessionID = sessionID
 
         do {

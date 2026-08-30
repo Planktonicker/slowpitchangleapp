@@ -290,6 +290,15 @@ enum SLA {
     /// Contact impulse must stand this far above the rolling noise floor.
     /// Matches `PASS_DB` in `spike/check_audio_trigger.py` (G5).
     static let triggerDb = 15.0
+    /// How much louder than the triggering impulse something has to be, inside
+    /// the same clip, before the trigger is judged to have heard the wrong
+    /// thing.
+    ///
+    /// 6 dB is a factor of two in amplitude — far outside window-to-window
+    /// noise, and far inside the gap actually measured: on IMG_6703 the
+    /// trigger fired on 17.1 dB and the bat crack in the same clip reached
+    /// 37.0, a gap of 19.9.
+    static let retriggerMarginDb = 6.0
 
     // MARK: - Bat / contact quality (Phase 3+)
 

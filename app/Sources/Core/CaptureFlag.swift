@@ -36,6 +36,11 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
     /// height estimate both do, and this says they were skipped.
     case distanceNotMeasured = "DISTANCE_NOT_MEASURED"
     case scaleFromManualDistance = "SCALE_FROM_MANUAL_DISTANCE"
+    /// Something in this clip was much louder than the impulse that triggered
+    /// it, so the trigger fired on the wrong sound. Stamped at capture time
+    /// because the trigger is disarmed for the whole of a clip and cannot
+    /// notice this itself once the recording has started.
+    case triggeredOnWrongSound = "TRIGGERED_ON_WRONG_SOUND"
     case hitterGateDisabled = "HITTER_GATE_DISABLED"
     /// The lens was well above or below contact height. Costs no accuracy on
     /// its own — a level camera sees the same geometry from any height — but
@@ -71,6 +76,8 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
             return "The camera distance was never measured for this swing — the ball was not tapped during setup. Launch angle and exit velocity do not need it: the scale comes from the ball's own size in the picture. What was skipped is the sound-travel correction on contact time, about three frames at 240fps, and the lens-height estimate."
         case .scaleFromManualDistance:
             return "Scale came from a typed distance rather than a measured object, so it inherits whatever error is in that number."
+        case .triggeredOnWrongSound:
+            return "Something during this clip was much louder than the sound that started the recording, so the trigger fired on something that was not the hit — and once a clip is recording the trigger is off, so it never heard the real one. The contact time on this swing is the time of the wrong sound. Launch angle and exit velocity survive it (the analysis falls back to the first frame of the flight and flags that), but the bat metrics do not, and the next swing here will do the same. Settings → Trigger → Calibrate measures what a hit at this venue actually sounds like."
         case .hitterGateDisabled:
             return "The requirement for a person in frame was switched off for this session, so a loud noise alone could have started this clip."
         case .ballUnconfirmed:
@@ -94,6 +101,7 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
         case .distanceOutsideProtocol: return "distance"
         case .distanceNotMeasured: return "no distance"
         case .scaleFromManualDistance: return "typed distance"
+        case .triggeredOnWrongSound: return "wrong trigger sound"
         case .hitterGateDisabled: return "no hitter check"
         case .cameraHeightOffProtocol: return "camera height"
         case .ballUnconfirmed: return "ball not identified"
