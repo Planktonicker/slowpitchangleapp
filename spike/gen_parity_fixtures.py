@@ -484,6 +484,8 @@ def main():
         "STITCH_ACCEL_K": sla.STITCH_ACCEL_K,
         "STITCH_VELOCITY_NOISE_PX_S": sla.STITCH_VELOCITY_NOISE_PX_S,
         "STITCH_MAX_ANGLE_DEG": sla.STITCH_MAX_ANGLE_DEG,
+        "BUILD_MAX_TURN_DEG": sla.BUILD_MAX_TURN_DEG,
+        "BUILD_TURN_MIN_STEP_PX": sla.BUILD_TURN_MIN_STEP_PX,
         "STITCH_VELOCITY_WINDOW": float(sla.STITCH_VELOCITY_WINDOW),
         "SEED_OUTLIER_SIGMA": float(sla.SEED_OUTLIER_SIGMA),
         "SEED_OUTLIER_MIN_PX": float(sla.SEED_OUTLIER_MIN_PX),
@@ -792,6 +794,44 @@ def main():
                         diameter_px=11.0, area_px=95.0))
             per_frame[f] = obs
         return per_frame
+
+    # ...and the layout that made a mess of two real field clips: a pitch
+    # arriving and a hit leaving, meeting at contact. The ball is in nearly the
+    # same PLACE on both sides of the collision — only the direction reverses —
+    # so a nearest-neighbour gate walked the pitch straight through and out the
+    # other side. One track, two flights, and a launch angle fitted to both.
+    #
+    # There must be TWO tracks here, not one.
+    def contact_case(fps=240.0, contact_f=30):
+        per_frame = {}
+        cx, cy = 640.0, 420.0
+        for f in range(contact_f + 30):
+            t = f / fps
+            if f <= contact_f:                     # pitch: in from the right,
+                k = contact_f - f                  # descending, 11 px/frame
+                x, y = cx + 11.0 * k, cy - 6.0 * k - 0.02 * k * k
+            else:                                  # hit: out to the right,
+                k = f - contact_f                  # rising, 26 px/frame
+                x, y = cx + 26.0 * k, cy - 8.0 * k + 0.02 * k * k
+            per_frame[f] = [sla.BallObservation(frame=f, t=t, x=x, y=y,
+                                                diameter_px=19.0, area_px=283.0)]
+        return per_frame
+
+    cc = contact_case()
+    cbuilt = sla.build_tracks(cc, fps=240.0)
+    cpick = sla.select_outbound_track(cbuilt, fps=240.0, direction="right")
+    out["build_tracks"].append({
+        "name": "pitch_must_not_run_into_hit",
+        "fps": 240.0,
+        "per_frame": {str(f): [{"frame": o.frame, "t": o.t, "x": o.x, "y": o.y,
+                                "diameter_px": o.diameter_px, "area_px": o.area_px}
+                               for o in obs] for f, obs in cc.items()},
+        "expected_track_count": len(cbuilt),
+        "expected_longest": max((len(t) for t in cbuilt), default=0),
+        "expected_selected_len": 0 if cpick is None else len(cpick),
+        "expected_selected_first_x": None if cpick is None else cpick[0].x,
+        "expected_selected_last_x": None if cpick is None else cpick[-1].x,
+    })
 
     bc = build_case()
     built = sla.build_tracks(bc, fps=199.0)

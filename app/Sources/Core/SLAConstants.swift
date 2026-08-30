@@ -114,6 +114,13 @@ enum SLA {
     static let seedSearchRadiusPx = 45.0
     static let seedSearchRadiusFrac = 0.06
 
+    /// Association may not reverse a moving track — see `TrackBuilder`. The
+    /// guard that keeps the incoming pitch out of the outgoing hit.
+    static let buildMaxTurnDeg = 60.0
+    /// Per FRAME, not per second: centroid noise is a fixed number of
+    /// pixels between frames however fast the camera runs.
+    static let buildTurnMinStepPx = 5.0
+
     /// Motion gating — see `MotionMask`. The largest single source of false
     /// candidates on real footage is stationary scenery that shares the ball's
     /// colour; a ball is the one ball-coloured thing that moves.

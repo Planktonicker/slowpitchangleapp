@@ -56,14 +56,54 @@ enum TrackBuilder {
                 }
                 let predX = last.x + vx * Double(gap) / fps
                 let predY = last.y + vy * Double(gap) / fps
-                let speedPxPerFrame = (vx * vx + vy * vy).squareRoot() / fps
+                let speed = (vx * vx + vy * vy).squareRoot()
+                let speedPxPerFrame = speed / fps
                 let gate = max(baseGatePx, 2.5 * speedPxPerFrame) * Double(gap)
+                // A moving track may not be extended by a candidate behind it.
+                // This is what keeps the PITCH out of the HIT: at contact the
+                // ball is in nearly the same PLACE on both sides of the
+                // collision and only its DIRECTION reverses, so a
+                // nearest-neighbour gate walked the incoming pitch straight
+                // through contact and out the other way — one "track" running
+                // left at 2,700 px/s for half its length and right at 6,300 for
+                // the rest. `stitchTracks` already refuses that join, but
+                // contact never handed it two fragments to refuse.
+                //
+                // See BUILD_MAX_TURN_DEG in `spike/sla_common.py`: 60 deg is
+                // roughly a hundred times the turn any real flight makes in one
+                // frame at 240fps, which is the point — this refuses reversals,
+                // it does not enforce smoothness.
+                let heading = speedPxPerFrame >= SLA.buildTurnMinStepPx
+                let cosMax = cos(SLA.buildMaxTurnDeg * .pi / 180)
 
+                var inGate: [(d: Double, ci: Int)] = []
                 for (ci, c) in cands.enumerated() {
                     let d = ((c.x - predX) * (c.x - predX)
                              + (c.y - predY) * (c.y - predY)).squareRoot()
-                    if d < gate { pairs.append((d, ti, ci)) }
+                    if d < gate { inGate.append((d, ci)) }
                 }
+                inGate.sort { $0.d != $1.d ? $0.d < $1.d : $0.ci < $1.ci }
+
+                // A track that cannot be extended forwards COASTS — it does not
+                // swerve onto the next candidate along. Rejecting the nearest
+                // candidate and letting the runner-up through is worse than no
+                // filter at all: on a lawn of jittering blobs it walks a track
+                // from one clutter blob to the NEXT ONE 90 px away every frame,
+                // manufacturing a perfectly straight 16,000 px/s track out of
+                // stationary grass that then beats the real ball on speed.
+                if heading, let best = inGate.first {
+                    // Measured from the last OBSERVED point, not the
+                    // prediction: the prediction is already downrange, so a
+                    // candidate sitting on it would have no direction at all.
+                    let c0 = cands[best.ci]
+                    let sx = c0.x - last.x, sy = c0.y - last.y
+                    let step = (sx * sx + sy * sy).squareRoot()
+                    if step > 1e-9, (sx * vx + sy * vy) / (step * speed) < cosMax {
+                        continue
+                    }
+                }
+
+                for g in inGate { pairs.append((g.d, ti, g.ci)) }
             }
             pairs.sort {
                 $0.d != $1.d ? $0.d < $1.d

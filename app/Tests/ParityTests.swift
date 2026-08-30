@@ -400,9 +400,27 @@ final class ParityTests: XCTestCase {
     /// lawn of stationary clutter blobs, dozens of which sit inside the
     /// association gate of its path.
     ///
+    /// ...and on the layout that made a mess of two real clips: a pitch
+    /// arriving and a hit leaving, meeting at contact. There must be TWO
+    /// tracks there. The ball is in nearly the same PLACE on both sides of the
+    /// collision and only its direction reverses, so a nearest-neighbour gate
+    /// walked the pitch straight through and out the other side — one track,
+    /// two flights, and a launch angle fitted to both.
+    ///
     /// Pinned because a ball that survives detection and then fails to LINK is
-    /// indistinguishable, from outside, from one that was never detected.
+    /// indistinguishable, from outside, from one that was never detected — and
+    /// because the clutter case is what catches the tempting wrong fix. Letting
+    /// a refused track take the RUNNER-UP candidate instead of coasting walks
+    /// it from one grass blob to the next 90 px away every frame, and that
+    /// straight 16,000 px/s fiction beats the real ball on speed. That case
+    /// goes from selecting all 40 frames of the ball to selecting 11 frames of
+    /// lawn, and nothing else in the suite notices.
     func testTrackBuildingMatchesReference() {
+        XCTAssertEqual(SLA.buildMaxTurnDeg,
+                       Self.fixtures.constants["BUILD_MAX_TURN_DEG"]!, accuracy: 1e-12)
+        XCTAssertEqual(SLA.buildTurnMinStepPx,
+                       Self.fixtures.constants["BUILD_TURN_MIN_STEP_PX"]!, accuracy: 1e-12)
+
         let cases = Self.fixtures.build_tracks
         XCTAssertFalse(cases.isEmpty)
         for c in cases {

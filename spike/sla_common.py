@@ -318,6 +318,41 @@ def detect_ball_candidates(
 # Track building (greedy nearest-neighbour with constant-velocity prediction)
 # ---------------------------------------------------------------------------
 
+# A moving track may not be extended by a candidate that lies behind it.
+#
+# This is the guard that keeps the PITCH out of the HIT. At contact the ball is
+# spatially continuous — it is in very nearly the same place on both sides of
+# the collision — and only its direction reverses. Nearest-neighbour
+# association does not look at direction, so it walked the incoming pitch
+# straight through contact and out the other side, producing one "track" whose
+# first half travels left at 2,700 px/s and whose second half travels right at
+# 6,300 px/s. Everything downstream then fits a single flight to two different
+# flights: a bogus launch angle, a bogus speed, and a track long enough to win
+# selection against the clean one.
+#
+# `stitch_tracks` already refuses exactly this join (STITCH_MAX_ANGLE_DEG), but
+# it only ever saw separate fragments. Contact never produced two fragments, so
+# that guard never got a vote.
+#
+# Deliberately loose. It exists to refuse a REVERSAL, not to enforce smoothness:
+# a real flight at 240fps turns a fraction of a degree per frame (gravity moves
+# 30 m/s by 0.04), so 60 deg is roughly a hundred times more turn than any ball
+# in flight needs, and a bounce off the ground or a bat is well past it. A
+# tighter cone would start rejecting the noisy first step of a young track for
+# no gain.
+BUILD_MAX_TURN_DEG = 60.0
+# ...and below this step the direction of travel is noise, not a heading.
+#
+# Per FRAME, not per second, and that is the whole point: a blob's apparent
+# heading comes from centroid noise of a pixel or two between frames, which is
+# a fixed number of pixels however fast the camera runs. Expressed per second
+# the same jitter reads 400 px/s at 199fps and 5,000 px/s at 240fps on a wider
+# lens, and any threshold picked for one clip is wrong for the next. Five
+# pixels a frame is a few times the centroid noise and well under the incoming
+# pitch, which runs 11.
+BUILD_TURN_MIN_STEP_PX = 5.0
+
+
 def build_tracks(
     per_frame: dict[int, list[BallObservation]],
     fps: float,
@@ -330,6 +365,9 @@ def build_tracks(
     Association gate grows with track speed so a 240fps line drive (~30-40 px
     per frame) still links, while random net/grass false positives don't.
     Tracks may coast (miss detection) for up to max_coast_frames.
+
+    A track that is moving will not accept a candidate behind it — see
+    BUILD_MAX_TURN_DEG.
     """
     active: list[dict] = []     # {obs: [...], last_frame: int}
     done: list[list[BallObservation]] = []
@@ -373,12 +411,40 @@ def build_tracks(
                 vx = vy = 0.0
             pred_x = obs[-1].x + vx * gap / fps
             pred_y = obs[-1].y + vy * gap / fps
-            speed_px_fr = math.hypot(vx, vy) / fps
+            speed = math.hypot(vx, vy)
+            speed_px_fr = speed / fps
             gate = max(base_gate_px, 2.5 * speed_px_fr) * gap
+            heading = speed_px_fr >= BUILD_TURN_MIN_STEP_PX
+            cos_max = math.cos(math.radians(BUILD_MAX_TURN_DEG))
+
+            in_gate: list[tuple[float, int]] = []
             for ci, c in enumerate(cands):
                 d = math.hypot(c.x - pred_x, c.y - pred_y)
                 if d < gate:
-                    pairs.append((d, ti, ci))
+                    in_gate.append((d, ci))
+            in_gate.sort()
+
+            if heading and in_gate:
+                # A track that cannot be extended forwards COASTS. It does not
+                # swerve onto the next candidate along.
+                #
+                # Rejecting the nearest candidate and letting the track take
+                # the runner-up is worse than not filtering at all: on a lawn
+                # of jittering blobs it walked tracks from one clutter blob to
+                # the NEXT ONE 90 px away, every frame, in a straight line —
+                # manufacturing a fast, perfectly straight 16,000 px/s track
+                # out of stationary grass, which then won selection against the
+                # real ball. Refusing the whole frame is the rule that matches
+                # the intent: the track lost sight of its object.
+                d0, ci0 = in_gate[0]
+                c0 = cands[ci0]
+                sx, sy = c0.x - obs[-1].x, c0.y - obs[-1].y
+                step = math.hypot(sx, sy)
+                if step > 1e-9 and (sx * vx + sy * vy) / (step * speed) < cos_max:
+                    continue
+
+            for d, ci in in_gate:
+                pairs.append((d, ti, ci))
 
         pairs.sort()
         matched_tracks: set[int] = set()
