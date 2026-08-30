@@ -184,6 +184,28 @@ garden, too low for a cage.
 Hit. The app records by itself and the swing card appears in a few seconds with
 **Launch** and **Exit velo**.
 
+### Seeing what was actually tracked
+
+Numbers cannot tell you the detector spent a clip following a stripe of grass.
+The picture can.
+
+Open the swing (Swings → tap it) → **"Play with tracking overlaid"**. The clip
+plays full screen with everything the app measured drawn on it:
+
+- **green circle** — the ball, at the diameter that was measured. If the circle
+  is visibly bigger or smaller than the ball under it, the scale is wrong, and
+  so is the exit velocity.
+- **yellow path** — the whole flight. A parabola is a hit. A line running along
+  the ground, or a scribble sitting in one place, is the detector tracking
+  something that is not the ball.
+- **yellow skeleton** — the hitter, at this frame. Limbs are only drawn between
+  joints the model was confident about, so a missing arm is a real gap and
+  explains a missing body measurement.
+
+Step frame by frame with the arrows. The readout says `no ball this frame`
+wherever the tracker lost it, which is what turns "it failed" into "it failed
+here".
+
 ### Is it capturing correctly? Three checks
 - **Numbers plausible?** Launch angle between −10° and 50°, exit velo roughly
   60–140 km/h (40–90 mph). Wildly outside → screenshot the card → Claude.

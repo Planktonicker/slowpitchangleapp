@@ -16,6 +16,11 @@ struct SwingDetailView: View {
     @State private var track: [BallObservation] = []
     @State private var videoSize: CGSize = .zero
     @State private var showOverlay = true
+    @State private var showReview = false
+    /// The video track's rotation. Without it the overlay is drawn in
+    /// encoded-buffer space over a picture the player has already turned — see
+    /// `VideoOverlayGeometry`.
+    @State private var videoTransform: CGAffineTransform = .identity
     @State private var hangText = ""
     @State private var carryText = ""
     @State private var shareURLs: [URL] = []
@@ -46,6 +51,7 @@ struct SwingDetailView: View {
         .background(Theme.black)
         .task { await load() }
         .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }
+        .fullScreenCover(isPresented: $showReview) { TrackReviewView(swing: swing) }
     }
 
     // MARK: - Replay
@@ -54,9 +60,7 @@ struct SwingDetailView: View {
         if let player {
             ZStack {
                 VideoPlayer(player: player)
-                    .aspectRatio(videoSize == .zero ? 16.0 / 9.0
-                                 : videoSize.width / videoSize.height,
-                                 contentMode: .fit)
+                    .aspectRatio(displayAspect, contentMode: .fit)
                 if showOverlay, videoSize != .zero {
                     GeometryReader { geo in
                         overlay(in: geo.size)
@@ -66,6 +70,14 @@ struct SwingDetailView: View {
             }
             .frame(maxHeight: 260)
             Toggle("Show tracked path", isOn: $showOverlay)
+            // The inline strip shows the path; it cannot show WHEN each point
+            // was found, or whether the hitter was ever seen. Both are what
+            // somebody asking "why did this fail" actually needs.
+            Button {
+                showReview = true
+            } label: {
+                Label("Play with tracking overlaid", systemImage: "figure.stand.line.dotted.figure.stand")
+            }
         } else {
             Text("Clip not found on this device.")
                 .foregroundStyle(.secondary)
@@ -77,11 +89,17 @@ struct SwingDetailView: View {
     /// playhead: at 240fps the whole flight is a fraction of a second, and the
     /// shape is what tells you whether the track is sane.
     private func overlay(in size: CGSize) -> some View {
-        let scale = min(size.width / videoSize.width, size.height / videoSize.height)
-        let offsetX = (size.width - videoSize.width * scale) / 2
-        let offsetY = (size.height - videoSize.height * scale) / 2
+        // Shared with the full-screen review, and correct for rotated clips.
+        // This used to letterbox the NATURAL size and ignore the preferred
+        // transform, so on any portrait-shot import — which is most imported
+        // footage — the path was drawn ninety degrees out over footage that
+        // was fine, which reads as a broken tracker.
+        let scale = VideoOverlayGeometry.scale(natural: videoSize,
+                                               transform: videoTransform, in: size)
         func map(_ x: Double, _ y: Double) -> CGPoint {
-            CGPoint(x: offsetX + x * scale, y: offsetY + y * scale)
+            VideoOverlayGeometry.viewPoint(bufferPoint: CGPoint(x: x, y: y),
+                                           natural: videoSize,
+                                           transform: videoTransform, in: size)
         }
 
         return ZStack {
@@ -95,12 +113,21 @@ struct SwingDetailView: View {
                 ForEach(Array(track.enumerated()), id: \.offset) { _, o in
                     Circle()
                         .stroke(.green, lineWidth: 1)
-                        .frame(width: max(4, o.diameterPx * scale),
-                               height: max(4, o.diameterPx * scale))
+                        .frame(width: max(4, o.diameterPx * Double(scale)),
+                               height: max(4, o.diameterPx * Double(scale)))
                         .position(map(o.x, o.y))
                 }
             }
         }
+    }
+
+    /// Aspect of the picture as shown, which for a rotated clip is not the
+    /// aspect of the encoded frame.
+    private var displayAspect: CGFloat {
+        guard videoSize != .zero else { return 16.0 / 9.0 }
+        let d = VideoOverlayGeometry.displaySize(natural: videoSize, transform: videoTransform)
+        guard d.height > 0 else { return 16.0 / 9.0 }
+        return d.width / d.height
     }
 
     // MARK: - Sections
@@ -371,9 +398,13 @@ struct SwingDetailView: View {
         let url = ClipStore.clipURL(named: clip)
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         let asset = AVURLAsset(url: url)
-        if let videoTrack = try? await asset.loadTracks(withMediaType: .video).first,
-           let size = try? await videoTrack.load(.naturalSize) {
-            videoSize = CGSize(width: abs(size.width), height: abs(size.height))
+        if let videoTrack = try? await asset.loadTracks(withMediaType: .video).first {
+            if let size = try? await videoTrack.load(.naturalSize) {
+                videoSize = CGSize(width: abs(size.width), height: abs(size.height))
+            }
+            if let t = try? await videoTrack.load(.preferredTransform) {
+                videoTransform = t
+            }
         }
         player = AVPlayer(url: url)
     }

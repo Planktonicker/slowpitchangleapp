@@ -1,0 +1,75 @@
+// SwingLab — Copyright (C) 2026 Planktonicker
+// SPDX-License-Identifier: AGPL-3.0-only
+// Full terms in LICENSE at the repository root. No warranty.
+
+import CoreGraphics
+import Foundation
+
+/// Putting measured points back on top of the picture they were measured from.
+///
+/// Everything this app measures — ball centres, diameters, pose joints — is in
+/// **encoded buffer pixels**, y down, because that is the frame the detector
+/// walked. What a player shows is not that frame. A video track carries a
+/// `preferredTransform` that rotates and flips the encoded pixels into the
+/// picture a viewer sees, and iPhone footage uses it constantly: the sensor
+/// reads out landscape whichever way the phone was held, and the transform is
+/// what makes a portrait clip portrait.
+///
+/// Skipping that step does not produce a slightly wrong overlay. It produces
+/// one rotated ninety degrees, drawn confidently, which reads as "the tracker
+/// is broken" when the tracker was right and the drawing was wrong. That is
+/// the opposite of what an overlay is for.
+///
+/// Everything here is pure and pinned by `VideoOverlayGeometryTests`, because
+/// the failure mode is a picture that looks plausible and is not.
+enum VideoOverlayGeometry {
+
+    /// How big the video is once the transform has been applied — the size a
+    /// player actually lays out.
+    static func displaySize(natural: CGSize, transform: CGAffineTransform) -> CGSize {
+        let t = natural.applying(transform)
+        return CGSize(width: abs(t.width), height: abs(t.height))
+    }
+
+    /// Where the picture sits inside a view, letterboxed.
+    ///
+    /// `AVPlayerLayer` and AVKit's `VideoPlayer` both default to
+    /// `.resizeAspect`, so the video is centred with bars on two sides and the
+    /// overlay has to land in the same rect rather than on the whole view.
+    static func videoRect(displaySize: CGSize, in viewSize: CGSize) -> CGRect {
+        guard displaySize.width > 0, displaySize.height > 0,
+              viewSize.width > 0, viewSize.height > 0 else { return .zero }
+        let scale = min(viewSize.width / displaySize.width,
+                        viewSize.height / displaySize.height)
+        let w = displaySize.width * scale
+        let h = displaySize.height * scale
+        return CGRect(x: (viewSize.width - w) / 2, y: (viewSize.height - h) / 2,
+                      width: w, height: h)
+    }
+
+    /// Points per encoded pixel. Aspect-fit is uniform, so one number does for
+    /// both axes — and for lengths like a ball diameter.
+    static func scale(natural: CGSize, transform: CGAffineTransform,
+                      in viewSize: CGSize) -> CGFloat {
+        let display = displaySize(natural: natural, transform: transform)
+        let rect = videoRect(displaySize: display, in: viewSize)
+        guard display.width > 0 else { return 0 }
+        return rect.width / display.width
+    }
+
+    /// The whole job: an encoded buffer pixel, as a point in the view.
+    ///
+    /// The transform already carries the translation that keeps the rotated
+    /// picture in positive coordinates, so applying it to a point lands
+    /// directly in display space — no separate flip or offset to get wrong.
+    static func viewPoint(bufferPoint: CGPoint, natural: CGSize,
+                          transform: CGAffineTransform,
+                          in viewSize: CGSize) -> CGPoint {
+        let display = displaySize(natural: natural, transform: transform)
+        let rect = videoRect(displaySize: display, in: viewSize)
+        guard display.width > 0, display.height > 0 else { return .zero }
+        let p = bufferPoint.applying(transform)
+        return CGPoint(x: rect.minX + p.x * (rect.width / display.width),
+                       y: rect.minY + p.y * (rect.height / display.height))
+    }
+}
