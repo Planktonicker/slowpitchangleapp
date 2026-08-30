@@ -17,7 +17,7 @@ struct SettingsView: View {
                               bounds: $model.settings.detector.hsvLo)
                     hsvEditor(title: "Upper bound",
                               bounds: $model.settings.detector.hsvHi)
-                    Text("OpenCV HSV convention (H 0-179), identical to track_ball.py's --hsv-lo/--hsv-hi. A range tuned on the Mac can be typed straight in here.")
+                    Text("OpenCV HSV convention (H 0-179), identical to track_ball.py's --hsv-lo/--hsv-hi. The defaults reject grass, which shares the ball's hue but not its saturation — if a venue still finds the lawn instead of the ball, raise the lower S before touching anything else.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 

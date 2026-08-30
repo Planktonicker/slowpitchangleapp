@@ -40,9 +40,16 @@ AIR_DENSITY = 1.225                          # kg/m^3, sea level
 DRAG_CD = 0.47                               # smooth-ish sphere
 MPH_PER_MPS = 2.23694
 
-# Optic yellow in OpenCV HSV (H: 0-179). Wide on purpose; tighten per venue.
-HSV_LO_DEFAULT = (18, 70, 120)
-HSV_HI_DEFAULT = (48, 255, 255)
+# Optic yellow in OpenCV HSV (H: 0-179). Still generous — tighten per venue —
+# but no longer wide enough to swallow grass, which the first window did:
+# measured on real field footage, sunlit grass sits at ~H36 S89 V133 and the
+# old ceiling (H<=48, S>=70, V>=120) admitted it wholesale. 18% of the frame
+# lit up and the largest "ball-coloured" blob was the lawn. The ball itself
+# measured H29-34, S~170, V~240: fluorescent yellow is far more SATURATED than
+# any vegetation, so S>=100 is the separator that costs nothing, and H<=40
+# still clears real optic yellow (~22-35) with margin.
+HSV_LO_DEFAULT = (18, 100, 120)
+HSV_HI_DEFAULT = (40, 255, 255)
 
 # Detection geometry defaults (pixels), sane for 1080p at 4.5-6 m.
 MIN_RADIUS_PX_DEFAULT = 4.0

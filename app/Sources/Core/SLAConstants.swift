@@ -33,9 +33,20 @@ enum SLA {
     // MARK: - Detection defaults
 
     /// Optic yellow in OpenCV HSV convention (H: 0-179, S/V: 0-255).
-    /// Wide on purpose; tighten per venue in Settings.
-    static let hsvLoDefault = HSVBounds(h: 18, s: 70, v: 120)
-    static let hsvHiDefault = HSVBounds(h: 48, s: 255, v: 255)
+    ///
+    /// Still generous — tighten per venue in Settings — but no longer wide
+    /// enough to swallow grass, which the first window did. Measured on real
+    /// field footage: sunlit grass sits at about H36 S89 V133, and the old
+    /// ceiling (H<=48, S>=70, V>=120) admitted it wholesale. 18% of the frame
+    /// passed the colour test and the largest "ball-coloured" blob in the
+    /// picture was the lawn, with the actual ball a speck inside the noise.
+    ///
+    /// The ball measured H29-34, S~170, V~240. Saturation is the separator that
+    /// costs nothing: fluorescent yellow is far more saturated than any
+    /// vegetation, so S>=100 splits them cleanly while H<=40 still clears real
+    /// optic yellow (~22-35 in this convention) with margin.
+    static let hsvLoDefault = HSVBounds(h: 18, s: 100, v: 120)
+    static let hsvHiDefault = HSVBounds(h: 40, s: 255, v: 255)
 
     /// Fluorescent pink/orange barrel tape (Phase 3 bat tracking).
     static let batHSVLoDefault = HSVBounds(h: 160, s: 90, v: 110)
