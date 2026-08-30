@@ -43,6 +43,16 @@ final class ParityTests: XCTestCase {
         var stitch_tracks: [StitchCase]
         var seed_track: [SeedCase]
         var motion_mask: [MotionCase]
+        var contact_from_audio: [ContactAudioCase]
+    }
+
+    struct ContactAudioCase: Decodable {
+        var name: String
+        var audio_t: Double
+        /// `nil` is "the camera distance is not known", which must leave the
+        /// trigger time alone rather than guess at one.
+        var distance_m: Double?
+        var expected: Double
     }
 
     struct MotionCase: Decodable {
@@ -530,6 +540,34 @@ final class ParityTests: XCTestCase {
         assertClose(SLA.smashGoodHi, c["SMASH_GOOD_HI"]!, "smash good hi")
         assertClose(SLA.slowpitchLaunchLo, c["SLOWPITCH_LAUNCH_LO"]!, "slow-pitch launch lo")
         assertClose(SLA.slowpitchLaunchHi, c["SLOWPITCH_LAUNCH_HI"]!, "slow-pitch launch hi")
+    }
+
+    /// Turning "when the phone heard contact" into "when contact happened".
+    ///
+    /// Pinned because it is the one measurement in the app validated directly
+    /// against real footage: on IMG_6703 the pitch and hit paths cross inside
+    /// [0.7667, 0.7708] s and the audio impulse landed at 0.781 s. The
+    /// correction has to put contact back inside that bracket, and a port that
+    /// dropped it — or applied it the wrong way round — would move the barrel
+    /// window by three frames of a sixty-millisecond window with nothing
+    /// downstream able to notice.
+    func testContactTimeFromAudioMatchesReference() {
+        assertClose(SLA.speedOfSoundMps,
+                    Self.fixtures.constants["SPEED_OF_SOUND_MPS"]!, "speed of sound")
+        assertClose(SLA.contactAudioMaxDistanceM,
+                    Self.fixtures.constants["CONTACT_AUDIO_MAX_DISTANCE_M"]!, "max distance")
+
+        let cases = Self.fixtures.contact_from_audio
+        XCTAssertFalse(cases.isEmpty)
+        for c in cases {
+            assertClose(SLA.contactTimeFromAudio(audioT: c.audio_t, distanceM: c.distance_m),
+                        c.expected, "contact from audio \(c.name)")
+        }
+
+        // The field bracket itself, stated as a test rather than as a comment.
+        let corrected = SLA.contactTimeFromAudio(audioT: 0.781, distanceM: 4.6)
+        XCTAssertGreaterThanOrEqual(corrected, 0.7667, "earlier than the pitch's last frame")
+        XCTAssertLessThanOrEqual(corrected, 0.7708, "later than the hit's first frame")
     }
 
     /// The motion gate, pixel for pixel.

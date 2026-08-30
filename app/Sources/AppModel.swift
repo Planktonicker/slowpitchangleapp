@@ -584,7 +584,13 @@ final class AppModel: ObservableObject {
             do {
                 analysis = try await ClipAnalyzer.analyze(
                     url: output.url,
-                    contactTime: output.contactOffset,
+                    // Not the trigger time. The trigger fires when the crack
+                    // reaches the phone, one sound-travel-time after contact —
+                    // three frames at 240fps from a normal tripod distance,
+                    // measured against a field clip. See `contactTimeFromAudio`.
+                    contactTime: SLA.contactTimeFromAudio(
+                        audioT: output.contactOffset,
+                        distanceM: wasManual ? nil : placement.distanceM),
                     options: options,
                     progress: { p in
                         Task { @MainActor [weak self] in self?.analysisProgress = p }

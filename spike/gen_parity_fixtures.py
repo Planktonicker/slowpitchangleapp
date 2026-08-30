@@ -485,6 +485,8 @@ def main():
         "STITCH_VELOCITY_NOISE_PX_S": sla.STITCH_VELOCITY_NOISE_PX_S,
         "STITCH_MAX_ANGLE_DEG": sla.STITCH_MAX_ANGLE_DEG,
         "BUILD_MAX_TURN_DEG": sla.BUILD_MAX_TURN_DEG,
+        "SPEED_OF_SOUND_MPS": sla.SPEED_OF_SOUND_MPS,
+        "CONTACT_AUDIO_MAX_DISTANCE_M": sla.CONTACT_AUDIO_MAX_DISTANCE_M,
         "BUILD_TURN_MIN_STEP_PX": sla.BUILD_TURN_MIN_STEP_PX,
         "STITCH_VELOCITY_WINDOW": float(sla.STITCH_VELOCITY_WINDOW),
         "SEED_OUTLIER_SIGMA": float(sla.SEED_OUTLIER_SIGMA),
@@ -532,6 +534,7 @@ def main():
         "stitch_tracks": [],
         "seed_track": [],
         "motion_mask": [],
+        "contact_from_audio": [],
     }
 
     for c in fit_cases():
@@ -641,6 +644,21 @@ def main():
             "prev": None if prev is None else [[int(v) for v in row] for row in prev],
             "cur": [[int(v) for v in row] for row in cur],
             "expected": None if m is None else [[int(v) for v in row] for row in m],
+        })
+
+    # Contact time from the audio trigger. The middle case is the real one: on
+    # IMG_6703 the impulse landed at 0.781 s and the pitch and hit paths cross
+    # in [0.7667, 0.7708]. The correction has to land inside that bracket.
+    for name, audio_t, dist in [
+        ("distance_unknown", 0.781, None),
+        ("field_clip_4m6", 0.781, 4.6),
+        ("close_in_tee", 0.400, 2.0),
+        ("absurd_distance_ignored", 0.781, 200.0),
+        ("clamped_at_clip_start", 0.005, 4.6),
+    ]:
+        out["contact_from_audio"].append({
+            "name": name, "audio_t": audio_t, "distance_m": dist,
+            "expected": sla.contact_time_from_audio(audio_t, dist),
         })
 
     still = [[100]*7 for _ in range(7)]

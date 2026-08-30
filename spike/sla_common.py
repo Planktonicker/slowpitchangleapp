@@ -1572,6 +1572,51 @@ def suggest_trigger_db(background_peak_db: float,
 # These functions return metres and degrees; comparison is against the hitter's
 # OWN baseline over time, which is the only reference that exists.
 
+# ---------------------------------------------------------------------------
+# Contact time from the audio trigger
+# ---------------------------------------------------------------------------
+#
+# The trigger fires when the crack of the bat REACHES THE PHONE, which is one
+# sound-travel-time after it happened. Measured on a field clip whose contact
+# instant is bracketed to 4 ms by the pitch and hit paths crossing: the audio
+# impulse landed 10-14 ms after contact, and the ball-diameter scale put the
+# camera about 4.6 m away, which is 13.4 ms of travel. That is not a tuning
+# coincidence, it is the speed of sound, and the distance is already known
+# because the scale depends on it.
+#
+# 13 ms is three frames at 240fps. It matters twice: the barrel window is only
+# ~60 ms wide, so a three-frame shift moves a fifth of it, and the contact
+# instant is where the undercut reading compares barrel to ball.
+#
+# 343 m/s is dry air at 20 C. Temperature moves it by 0.6 m/s per degree, so a
+# 10-degree error is 1.7% of a 13 ms correction — 0.2 ms, a twentieth of a
+# frame. Not worth asking anybody for the temperature.
+SPEED_OF_SOUND_MPS = 343.0
+
+# Beyond this the "distance" is not a camera placement, it is a bad reading,
+# and subtracting it would move contact somewhere the clip never covered.
+CONTACT_AUDIO_MAX_DISTANCE_M = 60.0
+
+
+def contact_time_from_audio(
+    audio_t: float,
+    distance_m: float | None,
+    speed_of_sound_mps: float = SPEED_OF_SOUND_MPS,
+) -> float:
+    """When contact actually happened, given when the phone heard it.
+
+    Returns audio_t unchanged when the distance is unknown or implausible:
+    guessing a distance would trade a known small bias for an unknown one.
+    """
+    if distance_m is None or not (0.0 < distance_m <= CONTACT_AUDIO_MAX_DISTANCE_M):
+        return audio_t
+    if speed_of_sound_mps <= 0:
+        return audio_t
+    # Never before the clip starts. A pre-roll shorter than the flight time of
+    # the sound would otherwise point at a frame that was never recorded.
+    return max(0.0, audio_t - distance_m / speed_of_sound_mps)
+
+
 # Joint names, matching Apple's VNHumanBodyPoseObservation.JointName raw values
 # so the Swift side needs no translation table.
 JOINT_NOSE = "nose"

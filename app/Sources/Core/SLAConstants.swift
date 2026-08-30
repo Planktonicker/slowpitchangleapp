@@ -114,6 +114,36 @@ enum SLA {
     static let seedSearchRadiusPx = 45.0
     static let seedSearchRadiusFrac = 0.06
 
+    /// Speed of sound, for turning "when the phone heard contact" into "when
+    /// contact happened". See `contactTimeFromAudio`.
+    static let speedOfSoundMps = 343.0
+    /// Past this the distance is a bad reading, not a camera placement.
+    static let contactAudioMaxDistanceM = 60.0
+
+    /// When contact actually happened, given when the trigger fired.
+    ///
+    /// The trigger fires when the crack of the bat REACHES THE PHONE, one
+    /// sound-travel-time after it happened. Measured on a field clip whose
+    /// contact instant is bracketed to 4 ms by the pitch and hit paths
+    /// crossing: the impulse landed 10-14 ms after contact, and the
+    /// ball-diameter scale put the camera about 4.6 m away — 13.4 ms of
+    /// travel. Not a tuning coincidence; the speed of sound, and the distance
+    /// is already known because the scale depends on it.
+    ///
+    /// Three frames at 240fps. It matters twice: the barrel window is only
+    /// ~60 ms wide, so this moves a fifth of it, and the contact instant is
+    /// where the undercut reading compares barrel to ball.
+    ///
+    /// Returns the input unchanged when the distance is unknown or absurd —
+    /// guessing one trades a known small bias for an unknown one. Port of
+    /// `contact_time_from_audio`.
+    static func contactTimeFromAudio(audioT: Double, distanceM: Double?) -> Double {
+        guard let d = distanceM, d > 0, d <= contactAudioMaxDistanceM else { return audioT }
+        // Never before the clip starts: a pre-roll shorter than the sound's
+        // flight would otherwise point at a frame that was never recorded.
+        return max(0, audioT - d / speedOfSoundMps)
+    }
+
     /// Association may not reverse a moving track — see `TrackBuilder`. The
     /// guard that keeps the incoming pitch out of the outgoing hit.
     static let buildMaxTurnDeg = 60.0

@@ -40,6 +40,8 @@
   "STITCH_VELOCITY_NOISE_PX_S": 400.0,
   "STITCH_MAX_ANGLE_DEG": 40.0,
   "BUILD_MAX_TURN_DEG": 60.0,
+  "SPEED_OF_SOUND_MPS": 343.0,
+  "CONTACT_AUDIO_MAX_DISTANCE_M": 60.0,
   "BUILD_TURN_MIN_STEP_PX": 5.0,
   "STITCH_VELOCITY_WINDOW": 6.0,
   "SEED_OUTLIER_SIGMA": 3.0,
@@ -50599,6 +50601,38 @@
      0
     ]
    ]
+  }
+ ],
+ "contact_from_audio": [
+  {
+   "name": "distance_unknown",
+   "audio_t": 0.781,
+   "distance_m": null,
+   "expected": 0.781
+  },
+  {
+   "name": "field_clip_4m6",
+   "audio_t": 0.781,
+   "distance_m": 4.6,
+   "expected": 0.7675889212827989
+  },
+  {
+   "name": "close_in_tee",
+   "audio_t": 0.4,
+   "distance_m": 2.0,
+   "expected": 0.3941690962099126
+  },
+  {
+   "name": "absurd_distance_ignored",
+   "audio_t": 0.781,
+   "distance_m": 200.0,
+   "expected": 0.781
+  },
+  {
+   "name": "clamped_at_clip_start",
+   "audio_t": 0.005,
+   "distance_m": 4.6,
+   "expected": 0.0
   }
  ]
 }
