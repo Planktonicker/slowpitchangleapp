@@ -39,9 +39,23 @@ struct DetectionTrace: Codable, Sendable, Equatable {
     /// window is matching scenery — and writing all of them helps nobody.
     var truncated = false
 
-    /// Cap on stored candidates. Ten thousand is far more than a real swing
-    /// produces and small enough to write and read without thinking about it.
-    static let candidateLimit = 10_000
+    /// Caps on stored candidates.
+    ///
+    /// Two of them, because the failure modes differ. The per-frame cap stops
+    /// one grassy frame from flooding the file with hundreds of near-identical
+    /// clutter blobs — nobody reviews the 300th ring on a single frame, and
+    /// past a couple of dozen the finding is "the colour window is matching
+    /// scenery", which the diagnostics already state in words. The total cap
+    /// bounds the file. Both being hit is recorded, because a truncated trace
+    /// must say "not saved past here" rather than let an empty frame read as
+    /// "nothing was detected".
+    static let perFrameLimit = 24
+    static let candidateLimit = 20_000
+
+    /// Time of the last candidate that was actually stored, when truncation
+    /// cut recording short. Before this instant an empty frame means nothing
+    /// was found; after it, it means nothing was SAVED.
+    var truncatedAtT: Double?
 
     var hasSearchRegion: Bool {
         searchedX0 != nil && searchedY0 != nil && searchedX1 != nil && searchedY1 != nil

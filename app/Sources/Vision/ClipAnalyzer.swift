@@ -91,9 +91,10 @@ enum ClipAnalyzer {
         /// is itself wrong — a re-wrapped or re-timed file — where there is no
         /// signal left to measure and the user simply knows the answer.
         var fpsOverride: Double?
-        /// How far either side of Vision's parabola a candidate may sit.
-        var corridorPx: Double = 90
-        /// Skip Vision and go straight to full-frame detection.
+        /// Skip the Vision trajectory pass entirely. Detection is full-frame
+        /// either way — the hint stopped constraining the search after it
+        /// twice steered onto the wrong object — so all this saves now is the
+        /// cost of the pass itself and its contact-time fallback.
         var forceFallbackDetector = false
         /// Rescale the detector's radius gates from the 1080p they are written
         /// for to whatever this clip actually is.
@@ -176,10 +177,19 @@ enum ClipAnalyzer {
         }
 
         // --- pass 2: measure ---
-        // Follows the fitted curve across the frame rather than boxing in the
-        // handful of points Vision reported — see `TrajectoryHint.searchROI`.
-        let searchROI = hint?.searchROI(corridorPx: options.corridorPx,
-                                        width: width, height: height)
+        // The whole frame, every frame — same as the reference. Vision's hint
+        // used to constrain this, first as a box around its points, then as a
+        // corridor along their fitted curve, and both steered the search off
+        // the ball. The failure is structural, not a tuning miss:
+        // VNDetectTrajectoriesRequest rewards a long clean parabola, and in
+        // slow-pitch the long clean parabola is the PITCH. The hit is several
+        // times faster and gone in a fraction of a second — exactly what that
+        // detector is worst at — so on a real swing clip the hint converges on
+        // the wrong ball and every constraint built on it excludes the right
+        // one. The hint survives only as a contact-time fallback and a
+        // diagnostics line; `sla_common.py` never had a corridor, and now
+        // neither does this.
+        let searchROI: ROI? = nil
         var perFrame: [Int: [BallObservation]] = [:]
         var tape: [BatTracker.TapeObservation] = []
         var trace = DetectionTrace(searchedX0: searchROI?.x0, searchedY0: searchROI?.y0,
@@ -207,22 +217,20 @@ enum ClipAnalyzer {
                     diagnostics.inWindowPixels.append(
                         BallDetector.countInWindow(image: img, settings: options.detector))
                 }
-                var cands = BallDetector.detect(image: img,
+                let cands = BallDetector.detect(image: img,
                                                 frame: index,
                                                 t: t,
                                                 settings: options.detector,
                                                 roi: searchROI)
-                // Kept BEFORE the corridor filter, so the review can show a
+                // Kept before track building, so the review can show a
                 // candidate the detector genuinely found and the pipeline then
-                // threw away. After the filter they would be indistinguishable
-                // from pixels that were never examined.
+                // discarded — without this they would be indistinguishable
+                // from pixels where nothing was found.
                 if trace.candidates.count < DetectionTrace.candidateLimit {
-                    trace.candidates.append(contentsOf: cands)
-                } else {
+                    trace.candidates.append(contentsOf: cands.prefix(DetectionTrace.perFrameLimit))
+                } else if !trace.truncated {
                     trace.truncated = true
-                }
-                if let h = hint {
-                    cands = cands.filter { h.admits(x: $0.x, y: $0.y, corridorPx: options.corridorPx) }
+                    trace.truncatedAtT = trace.candidates.last?.t
                 }
                 if !cands.isEmpty {
                     perFrame[index] = cands
@@ -246,32 +254,6 @@ enum ClipAnalyzer {
         diagnostics?.bestTrackFrames = tracks.map(\.count).max() ?? 0
         var selected = TrackBuilder.selectOutboundTrack(tracks, direction: options.direction)
 
-        // Vision's hint is an accelerator, not an authority, and it is allowed
-        // to be wrong about WHICH object is the ball. When it is, the
-        // constrained pass does not fail — it succeeds on the wrong thing, and
-        // a short confident track then blocked the unconstrained retry that
-        // would have found the real flight. The retry used to require `nil`,
-        // so a nineteen-frame track of something that was not a ball counted
-        // as an answer while the ball sat in plain sight outside the corridor.
-        //
-        // Now anything short of a usable track triggers the second pass, and
-        // the better of the two wins rather than the first one to exist.
-        let constrainedCount = selected?.count ?? 0
-        if hint != nil, !options.forceFallbackDetector,
-           constrainedCount < SLA.minTrackFrames {
-            var retry = options
-            retry.forceFallbackDetector = true
-            diagnostics?.retriedWithoutHint = true
-            let unconstrained = try? await analyze(url: url, contactTime: contactTime,
-                                                   options: retry, diagnostics: diagnostics,
-                                                   progress: progress)
-            if let unconstrained, unconstrained.track.count > constrainedCount {
-                return unconstrained
-            }
-            // The retry did no better. Fall through and report what the hint
-            // found, rather than throwing away a short track for nothing — and
-            // if there was nothing either way, the guard below says so.
-        }
         // Last resort, when the requested direction matched nothing. This used
         // to take the LONGEST track, which on a swing clip is reliably the
         // worst possible answer: the longest thing in the footage is either an

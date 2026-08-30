@@ -24,122 +24,12 @@ struct TrajectoryHint: Sendable {
     var startTime: Double
     var endTime: Double
 
-    /// Vertical corridor around the path, fitted from the hint points.
-    private var fit: (a: Double, b: Double, c: Double)?
-    /// The x range the fit was actually made over. Outside it the curve is an
-    /// extrapolation and is trusted less, in proportion to how far outside.
-    private var xSpan: (lo: Double, hi: Double) = (0, 0)
-
     init(pointsPx: [CGPoint], startTime: Double, endTime: Double) {
         self.pointsPx = pointsPx
         self.startTime = startTime
         self.endTime = endTime
-        let xs = pointsPx.map { Double($0.x) }
-        self.xSpan = (xs.min() ?? 0, xs.max() ?? 0)
-        if pointsPx.count >= 3 {
-            let f = Geometry.fitQuadratic(ts: xs, vs: pointsPx.map { Double($0.y) })
-            self.fit = (f.a, f.b, f.c)
-        } else {
-            self.fit = nil
-        }
     }
 
-    /// True when a candidate at (x, y) is plausibly on this trajectory.
-    ///
-    /// The corridor widens away from the data. Vision reports the stretch it
-    /// is confident about, which can be a couple of hundred pixels of a
-    /// flight that crosses the whole frame — and a quadratic fitted to that
-    /// stretch says almost nothing three times its own length away. Holding a
-    /// fixed tolerance out there claims a precision the fit does not have, and
-    /// what it actually rejects is the real ball, because the extrapolated
-    /// curve has drifted off it.
-    ///
-    /// Linear widening is the conservative reading: quadratic extrapolation
-    /// error grows faster than that, so this still under-states the
-    /// uncertainty rather than over-stating it. Capped, so the corridor never
-    /// becomes "accept anything" and stops doing its job near the data.
-    func admits(x: Double, y: Double, corridorPx: Double) -> Bool {
-        if let f = fit {
-            let yHat = f.a * x * x + f.b * x + f.c
-            let outside = max(0, max(xSpan.lo - x, x - xSpan.hi))
-            let widened = corridorPx + min(corridorPx * 3, outside * 0.5)
-            if abs(y - yHat) <= widened { return true }
-        }
-        for p in pointsPx {
-            let dx = x - Double(p.x), dy = y - Double(p.y)
-            if (dx * dx + dy * dy).squareRoot() <= corridorPx { return true }
-        }
-        return false
-    }
-
-    /// Bounding box of the hint, expanded by `pad`, for ROI-limited search.
-    /// The bounding box of the points Vision actually reported, padded.
-    ///
-    /// Kept for the no-fit case and for tests. On its own it is NOT the region
-    /// worth searching — see `searchROI`.
-    func roi(pad: Double, width: Int, height: Int) -> ROI? {
-        guard !pointsPx.isEmpty else { return nil }
-        let xs = pointsPx.map { Double($0.x) }
-        let ys = pointsPx.map { Double($0.y) }
-        return ROI(x0: Int((xs.min() ?? 0) - pad),
-                   y0: Int((ys.min() ?? 0) - pad),
-                   x1: Int((xs.max() ?? 0) + pad) + 1,
-                   y1: Int((ys.max() ?? 0) + pad) + 1)
-            .clamped(width: width, height: height)
-    }
-
-    /// Where the ball could be, which is not the same as where Vision saw it.
-    ///
-    /// `admits` extrapolates: it fits a parabola to the hint points and accepts
-    /// a candidate within the corridor of that curve at ANY x, including far
-    /// past the last point Vision reported. The search region did not
-    /// extrapolate — it was the hint's own bounding box plus a little padding.
-    /// So the two disagreed about where the ball might be, and the tighter one
-    /// won in silence: the detector never looked at pixels the corridor would
-    /// have accepted, and a ball that flew on past Vision's last point simply
-    /// did not exist.
-    ///
-    /// That is not a rare corner. `VNDetectTrajectoriesRequest` reports the
-    /// segment it is confident about, which on a real swing is often the few
-    /// frames around the fastest, cleanest part of the flight — one clip gave
-    /// eight points. Everything before and after was cropped away before a
-    /// single pixel was examined, and the resulting short track looked like a
-    /// detector that could not see a ball in plain view.
-    ///
-    /// Now the region follows the fitted curve across the frame, so the search
-    /// and the admission test agree. Clutter rejection does not suffer: it was
-    /// never the ROI doing that job, it was the corridor, and the corridor is
-    /// unchanged.
-    func searchROI(corridorPx: Double, width: Int, height: Int) -> ROI? {
-        guard !pointsPx.isEmpty else { return nil }
-        let pad = corridorPx + 40
-        var minX = pointsPx.map { Double($0.x) }.min() ?? 0
-        var maxX = pointsPx.map { Double($0.x) }.max() ?? 0
-        var minY = pointsPx.map { Double($0.y) }.min() ?? 0
-        var maxY = pointsPx.map { Double($0.y) }.max() ?? 0
-
-        if let f = fit, width > 1 {
-            // Walk the curve across the frame and keep the stretch of it that
-            // is actually on screen. A steep parabola leaves the picture almost
-            // at once and contributes almost nothing; a shallow one reaches the
-            // far edge and the region grows to match, which is the correct
-            // answer rather than an expensive one.
-            let step = max(1.0, Double(width) / 240)
-            var x = 0.0
-            while x <= Double(width) {
-                let yHat = f.a * x * x + f.b * x + f.c
-                if yHat >= -corridorPx, yHat <= Double(height) + corridorPx {
-                    minX = min(minX, x); maxX = max(maxX, x)
-                    minY = min(minY, yHat); maxY = max(maxY, yHat)
-                }
-                x += step
-            }
-        }
-
-        return ROI(x0: Int(minX - pad), y0: Int(minY - pad),
-                   x1: Int(maxX + pad) + 1, y1: Int(maxY + pad) + 1)
-            .clamped(width: width, height: height)
-    }
 }
 
 /// Thin wrapper over `VNDetectTrajectoriesRequest`.
@@ -214,8 +104,7 @@ final class TrajectoryDetector {
         // Vision's normalized coordinates are measured on the ORIENTED image,
         // origin bottom-left. Mapping them back onto the buffer therefore has
         // to undo the orientation as well as the y flip — assuming `.up` here
-        // put the corridor in the wrong half of a sideways frame, which reads
-        // downstream as a hint that admits nothing.
+        // put the points in the wrong half of a sideways frame.
         let pts = obs.detectedPoints.map { p in
             VisionGeometry.imagePoint(fromVision: p.location,
                                       orientation: lastOrientation,

@@ -429,6 +429,13 @@ struct TrackReviewView: View {
                     // opposite ends of the pipeline.
                     Text("\(rejectedNow.count) found here, none used")
                         .font(Theme.label(11)).foregroundStyle(Theme.warn)
+                } else if let cutoff = trace.truncatedAtT, currentTime > cutoff {
+                    // Past the truncation point an empty frame is a statement
+                    // about the FILE, not the footage, and saying "nothing
+                    // detected" here once sent a whole debugging session after
+                    // a detector that was working.
+                    Text("trace full — finds past this point weren't saved")
+                        .font(Theme.label(11)).foregroundStyle(Theme.steel)
                 } else {
                     Text("nothing detected this frame")
                         .font(Theme.label(11)).foregroundStyle(Theme.steel)
