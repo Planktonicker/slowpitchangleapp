@@ -48,7 +48,12 @@ struct SettingsView: View {
                 }
 
                 Section("Analysis") {
-                    Toggle("Track the bat", isOn: $model.settings.trackBat)
+                    // No "track the bat" switch. The bat is tracked whenever
+                    // tape is on it and reported only when it was, which is a
+                    // question the app can answer for itself — see
+                    // `ClipAnalyzer`. Asking the hitter to remember a toggle
+                    // buys nothing and silently costs them the bat panel on
+                    // every clip they forget it.
                     Toggle("Track the hitter's body", isOn: $model.settings.trackBody)
                     Text("Adds stride, head movement, weight shift, front-knee angle and spine tilt — the sagittal-plane measurements a side-on camera makes honestly. It is a third pass over each clip, so turn it off if the phone is running hot.")
                         .font(.caption).foregroundStyle(.secondary)

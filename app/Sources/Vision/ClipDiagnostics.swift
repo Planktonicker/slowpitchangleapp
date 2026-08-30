@@ -84,6 +84,10 @@ final class ClipDiagnostics {
 
     // Stage 4 — bat and body
     var batTapeFrames = 0
+    /// Set when a tape path was found and then withheld — a pink object that
+    /// was not moving like a barrel. Distinguishes "no tape on the bat" from
+    /// "something pink stood in for one", which look identical in the result.
+    var batRejectedReason: String?
     var poseFramesSampled = 0
     var poseFramesWithPerson = 0
     var jointSeenCount: [PoseJoint: Int] = [:]
@@ -162,7 +166,14 @@ final class ClipDiagnostics {
                               d.first!, d[d.count / 2], d.last!))
         }
         out.append("4 track    \(tracksBuilt) tracks built, longest \(bestTrackFrames) frames")
-        out.append("5 bat      \(batTapeFrames) frames with barrel tape")
+        if batTapeFrames == 0 {
+            out.append("5 bat      no barrel tape seen — bat metrics not reported")
+        } else {
+            out.append("5 bat      \(batTapeFrames) frames with barrel tape")
+        }
+        if let why = batRejectedReason {
+            out.append("           withheld: \(why)")
+        }
 
         if poseFramesSampled > 0 {
             out.append(String(format: "6 body     person in %d/%d sampled frames (%.0f%%)",

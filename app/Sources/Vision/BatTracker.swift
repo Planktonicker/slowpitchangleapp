@@ -42,6 +42,16 @@ enum BatTracker {
         var windowS: Double = 0.06
         var minBlobArea: Double = 30
         var maxBlobArea: Double = 20000
+        /// Below this the pink thing in frame was not a swinging bat.
+        ///
+        /// App-only — the reference tracks no tape, it is handed a path. The
+        /// number comes from the swing, not from tuning: the slowest adult
+        /// slow-pitch barrel at contact is around 13 m/s (30 mph), and a
+        /// stationary pink object — a jersey, a glove in the grass, a cooler
+        /// lid — reads under 1. Eight sits an order of magnitude clear of the
+        /// clutter and comfortably under any real swing, so it decides
+        /// PRESENCE and never trims a genuine reading.
+        var minBarrelSpeedMps: Double = 8.0
     }
 
     struct TapeObservation {
@@ -51,9 +61,16 @@ enum BatTracker {
     }
 
     /// Largest tape-coloured blob in a frame, if any.
+    ///
+    /// - Parameter motion: pixels that changed since the previous frame, in
+    ///   full-frame coordinates. The barrel through contact is the second
+    ///   fastest thing in the picture; a red jersey on the bench is the
+    ///   fastest way to invent an attack angle for a bat that carries no tape
+    ///   at all. Same gate, same reason, as `BallDetector` — see `MotionMask`.
     static func detectTape(image: PixelImage,
                            settings: Settings,
-                           roi: ROI? = nil) -> (x: Double, y: Double)? {
+                           roi: ROI? = nil,
+                           motion: [Bool]? = nil) -> (x: Double, y: Double)? {
         let r = (roi ?? ROI(x0: 0, y0: 0, x1: image.width, y1: image.height))
             .clamped(width: image.width, height: image.height)
         let w = r.x1 - r.x0, h = r.y1 - r.y0
@@ -72,6 +89,18 @@ enum BatTracker {
         }
         Morphology.open(&mask, width: w, height: h)
         Morphology.close(&mask, width: w, height: h)
+
+        // After the morphology, like the ball's gate, so an already-cut blob is
+        // never opened and closed into a different shape.
+        if let motion, motion.count == image.width * image.height {
+            for yy in 0..<h {
+                let motionRow = (r.y0 + yy) * image.width + r.x0
+                let maskRow = yy * w
+                for xx in 0..<w where !motion[motionRow + xx] {
+                    mask[maskRow + xx] = 0
+                }
+            }
+        }
 
         let blobs = ConnectedComponents.label(mask: mask, width: w, height: h)
         var best: ConnectedComponents.Blob?

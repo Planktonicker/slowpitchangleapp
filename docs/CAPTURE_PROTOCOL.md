@@ -9,11 +9,23 @@ disprove) the measurement approach before any app code exists.
 - iPhone + tripod with phone mount, able to stand ~lens-at-waist height (~1.1 m)
 - Tape measure (or practiced 0.9 m paces) for camera distance and carry distances
 - The actual game balls — standard **30.5 cm circumference optic-yellow** slow-pitch softballs
-- A strip of **fluorescent pink/orange tape** wrapped once around the bat barrel
-  **at the sweet spot** (~10–15 cm from the barrel end). Placement matters twice:
-  attack angle is measured at the tape, and the contact-offset ("undercut")
-  reading assumes contact happens near the tape — put it where you actually
-  hit the ball.
+- A strip of **fluorescent pink or magenta tape** wrapped once around the bat
+  barrel **at the sweet spot** (~10–15 cm from the barrel end). Placement
+  matters twice: attack angle is measured at the tape, and the contact-offset
+  ("undercut") reading assumes contact happens near the tape — put it where you
+  actually hit the ball.
+
+  **Pink, not orange.** The detector's window is hue 160–179 (OpenCV), which is
+  pink through magenta. Orange sits at 10–25, and the ball's own optic-yellow
+  window is 18–40 — an orange barrel would be picked up by the BALL detector as
+  a fast-moving ball-coloured object arriving at contact from the wrong
+  direction, which is the one piece of clutter most likely to be mistaken for a
+  hit. Pink is as far from the ball in hue as anything gets, which is why it was
+  chosen. Deep red also lands near 170–179; prefer the fluorescent pink.
+
+  Taping is optional. Untaped, everything about the ball still measures; the
+  bat panel — attack angle, bat speed, smash factor, undercut — simply does not
+  appear. The app decides that for itself and never asks.
 - Paper + pen for the clip log (template at the bottom) and a marker card to
   "slate" clips
 

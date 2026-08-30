@@ -272,8 +272,9 @@ enum ClipAnalyzer {
                     diagnostics?.candidateDiametersPx.append(contentsOf: cands.map(\.diameterPx))
                 }
 
-                if options.trackBat, let w = batWindow, w.contains(t),
-                   let p = BatTracker.detectTape(image: img, settings: options.bat) {
+                if options.trackBat, let w = batWindow, w.contains(t), motion != nil,
+                   let p = BatTracker.detectTape(image: img, settings: options.bat,
+                                                 motion: motion) {
                     tape.append(BatTracker.TapeObservation(t: t, x: p.x, y: p.y))
                     diagnostics?.batTapeFrames += 1
                 }
@@ -374,8 +375,32 @@ enum ClipAnalyzer {
         let metrics = SwingAnalyzer.analyze(track: measured,
                                             contactTime: effectiveContact,
                                             rollDeg: options.rollDeg)
-        let bat = options.trackBat ? BatTracker.analyze(observations: measuredTape,
-                                                        contactTime: effectiveContact) : nil
+        // The bat is tracked automatically and reported only when a bat was
+        // actually there. Nothing asks the user whether they taped the barrel:
+        // if the tape is on, its path is measured; if it is not, no attack
+        // angle, no bat speed and no smash factor appear at all.
+        //
+        // Presence is decided on SPEED, because the failure that matters is a
+        // stationary pink object — a jersey, a glove in the grass — standing in
+        // for a barrel and producing a confident-looking attack angle for a bat
+        // that was never taped. A barrel through contact moves; a cooler lid
+        // does not. Below the floor the reading is withheld rather than
+        // flagged, because it is not a poorly measured bat, it is not a bat.
+        var bat: BatMetrics?
+        if options.trackBat,
+           let candidate = BatTracker.analyze(observations: measuredTape,
+                                              contactTime: effectiveContact) {
+            let speedMps = SLA.batSpeedMps(vxPxS: candidate.vxPxS,
+                                           vyPxS: candidate.vyPxS,
+                                           scaleMPerPx: metrics.scaleBallMPerPx)
+            if speedMps >= options.bat.minBarrelSpeedMps {
+                bat = candidate
+            } else {
+                diagnostics?.batRejectedReason = String(
+                    format: "tape path moved at %.1f m/s, under the %.0f m/s floor — "
+                          + "not a swinging bat", speedMps, options.bat.minBarrelSpeedMps)
+            }
+        }
 
         // --- pass 3: the hitter's body ---
         //
