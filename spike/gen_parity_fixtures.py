@@ -144,10 +144,31 @@ def analyze_cases():
                   make_track(45.0, 55.0, 260.0, 90), None, 0.0))
 
     # Contact time earlier than the first tracked point: the fit must
-    # extrapolate back to t0 (batter occlusion case).
+    # extrapolate back to t0 (batter occlusion case). Four frames back, well
+    # inside CONTACT_MAX_BACK_EXTRAPOLATION_S, so no flag.
     cases.append(("occluded_start_extrapolates",
                   make_track(70.0, 20.0, 250.0, 70, start_frame=12),
                   8 / FPS, 0.0))
+
+    # ...and the case either side of that bound, because the bound is the whole
+    # of the guard and a port that dropped it would pass every case above.
+    # 14 frames at 240fps is 58.3 ms, just under; 15 is 62.5 ms, just over.
+    cases.append(("extrapolation_at_the_limit",
+                  make_track(70.0, 20.0, 250.0, 70, start_frame=20),
+                  6 / FPS, 0.0))
+    cases.append(("extrapolation_just_over_the_limit",
+                  make_track(70.0, 20.0, 250.0, 70, start_frame=20),
+                  5 / FPS, 0.0))
+
+    # FLAG_CONTACT_TIME_REJECTED: the false-trigger case, measured on
+    # IMG_6703. A noise half a second before contact fires the trigger, the
+    # refractory window covers the real crack, and the clip is written with a
+    # contact time 0.5 s early. The flag must appear AND t0 must fall back to
+    # the first sighting — a port that flags without falling back still
+    # reports the inflated number, so the fixture pins the value too.
+    cases.append(("contact_time_rejected",
+                  make_track(70.0, 20.0, 250.0, 70, start_frame=120),
+                  0.0, 0.0))
 
     # Camera roll correction applied to the velocity vector.
     cases.append(("camera_roll_3deg",
@@ -489,6 +510,7 @@ def main():
         "BUILD_HEADING_WINDOW": float(sla.BUILD_HEADING_WINDOW),
         "SPEED_OF_SOUND_MPS": sla.SPEED_OF_SOUND_MPS,
         "CONTACT_AUDIO_MAX_DISTANCE_M": sla.CONTACT_AUDIO_MAX_DISTANCE_M,
+        "CONTACT_MAX_BACK_EXTRAPOLATION_S": sla.CONTACT_MAX_BACK_EXTRAPOLATION_S,
         "BUILD_TURN_MIN_STEP_PX": sla.BUILD_TURN_MIN_STEP_PX,
         "STITCH_VELOCITY_WINDOW": float(sla.STITCH_VELOCITY_WINDOW),
         "SEED_OUTLIER_SIGMA": float(sla.SEED_OUTLIER_SIGMA),

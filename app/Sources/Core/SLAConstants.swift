@@ -120,6 +120,24 @@ enum SLA {
     /// Past this the distance is a bad reading, not a camera placement.
     static let contactAudioMaxDistanceM = 60.0
 
+    /// How far before the track's first sighting a supplied contact time may
+    /// sit before it stops being believable. Mirrors
+    /// `CONTACT_MAX_BACK_EXTRAPOLATION_S`.
+    ///
+    /// Extrapolating backwards is legitimate for occlusion — the ball leaves
+    /// the bat behind the hitter and the first frames of flight are hidden —
+    /// and that is a handful of frames. 60 ms is fourteen at 240fps, wider
+    /// than a hitter is in a 1280-wide frame at 25 px a frame.
+    ///
+    /// Beyond it the number is not an occlusion correction, it is a false
+    /// trigger. Measured on IMG_6703: a 17 dB noise half a second before
+    /// contact fires at the default threshold, the refractory window then
+    /// covers the real 37 dB crack, and the clip is written with a contact
+    /// time 0.5 s early. The same 30-frame track then reported +4.25° and
+    /// 105.26 mph instead of −5.83° and 70.96 mph, carrying the same flags as
+    /// the correct answer.
+    static let contactMaxBackExtrapolationS = 0.06
+
     /// When contact actually happened, given when the trigger fired.
     ///
     /// The trigger fires when the crack of the bat REACHES THE PHONE, one
@@ -402,6 +420,7 @@ enum SwingFlag: String, Codable, CaseIterable, Sendable {
     case scaleDisagree = "SCALE_DISAGREE"
     case depthMotion = "DEPTH_MOTION"
     case highResidual = "HIGH_RESIDUAL"
+    case contactTimeRejected = "CONTACT_TIME_REJECTED"
 
     /// Plain-language explanation shown next to a low-confidence reading.
     var explanation: String {
@@ -416,6 +435,8 @@ enum SwingFlag: String, Codable, CaseIterable, Sendable {
             return "The ball changed size through the track, so it flew toward or away from the camera. Stand more square to the line of play."
         case .highResidual:
             return "The tracked path was jittery. Likely a busy background or a partly hidden ball."
+        case .contactTimeRejected:
+            return "The trigger fired well before the ball was seen leaving the bat, so it heard something other than this hit. Contact has been taken as the first frame of the flight instead, which costs a few frames of accuracy — but it also means the bat panel is missing and the trigger is picking up something at this venue. Settings → Trigger → Calibrate."
         }
     }
 }

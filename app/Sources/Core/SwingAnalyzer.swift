@@ -28,7 +28,27 @@ enum SwingAnalyzer {
 
         var flags: [SwingFlag] = []
         let n = track.count
-        let t0 = contactTime ?? track[0].t
+        var t0 = contactTime ?? track[0].t
+        // A contact time far earlier than the flight is not a contact time.
+        //
+        // The fit is a quadratic in t evaluated at t0, so a t0 half a second
+        // before the first sighting does not merely shift the answer — it
+        // extrapolates the curve back over ten times the span it was fitted
+        // on, and reports the velocity of a moment the camera never saw.
+        // There was no guard: whatever the caller passed was used, however far
+        // away, and the result carried the same flags as a clean reading. See
+        // `SLA.contactMaxBackExtrapolationS` for the field measurement.
+        //
+        // Falling back to the first sighting rather than refusing the swing:
+        // it is what the analyzer already does when given no contact time, it
+        // is the best defensible number this track supports, and on the clip
+        // in that note it recovers the correct reading to a tenth of a degree.
+        // The flag is what stops it being reported as if the trigger had been
+        // right.
+        if contactTime != nil, track[0].t - t0 > SLA.contactMaxBackExtrapolationS {
+            flags.append(.contactTimeRejected)
+            t0 = track[0].t
+        }
         let ts = track.map { $0.t - t0 }
         let xs = track.map { $0.x }
         let ys = track.map { $0.y }

@@ -216,6 +216,99 @@ outdoor clips with ≥0.25 s of tracked flight.*
 
 - Clips with contact impulse ≥ 15 dB over ambient: ____ / ____ (need ≥ 90%)
 
+### The armed-phone chain — 2026-08-30, IMG_6703 and IMG_6707
+
+The first end-to-end result the project has. Not G5 exactly: G5 asks whether
+contact is loud enough, and this asks the question the phone on the tripod
+actually faces — **armed, with nobody touching it, does the whole chain reach a
+number?** Microphone → trigger → ring buffer becomes a clip → contact corrected
+for sound travel → motion-gated detection → track selection → launch angle and
+exit velocity. Run with `spike/armed_phone_test.py`, which is a port of
+`ContactTrigger.swift` window for window and is given no contact frame, because
+the phone is not given one either.
+
+**Both clips completed the chain.** That is the headline and it is the first
+time it has been true.
+
+| | IMG_6703 | IMG_6707 |
+|---|---|---|
+| Trigger fired | 0.282 s | 0.322 s |
+| Real bat crack | **0.781 s** (37.0 dB) | 0.322 s (30.4 dB) |
+| Candidates after motion gate | 135 over 431 frames (0.31/frame) | 102 over 464 (0.22/frame) |
+| Colour matches the gate removed | 99% | 100% |
+| Candidate chains | 2 (pitch + hit) | 2 (pitch + hit) |
+| Selected chain | 30 frames, straightness **1.00** | 23 frames, straightness **1.00** |
+| Pitch speed | 2708 px/s | 2476 px/s |
+| Hit speed | **6037 px/s** | **6140 px/s** |
+| Reading | LA −5.9°, EV 70.8 mph | LA 18.5°, EV 82.9 mph |
+| Flags | CONTACT_TIME_REJECTED, NO_GRAVITY_CHECK | DEPTH_MOTION, NO_GRAVITY_CHECK |
+
+**Neither reading is validated.** There is no radar gun, no measured carry and
+no second camera behind these numbers, and both carry `NO_GRAVITY_CHECK`, which
+means only one of the two scale witnesses turned up. What *is* established is
+that the chain runs and that its parts separate the right objects.
+
+Four findings, all of them things nothing else would have caught:
+
+**1. These exports are variable frame rate, and the header lies twice over.**
+The containers claim 175.35 and 147.03 fps. Frames-over-duration says 204.5 and
+213.1. The *median* interval is 4.1667 ms — exactly 240.00 fps — with the rest
+of the intervals at 12.5, 25 and 33.3 ms. These are slow-motion **edits**: a
+240fps core with 30fps ramps welded either side, which is what
+`docs/APP_GUIDE.md` and the `PhotoClipPicker` note have always said about the
+Photos export path, now measured. 16% and 12% of intervals are off the median.
+Counting frames puts contact on IMG_6703 at 0.644 s; the timestamps put it at
+0.769 s, which is where the audio impulse and the bracket pinned in
+`ParityTests` both say it is. The app already reads presentation timestamps;
+the Mac scripts did not, and `armed_phone_test.py` now does.
+
+**2. The detector works on real footage, and the motion gate is what makes it
+work.** 99–100% of colour matches were removed by the gate on both clips, and
+what survived built into exactly two chains each — the incoming pitch and the
+struck ball — both at straightness 1.00. This is the first direct confirmation
+of the note in CLAUDE.md that colour alone yields ~130 candidates a frame here.
+
+**3. The hit is 2.3–2.5× the pitch, and that is the cleanest discriminator
+available.** 6037 vs 2708 px/s and 6140 vs 2476 px/s. `select_outbound_track`
+scores on speed alone for exactly this reason and it picked correctly on both
+clips, *including* on IMG_6703 where the contact time it was given was half a
+second wrong.
+
+**4. The default 15 dB threshold is too low at this venue, and the refractory
+window turns that into a wrong number rather than a missing one.** On IMG_6703
+a 17.1 dB noise at 0.282 s fires the trigger; the 2-second refractory then
+covers the real 37.0 dB crack at 0.781 s entirely. The clip is still written —
+the 2.0 s post-roll reaches past the real contact — but it is written with a
+contact time **half a second early**. Handed to the fit, that same 30-frame
+track reported **+4.25° and 105.26 mph** instead of **−5.83° and 70.96 mph**, a
+48% exit-velocity inflation, **carrying exactly the same flags as the correct
+answer**. Nothing in the output told the two apart.
+
+That is now guarded: `CONTACT_MAX_BACK_EXTRAPOLATION_S` bounds how far before
+the first sighting a supplied contact time may sit, and past it the analyzer
+flags `CONTACT_TIME_REJECTED` and falls back to the flight's first frame —
+which on this clip recovers −5.89° and 70.82 mph, within a tenth of a degree of
+the right answer. The threshold at this venue should be **18 dB or more**;
+anything from 18 to 30 fires on the crack and nothing else.
+
+### What was tried as a non-audio trigger and did not work
+
+Whole-frame frame-difference energy does **not** mark contact. On IMG_6707 the
+contact frame ranks #267 of 700 by moved-pixel count; the best frame within
+±3 of contact ranks #105. Restricting the measurement to a 400×400 window
+around the contact point improves it to #63 of 700 and no further. On IMG_6703
+it ranks #21 of 430 either way, and the clip's actual maximum is elsewhere.
+Motion energy is dominated by the background — foliage, the crowd, the ramp
+frames — and contact is not the loudest thing in the picture even locally.
+
+The signal that *does* separate is the ball's own speed, and it is only
+available after detection has run. That is the useful conclusion and it is an
+architectural one: the phone records continuously into a ring buffer, so the
+trigger never gates the camera — it only chooses which 3.5 seconds to keep.
+Audio is good enough for *that* and was right on both clips at a suitable
+threshold. **When contact happened** is a separate question, the video answers
+it better, and the fallback above is what makes the video the one that decides.
+
 ## Observations
 
 (lighting, blur, cage flicker test result, occlusion comparison, anything odd)

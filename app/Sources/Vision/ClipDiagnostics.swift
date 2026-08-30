@@ -338,6 +338,14 @@ final class ClipDiagnostics {
             }
         }
 
+        // Before the launch-angle plausibility line below, because it explains
+        // an implausible angle rather than being explained by one — and
+        // because this is a VENUE problem with a named fix, where most of the
+        // lines here are detection problems.
+        if flags.contains("CONTACT_TIME_REJECTED") {
+            return "the trigger fired well before the ball was seen leaving the bat, so the microphone heard something that was not this hit — and the two-second refractory window then covered the real crack. Contact has been taken from the first frame of the flight instead, so the reading stands, but the bat panel is gone and the next swing at this venue will do the same thing. Settings → Trigger → Calibrate measures what a hit here actually sounds like."
+        }
+
         if flags.contains("HIGH_RESIDUAL") {
             return "a track was measured but it does not fit a parabola, which a ball in flight must. The points being tracked are not one object moving ballistically — most often background clutter sharing the ball's colour."
         }

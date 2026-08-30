@@ -605,6 +605,9 @@ final class ParityTests: XCTestCase {
                     Self.fixtures.constants["SPEED_OF_SOUND_MPS"]!, "speed of sound")
         assertClose(SLA.contactAudioMaxDistanceM,
                     Self.fixtures.constants["CONTACT_AUDIO_MAX_DISTANCE_M"]!, "max distance")
+        assertClose(SLA.contactMaxBackExtrapolationS,
+                    Self.fixtures.constants["CONTACT_MAX_BACK_EXTRAPOLATION_S"]!,
+                    "max back-extrapolation")
 
         let cases = Self.fixtures.contact_from_audio
         XCTAssertFalse(cases.isEmpty)

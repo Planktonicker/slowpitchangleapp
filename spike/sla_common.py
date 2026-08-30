@@ -78,6 +78,26 @@ FLAG_NO_GRAVITY_CHECK = "NO_GRAVITY_CHECK"
 FLAG_SCALE_DISAGREE = "SCALE_DISAGREE"
 FLAG_DEPTH_MOTION = "DEPTH_MOTION"
 FLAG_HIGH_RESIDUAL = "HIGH_RESIDUAL"
+FLAG_CONTACT_TIME_REJECTED = "CONTACT_TIME_REJECTED"
+
+# How far before the track's first sighting a supplied contact time may sit
+# before it stops being believable.
+#
+# The reason to extrapolate backwards at all is occlusion: the ball leaves the
+# bat behind the hitter's body and the first frames of the flight are hidden,
+# so the fit is evaluated at contact rather than at the first sighting. That is
+# a handful of frames. 60 ms is fourteen at 240fps — a ball leaving at 25 px a
+# frame stays hidden for 350 px of travel, which is wider than a hitter is in a
+# 1280-wide frame.
+#
+# Beyond that the number is not an occlusion correction, it is a false trigger.
+# Measured on IMG_6703: a 17 dB noise 0.5 s before contact fires the trigger at
+# the default threshold, the refractory window then covers the real 37 dB crack,
+# and the clip is saved with a contact time half a second early. Handed to the
+# fit, that same 30-frame track reported +4.25 deg and 105.26 mph instead of
+# -5.83 deg and 70.96 mph — a 48% exit-velocity inflation — WITH THE SAME FLAGS
+# as the correct answer. Nothing in the output told the two apart.
+CONTACT_MAX_BACK_EXTRAPOLATION_S = 0.06
 
 
 # ---------------------------------------------------------------------------
@@ -1308,6 +1328,24 @@ def analyze_track(
     flags: list[str] = []
     n = len(track)
     t0 = contact_time if contact_time is not None else track[0].t
+    # A contact time far earlier than the flight is not a contact time.
+    #
+    # The fit is a quadratic in t evaluated at t0, so a t0 half a second before
+    # the first sighting does not merely shift the answer, it EXTRAPOLATES the
+    # curve back over ten times the span it was fitted on, and reports the
+    # velocity of a moment the camera never saw. There was no guard: whatever
+    # the caller passed was used, however far away, and the result carried the
+    # same flags as a clean reading. See CONTACT_MAX_BACK_EXTRAPOLATION_S for
+    # the field measurement that produced this.
+    #
+    # Falling back to the first sighting rather than refusing the swing: that
+    # is what the analyzer does when it is given no contact time at all, it is
+    # the best defensible number available from this track, and on the clip
+    # above it recovers the correct reading to a tenth of a degree. The flag is
+    # what stops it being reported as if the trigger had been right.
+    if contact_time is not None and track[0].t - t0 > CONTACT_MAX_BACK_EXTRAPOLATION_S:
+        flags.append(FLAG_CONTACT_TIME_REJECTED)
+        t0 = track[0].t
     ts = np.array([o.t for o in track]) - t0
     xs = np.array([o.x for o in track])
     ys = np.array([o.y for o in track])
