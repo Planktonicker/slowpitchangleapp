@@ -109,11 +109,27 @@ enum BallDetector {
         return count * 4
     }
 
+    /// - Parameter motion: pixels that moved since the previous frame, in
+    ///   FULL-FRAME coordinates. When supplied, a pixel must both match the
+    ///   colour window and have moved. This is what separates the ball from
+    ///   the sunlit grass and foliage that share its colour and never move —
+    ///   see `MotionMask`. `nil` on the first frame of a clip, where nothing
+    ///   can be differenced and the colour window has to stand alone.
+    ///
+    ///   Applied AFTER the morphology, exactly where `detect_ball_candidates`
+    ///   applies its `fg_mask`. Gating the colour loop instead would be
+    ///   cheaper — it would skip the HSV conversion for most of a grassy
+    ///   frame — but it would open and close a blob that had already been cut
+    ///   by the motion mask, so the same ball would come out a different size
+    ///   in the app than on the Mac. That is precisely the drift the parity
+    ///   rule exists to prevent, and a diameter is a scale, so it would move
+    ///   every reported number.
     static func detect(image: PixelImage,
                        frame: Int,
                        t: Double,
                        settings: DetectorSettings = DetectorSettings(),
-                       roi: ROI? = nil) -> [BallObservation] {
+                       roi: ROI? = nil,
+                       motion: [Bool]? = nil) -> [BallObservation] {
         let r = (roi ?? ROI(x0: 0, y0: 0, x1: image.width, y1: image.height))
             .clamped(width: image.width, height: image.height)
         let w = r.x1 - r.x0
@@ -137,6 +153,18 @@ enum BallDetector {
         // --- morphological open then close, 3x3 cross (OpenCV's 3x3 ellipse) ---
         Morphology.open(&mask, width: w, height: h)
         Morphology.close(&mask, width: w, height: h)
+
+        // --- motion gate ---
+        if let motion, motion.count == image.width * image.height {
+            for yy in 0..<h {
+                let iy = r.y0 + yy
+                let rowBase = yy * w
+                let motionRow = iy * image.width + r.x0
+                for xx in 0..<w where !motion[motionRow + xx] {
+                    mask[rowBase + xx] = 0
+                }
+            }
+        }
 
         // --- connected components ---
         let blobs = ConnectedComponents.label(mask: mask, width: w, height: h)

@@ -211,6 +211,10 @@ enum ClipAnalyzer {
         var tape: [BatTracker.TapeObservation] = []
         var trace = DetectionTrace(searchedX0: searchROI?.x0, searchedY0: searchROI?.y0,
                                    searchedX1: searchROI?.x1, searchedY1: searchROI?.y1)
+        // Previous frame's luma, for the motion gate. Held across the walk:
+        // the gate is the difference between ~130 candidates a frame on grassy
+        // footage and a handful. See `MotionMask`.
+        var previousLuma: MotionMask.Luma?
         // The bat window is only known once contact is known. When the caller
         // did not supply one, fall back to Vision's flight start.
         let assumedContact = contactTime ?? hint?.startTime
@@ -229,16 +233,28 @@ enum ClipAnalyzer {
             guard let pb = CMSampleBufferGetImageBuffer(sb) else { return }
             diagnostics?.framesDecoded += 1
             _ = PixelImage.withImage(pb) { img in
+                let luma = MotionMask.Luma(pixels: img.lumaPlane(),
+                                           width: img.width, height: img.height)
+                let motion = MotionMask.mask(current: luma, previous: previousLuma)
+                previousLuma = luma
                 if let diagnostics, index % probeStride == 0 {
                     diagnostics.probedFrames += 1
                     diagnostics.inWindowPixels.append(
                         BallDetector.countInWindow(image: img, settings: options.detector))
                 }
-                let cands = BallDetector.detect(image: img,
-                                                frame: index,
-                                                t: t,
-                                                settings: options.detector,
-                                                roi: searchROI)
+                // No previous frame means no gate, and an ungated frame on
+                // grassy footage yields ~130 ball-coloured blobs of scenery.
+                // Nothing survives track building from a single frame, but it
+                // would fill the diagnostics report with junk and hide the
+                // real story. One frame at 240fps costs nothing.
+                let cands: [BallObservation] = motion == nil
+                    ? []
+                    : BallDetector.detect(image: img,
+                                          frame: index,
+                                          t: t,
+                                          settings: options.detector,
+                                          roi: searchROI,
+                                          motion: motion)
                 // Kept before track building, so the review can show a
                 // candidate the detector genuinely found and the pipeline then
                 // discarded — without this they would be indistinguishable

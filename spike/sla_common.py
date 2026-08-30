@@ -125,10 +125,54 @@ class SwingMetrics:
 # Detection
 # ---------------------------------------------------------------------------
 
-def make_bg_subtractor() -> cv2.BackgroundSubtractorMOG2:
-    return cv2.createBackgroundSubtractorMOG2(
-        history=240, varThreshold=25, detectShadows=False
-    )
+# Motion gating: keep only pixels that MOVED.
+#
+# The single largest source of false candidates on real footage, measured on
+# two field clips: sunlit grass and sunlit foliage are the ball's colour, and
+# they are everywhere. Without a motion gate those clips yielded 129 and 131
+# candidates PER FRAME and roughly a thousand candidate tracks, among which
+# choosing the ball is guesswork — the tree canopy alone produced round,
+# ball-sized blobs sitting at the same pixel for the entire clip.
+#
+# A ball is the one ball-coloured thing in the frame that MOVES. Differencing
+# consecutive frames removes everything that does not, and on those same clips
+# it cut a thousand candidate tracks to three and six, with the survivor
+# tracking the ball at straightness 1.00.
+#
+# Frame differencing rather than MOG2 on purpose: it needs one previous frame
+# instead of a learned model, it cannot drift or need warm-up, it costs one
+# subtract per pixel, and it ports to Swift without a computer-vision library.
+# What it gives up — segmenting slow-moving objects — does not matter here,
+# because the thing being found is the fastest object in the picture.
+MOTION_DIFF_THRESHOLD = 18      # 8-bit luma change that counts as movement
+MOTION_DILATE_PX = 3            # grow the moving region to cover the whole ball
+
+
+def motion_mask(
+    gray: np.ndarray,
+    prev_gray: np.ndarray | None,
+    threshold: int = MOTION_DIFF_THRESHOLD,
+    dilate_px: int = MOTION_DILATE_PX,
+) -> np.ndarray | None:
+    """Pixels that changed since the previous frame, dilated.
+
+    `None` for the first frame, which has nothing to difference against — the
+    caller should detect without a gate rather than skip the frame.
+
+    The dilation matters more than it looks: differencing marks the ball's
+    LEADING and TRAILING edges, and the middle of a smoothly-coloured ball
+    barely changes between frames. Growing the mask closes it back into one
+    blob, so the colour stage sees a whole ball rather than two crescents that
+    fail the roundness gate.
+    """
+    if prev_gray is None:
+        return None
+    diff = cv2.absdiff(gray, prev_gray)
+    mask = (diff > threshold).astype(np.uint8) * 255
+    if dilate_px > 0:
+        k = np.ones((dilate_px, dilate_px), np.uint8)
+        mask = cv2.dilate(mask, k, iterations=2)
+    return mask
 
 
 def normalize_brightness(frame_bgr: np.ndarray, target_v: float = 128.0) -> np.ndarray:

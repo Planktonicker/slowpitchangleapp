@@ -495,6 +495,8 @@ def main():
         "SEED_GATE_BASE_PX": float(sla.SEED_GATE_BASE_PX),
         "SEED_SEARCH_RADIUS_PX": float(sla.SEED_SEARCH_RADIUS_PX),
         "SEED_SEARCH_RADIUS_FRAC": float(sla.SEED_SEARCH_RADIUS_FRAC),
+        "MOTION_DIFF_THRESHOLD": float(sla.MOTION_DIFF_THRESHOLD),
+        "MOTION_DILATE_PX": float(sla.MOTION_DILATE_PX),
             "MAX_RADIUS_PX_DEFAULT": sla.MAX_RADIUS_PX_DEFAULT,
             "BAT_BARREL_DIAMETER_M": sla.BAT_BARREL_DIAMETER_M,
             "CONTACT_PLAUSIBLE_M": sla.CONTACT_PLAUSIBLE_M,
@@ -527,6 +529,7 @@ def main():
         "build_tracks": [],
         "stitch_tracks": [],
         "seed_track": [],
+        "motion_mask": [],
     }
 
     for c in fit_cases():
@@ -625,6 +628,28 @@ def main():
         out["body_drift_gate"].append({
             "drift_m": d, "expected": sla.head_drift_plausible(d),
         })
+
+    # Motion gating: which pixels count as having moved. Small hand-built
+    # frames, so the threshold and the dilation are both pinned exactly.
+    def _mm(name, prev, cur):
+        pa = None if prev is None else np.array(prev, np.uint8)
+        m = sla.motion_mask(np.array(cur, np.uint8), pa)
+        out["motion_mask"].append({
+            "name": name,
+            "prev": None if prev is None else [[int(v) for v in row] for row in prev],
+            "cur": [[int(v) for v in row] for row in cur],
+            "expected": None if m is None else [[int(v) for v in row] for row in m],
+        })
+
+    still = [[100]*7 for _ in range(7)]
+    moved = [row[:] for row in still]
+    moved[3][3] = 200                      # one pixel jumps by 100
+    faint = [row[:] for row in still]
+    faint[3][3] = 110                      # ...and one by 10, under the threshold
+    _mm("first_frame_has_no_previous", None, still)
+    _mm("nothing_moved", still, still)
+    _mm("one_pixel_moved", still, moved)
+    _mm("change_below_threshold", still, faint)
 
     # Seeded tracking: the ball's flight followed out from a tap. Deterministic
     # layouts — a flight in ragged bursts among stationary clutter, plus the
@@ -894,7 +919,8 @@ def main():
           f"{len(out['select_track'])} selection cases, "
           f"{len(out['build_tracks'])} track-building cases, "
           f"{len(out['stitch_tracks'])} stitch cases, "
-          f"{len(out['seed_track'])} seeded-track cases")
+          f"{len(out['seed_track'])} seeded-track cases, "
+          f"{len(out['motion_mask'])} motion-mask cases")
 
 
 if __name__ == "__main__":

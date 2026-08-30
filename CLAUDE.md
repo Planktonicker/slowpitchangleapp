@@ -83,10 +83,17 @@ successfully measured a real swing. Do not describe any output as accurate.
 
 Open, in rough priority order:
 
-1. **Ball detection has never succeeded in the field.** Import a clip
-   (Swings → import → **From Photos**) and read the diagnostics report; it names
-   the stage that failed. That report, or full-resolution frames exported from
-   the same screen, is what any tuning should be based on — not guesses.
+1. **Ball detection has found the ball on two real clips, and nothing more
+   than that has been checked.** Both were gated by frame differencing
+   (`MotionMask` / `motion_mask`) and the selected chain followed the ball at
+   straightness 1.00 over 18 and 24 frames; the launch angles were not
+   independently measured, so they are unvalidated. Colour alone had produced
+   ~130 candidates per frame and ~1000 candidate chains — sunlit grass and
+   foliage are the ball's colour, and the tree canopy yields round ball-sized
+   blobs parked at the same pixel all clip. Import a clip (Swings → import →
+   **From Photos**) and read the diagnostics report; it names the stage that
+   failed. That report, or full-resolution frames exported from the same
+   screen, is what any tuning should be based on — not guesses.
 2. Pose tracking on real footage is unproven. The diagnostics report per-joint
    confidence, which is the evidence.
 3. Trigger thresholds are per-venue; Settings → Trigger → Calibrate measures one.
@@ -123,6 +130,14 @@ Open, in rough priority order:
 - **`AppModel` deliberately does not republish `capture`/`wizard` changes.**
   Doing so invalidates every view in the app twenty times a second. Views that
   need live camera or placement state hold them as `@ObservedObject` directly.
+- **Ball colour is not a discriminator outdoors.** The HSV window that finds
+  optic yellow also passes about 5% of a sunlit grass frame. Every heuristic
+  tried on top of the colour mask — longest track, fastest track, straightest
+  track — picked scenery. What actually separates the ball is that it *moves*:
+  the motion gate is now load-bearing, not an optimisation. It is applied
+  after the morphology, exactly where `detect_ball_candidates` applies its
+  `fg_mask`; gating the colour loop instead is cheaper but opens and closes an
+  already-cut blob, which changes the measured diameter, which is a scale.
 - **The build is `-O` in Debug too.** The detector walks two million pixels a
   frame; `-Onone` makes analysis take minutes instead of seconds.
 - `AVAssetImageGenerator` defaults to **half a second** of seek tolerance — 120

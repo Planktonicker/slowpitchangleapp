@@ -34,19 +34,27 @@ import sla_common as sla
 
 def collect_candidates(cap, fps, args, n_frames):
     """Pass 1: stream frames, detect per-frame ball candidates (memory-light)."""
-    bg = sla.make_bg_subtractor()
     per_frame = {}
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     idx = 0
+    prev_gray = None
     while True:
         ok, frame = cap.read()
         if not ok:
             break
         if args.normalize_brightness:
             frame = sla.normalize_brightness(frame)
-        fg = bg.apply(frame)
-        _, fg = cv2.threshold(fg, 127, 255, cv2.THRESH_BINARY)
-        fg = cv2.dilate(fg, np.ones((5, 5), np.uint8))
+        # Frame differencing, not MOG2. On two real field clips MOG2 left 446
+        # candidate chains where differencing left 3: a learned background
+        # model needs warm-up, and wind-moved foliage keeps re-entering the
+        # foreground. The ball is the fastest thing in the picture, which is
+        # the one case differencing is good at.
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        fg = sla.motion_mask(gray, prev_gray)
+        prev_gray = gray
+        if fg is None and not args.no_bgsub:
+            idx += 1                       # first frame: nothing to difference
+            continue
         cands = sla.detect_ball_candidates(
             frame, idx, idx / fps,
             fg_mask=fg if not args.no_bgsub else None,
@@ -140,7 +148,8 @@ def main():
     ap.add_argument("--hsv-hi", type=int, nargs=3, default=list(sla.HSV_HI_DEFAULT), metavar=("H", "S", "V"))
     ap.add_argument("--min-radius", type=float, default=sla.MIN_RADIUS_PX_DEFAULT)
     ap.add_argument("--max-radius", type=float, default=sla.MAX_RADIUS_PX_DEFAULT)
-    ap.add_argument("--no-bgsub", action="store_true", help="disable background subtraction gating")
+    ap.add_argument("--no-bgsub", action="store_true",
+                    help="disable motion gating (colour window alone; expect heavy clutter outdoors)")
     ap.add_argument("--normalize-brightness", action="store_true", help="counter LED flicker banding")
     args = ap.parse_args()
 

@@ -42,6 +42,16 @@ final class ParityTests: XCTestCase {
         var build_tracks: [BuildCase]
         var stitch_tracks: [StitchCase]
         var seed_track: [SeedCase]
+        var motion_mask: [MotionCase]
+    }
+
+    struct MotionCase: Decodable {
+        var name: String
+        /// `nil` is the first frame of a clip — there is nothing to
+        /// difference against, and the reference returns no mask at all.
+        var prev: [[Int]]?
+        var cur: [[Int]]
+        var expected: [[Int]]?
     }
 
     struct SeedCase: Decodable {
@@ -502,6 +512,52 @@ final class ParityTests: XCTestCase {
         assertClose(SLA.smashGoodHi, c["SMASH_GOOD_HI"]!, "smash good hi")
         assertClose(SLA.slowpitchLaunchLo, c["SLOWPITCH_LAUNCH_LO"]!, "slow-pitch launch lo")
         assertClose(SLA.slowpitchLaunchHi, c["SLOWPITCH_LAUNCH_HI"]!, "slow-pitch launch hi")
+    }
+
+    /// The motion gate, pixel for pixel.
+    ///
+    /// Pinned because the whole detector now depends on it: without the gate
+    /// two real clips produced 129 and 131 ball-coloured candidates per frame
+    /// and about a thousand candidate tracks; with it, three and six. A port
+    /// that dilated by a different radius — or ran one iteration instead of
+    /// two — would change which pixels the detector is even allowed to look
+    /// at, and every number downstream with it, silently.
+    func testMotionMaskMatchesReference() {
+        assertClose(SLA.motionDiffThreshold,
+                    Self.fixtures.constants["MOTION_DIFF_THRESHOLD"]!, "motion threshold")
+        assertClose(SLA.motionDilatePx,
+                    Self.fixtures.constants["MOTION_DILATE_PX"]!, "motion dilate")
+
+        let cases = Self.fixtures.motion_mask
+        XCTAssertFalse(cases.isEmpty)
+        for c in cases {
+            let h = c.cur.count, w = c.cur[0].count
+            let cur = MotionMask.Luma(pixels: c.cur.flatMap { $0.map { UInt8($0) } },
+                                      width: w, height: h)
+            let prev = c.prev.map {
+                MotionMask.Luma(pixels: $0.flatMap { $0.map { UInt8($0) } },
+                                width: w, height: h)
+            }
+            let mask = MotionMask.mask(current: cur, previous: prev)
+
+            guard let expected = c.expected else {
+                XCTAssertNil(mask, "no previous frame means no mask: \(c.name)")
+                continue
+            }
+            guard let mask else {
+                XCTFail("expected a mask for \(c.name)")
+                continue
+            }
+            // The reference emits 0/255; the port emits false/true. Compare
+            // as booleans, and compare the count too — an off-by-one in the
+            // dilation shifts the ring without changing any single pixel we
+            // happened to spot-check.
+            let want = expected.flatMap { $0.map { $0 != 0 } }
+            XCTAssertEqual(mask.count, want.count, "mask size \(c.name)")
+            XCTAssertEqual(mask, want, "mask pixels \(c.name)")
+            XCTAssertEqual(mask.filter { $0 }.count, want.filter { $0 }.count,
+                           "moved pixel count \(c.name)")
+        }
     }
 
     // MARK: - Least squares

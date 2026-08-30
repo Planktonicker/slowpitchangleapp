@@ -114,6 +114,12 @@ enum SLA {
     static let seedSearchRadiusPx = 45.0
     static let seedSearchRadiusFrac = 0.06
 
+    /// Motion gating — see `MotionMask`. The largest single source of false
+    /// candidates on real footage is stationary scenery that shares the ball's
+    /// colour; a ball is the one ball-coloured thing that moves.
+    static let motionDiffThreshold = 18.0
+    static let motionDilatePx = 3.0
+
     static func seedSearchRadius(frameWidthPx: Double) -> Double {
         max(seedSearchRadiusPx, frameWidthPx * seedSearchRadiusFrac)
     }

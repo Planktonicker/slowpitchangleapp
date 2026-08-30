@@ -112,16 +112,19 @@ def render_clip(path: str) -> int:
 
 def run_pipeline(path: str):
     cap = cv2.VideoCapture(path)
-    bg = sla.make_bg_subtractor()
     per_frame = {}
     idx = 0
+    prev_gray = None
     while True:
         ok, frame = cap.read()
         if not ok:
             break
-        fg = bg.apply(frame)
-        _, fg = cv2.threshold(fg, 127, 255, cv2.THRESH_BINARY)
-        fg = cv2.dilate(fg, np.ones((5, 5), np.uint8))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        fg = sla.motion_mask(gray, prev_gray)
+        prev_gray = gray
+        if fg is None:
+            idx += 1
+            continue
         cands = sla.detect_ball_candidates(frame, idx, idx / FPS, fg_mask=fg)
         if cands:
             per_frame[idx] = cands

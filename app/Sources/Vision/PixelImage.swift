@@ -24,6 +24,25 @@ struct PixelImage {
     let height: Int
     let bytesPerRow: Int
 
+    /// Luma for every pixel, row-major, for motion differencing.
+    ///
+    /// Rec. 601 weights on the BGRA the detector already receives. Exact
+    /// colorimetry does not matter here — the only question asked of this is
+    /// "did this pixel change", and any reasonable luma answers it.
+    func lumaPlane() -> [UInt8] {
+        var out = [UInt8](repeating: 0, count: width * height)
+        for y in 0..<height {
+            let row = base + y * bytesPerRow
+            let outRow = y * width
+            for x in 0..<width {
+                let p = row + x * 4
+                let v = 0.114 * Double(p[0]) + 0.587 * Double(p[1]) + 0.299 * Double(p[2])
+                out[outRow + x] = UInt8(min(255, max(0, v)))
+            }
+        }
+        return out
+    }
+
     @inline(__always)
     func pixel(x: Int, y: Int) -> (b: Double, g: Double, r: Double) {
         let cx = min(max(x, 0), width - 1)
