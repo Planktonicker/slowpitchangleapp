@@ -29,14 +29,25 @@ struct SwingDetailView: View {
     @State private var videoTransform: CGAffineTransform = .identity
     @State private var hangText = ""
     @State private var carryText = ""
-    @State private var shareURLs: [URL] = []
-    @State private var showShare = false
+    /// What is on top, if anything. One optional instead of three booleans —
+    /// see the note on the `.sheet` modifier.
+    enum DetailSheet: Identifiable {
+        case share([URL])
+        case note(SwingRead.Note)
+        case report(String)
+
+        var id: String {
+            switch self {
+            case .share(let urls): return "share:" + urls.map(\.lastPathComponent).joined(separator: ",")
+            case .note(let n):     return "note:" + n.id
+            case .report:          return "report"
+            }
+        }
+    }
+    @State private var sheet: DetailSheet?
     @State private var showDetail = false
     @State private var exporting: Double?
     @State private var exportError: String?
-    @State private var showReport = false
-    @State private var reportText = ""
-    @State private var openNote: SwingRead.Note?
 
     var body: some View {
         List {
@@ -84,13 +95,24 @@ struct SwingDetailView: View {
             swing = fresh
             Task { await load() }
         }
-        .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }
-        .sheet(item: $openNote) { note in
-            BodyNoteCard(note: note) { openNote = nil }
-        }
-        .sheet(isPresented: $showReport) {
-            DiagnosticsView(report: reportText,
-                            clipURL: swing.clipFilename.map { ClipStore.clipURL(named: $0) })
+        // ONE sheet modifier, switching on what to show.
+        //
+        // There were three stacked on this view — share, body note, report —
+        // and SwiftUI does not reliably honour that: the later ones win and the
+        // earlier ones silently do nothing. Share was first, so adding the
+        // body-note card broke "Export everything for this swing" without
+        // touching a line of it. The button ran, the files were found, and no
+        // sheet ever appeared.
+        .sheet(item: $sheet) { which in
+            switch which {
+            case .share(let urls):
+                ShareSheet(items: urls)
+            case .note(let note):
+                BodyNoteCard(note: note) { sheet = nil }
+            case .report(let text):
+                DiagnosticsView(report: text,
+                                clipURL: swing.clipFilename.map { ClipStore.clipURL(named: $0) })
+            }
         }
         .fullScreenCover(isPresented: $showReview) { TrackReviewView(swing: swing) }
     }
@@ -310,7 +332,7 @@ struct SwingDetailView: View {
             // this camera cannot see. A hitter cannot act on "stride 41 cm";
             // they can act on what a stride the hips did not follow means.
             ForEach(SwingRead.body(body)) { note in
-                Button { openNote = note } label: {
+                Button { sheet = .note(note) } label: {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {
                             Text(note.title)
@@ -645,8 +667,7 @@ struct SwingDetailView: View {
             exportError = "The report for this swing is no longer on disk."
             return
         }
-        reportText = text
-        showReport = true
+        sheet = .report(text)
     }
 
     /// Every file this swing produced, in one share sheet.
@@ -666,11 +687,21 @@ struct SwingDetailView: View {
             let u = ClipStore.trackURL(named: name)
             if FileManager.default.fileExists(atPath: u.path) { urls.append(u) }
         }
-        shareURLs = urls
-        showShare = !urls.isEmpty
-        if urls.isEmpty {
-            exportError = "Nothing was kept for this swing — clips are off in Settings, or storage was cleared."
+        guard !urls.isEmpty else {
+            // Name what is missing rather than shrugging. "Nothing to export"
+            // is the same sentence whether the clip was never kept, the
+            // analysis wrote no track, or storage was cleared — and those want
+            // three different responses.
+            var why: [String] = []
+            if swing.clipFilename == nil { why.append("no clip was kept (Settings → Storage)") }
+            if swing.trackCSVFilename == nil { why.append("no ball track — nothing was measured") }
+            exportError = why.isEmpty
+                ? "The files for this swing are recorded but missing from disk — storage was probably cleared."
+                : "Nothing to export: " + why.joined(separator: "; ") + "."
+            return
         }
+        exportError = nil
+        sheet = .share(urls)
     }
 
     /// Render the overlay into a shareable file.
@@ -711,8 +742,7 @@ struct SwingDetailView: View {
                     progress: { p in Task { @MainActor in exporting = p } })
                 await MainActor.run {
                     exporting = nil
-                    shareURLs = [out]
-                    showShare = true
+                    sheet = .share([out])
                 }
             } catch {
                 await MainActor.run {

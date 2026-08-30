@@ -19,11 +19,20 @@ struct HistoryView: View {
     /// added to it. Without this "This round" was a dead end: the swing you
     /// wanted to add was, by definition, not in the round yet.
     @State private var showEverything = false
-    @State private var shareURLs: [URL] = []
-    @State private var showShare = false
+    enum HistorySheet: Identifiable {
+        case share([URL])
+        case photoPicker
+        case diagnostics
+        var id: String {
+            switch self {
+            case .share(let u): return "share:" + u.map(\.lastPathComponent).joined(separator: ",")
+            case .photoPicker:  return "photo"
+            case .diagnostics:  return "diagnostics"
+            }
+        }
+    }
+    @State private var sheet: HistorySheet?
     @State private var showImporter = false
-    @State private var showPhotoPicker = false
-    @State private var showDiagnostics = false
 
     /// Inside a round this screen is "this round", not "everything ever".
     ///
@@ -53,7 +62,7 @@ struct HistoryView: View {
                              ? "Arm the camera on the Capture tab and hit. Every clip is kept — including the ones that measure nothing, because those are the ones worth looking at. Older swings can be pulled into this round: switch to Every swing in the filter, open one, and add it."
                              : "Start a session, set the camera up, arm it, and hit. Clips are kept so anything that looks wrong can be re-run later.")
                     } actions: {
-                        Button("Import from Photos") { showPhotoPicker = true }
+                        Button("Import from Photos") { sheet = .photoPicker }
                             .buttonStyle(.borderedProminent)
                     }
                 } else {
@@ -93,7 +102,7 @@ struct HistoryView: View {
                         // and a 240fps clip measured as 30fps is wrong by a
                         // factor of eight with nothing downstream able to tell.
                         Button {
-                            showPhotoPicker = true
+                            sheet = .photoPicker
                         } label: {
                             Label("From Photos (keeps 240fps)", systemImage: "photo.on.rectangle")
                         }
@@ -109,8 +118,8 @@ struct HistoryView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        shareURLs = model.exportAll()
-                        showShare = !shareURLs.isEmpty
+                        let urls = model.exportAll()
+                        if !urls.isEmpty { sheet = .share(urls) }
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
@@ -121,7 +130,30 @@ struct HistoryView: View {
                     .disabled(model.swings.isEmpty)
                 }
             }
-            .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }
+            // ONE sheet modifier — see the note in StartView. Three stacked
+            // on one view is not something SwiftUI reliably honours: the later
+            // ones win, the earlier ones silently do nothing, and the symptom
+            // is a button that simply does not respond.
+            .sheet(item: $sheet) { which in
+                switch which {
+                case .share(let urls):
+                    ShareSheet(items: urls)
+                case .photoPicker:
+                    PhotoClipPicker { result in
+                        switch result {
+                        case .success(let url):
+                            model.importCopiedClip(at: url)
+                        case .failure(let error):
+                            model.banner = AppModel.Banner(kind: .error,
+                                                           text: error.localizedDescription)
+                        }
+                    }
+                    .ignoresSafeArea()
+                case .diagnostics:
+                    DiagnosticsView(report: model.lastDiagnostics ?? "",
+                                    clipURL: model.lastImportedClip)
+                }
+            }
             // `.movie` rather than `.video`: `.video` also matches things with
             // no video track worth reading, and every failure here costs a
             // whole analysis pass to discover.
@@ -135,27 +167,14 @@ struct HistoryView: View {
                     model.banner = AppModel.Banner(kind: .error, text: error.localizedDescription)
                 }
             }
-            .sheet(isPresented: $showPhotoPicker) {
-                PhotoClipPicker { result in
-                    switch result {
-                    case .success(let url): model.importCopiedClip(at: url)
-                    case .failure(let error):
-                        model.banner = AppModel.Banner(kind: .error,
-                                                       text: error.localizedDescription)
-                    }
-                }
-                .ignoresSafeArea()
-            }
             .overlay(alignment: .bottom) { importProgress }
             .onChange(of: model.lastDiagnostics) { _, report in
                 // Opened automatically. A report nobody looks at is the same as
                 // no report, and the moment it is worth reading is the moment
                 // the import just finished — especially when it found nothing.
-                showDiagnostics = report != nil
-            }
-            .sheet(isPresented: $showDiagnostics) {
-                DiagnosticsView(report: model.lastDiagnostics ?? "",
-                                clipURL: model.lastImportedClip)
+                // Only replace what is on screen if nothing is. Yanking the
+                // share sheet away to show a report is worse than waiting.
+                if report != nil, sheet == nil { sheet = .diagnostics }
             }
         }
     }

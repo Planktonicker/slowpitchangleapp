@@ -19,10 +19,11 @@ import SwiftUI
 struct StartView: View {
     @EnvironmentObject private var model: AppModel
     @State private var mode: SessionMode = .live
-    @State private var showSwings = false
-    @State private var showSettings = false
-    @State private var showTrends = false
-    @State private var showRounds = false
+    enum StartSheet: String, Identifiable {
+        case swings, settings, trends, rounds
+        var id: String { rawValue }
+    }
+    @State private var sheet: StartSheet?
 
     var body: some View {
         NavigationStack {
@@ -49,7 +50,7 @@ struct StartView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showSettings = true } label: {
+                    Button { sheet = .settings } label: {
                         Image(systemName: "gearshape").foregroundStyle(Theme.steel)
                     }
                 }
@@ -57,13 +58,22 @@ struct StartView: View {
             // No NavigationStack wrappers: each of these already carries one,
             // and nesting them gives two title bars and a back button that
             // goes nowhere.
-            // `isModal` on all three: presented as sheets there is no tab bar
-            // to leave by, and these screens had no Done button of their own —
-            // a swipe-down was the only way out and nothing said so.
-            .sheet(isPresented: $showSwings) { HistoryView(isModal: true) }
-            .sheet(isPresented: $showSettings) { SettingsView(isModal: true) }
-            .sheet(isPresented: $showTrends) { TrendsView(isModal: true) }
-            .sheet(isPresented: $showRounds) { RoundsView() }
+            // ONE sheet modifier. Stacking four on a view is not something
+            // SwiftUI reliably honours — the later ones win and the earlier
+            // ones silently do nothing, which presents as a button that does
+            // not respond and nothing in the code to explain it.
+            //
+            // `isModal` on the first three: presented as sheets there is no tab
+            // bar to leave by, and these screens had no Done button of their
+            // own — a swipe-down was the only way out and nothing said so.
+            .sheet(item: $sheet) { which in
+                switch which {
+                case .swings:     HistoryView(isModal: true)
+                case .settings:   SettingsView(isModal: true)
+                case .trends:     TrendsView(isModal: true)
+                case .rounds:     RoundsView()
+                }
+            }
         }
         .tint(Theme.yellow)
     }
@@ -126,7 +136,7 @@ struct StartView: View {
     }
 
     private var library: some View {
-        Button { showSwings = true } label: {
+        Button { sheet = .swings } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(model.swings.isEmpty
@@ -154,9 +164,9 @@ struct StartView: View {
     /// rest of the specialist screens under Settings.
     private var betweenSessions: some View {
         HStack(spacing: 12) {
-            Button("Past rounds") { showRounds = true }
+            Button("Past rounds") { sheet = .rounds }
                 .buttonStyle(OutlineButtonStyle())
-            Button("Trends") { showTrends = true }
+            Button("Trends") { sheet = .trends }
                 .buttonStyle(OutlineButtonStyle())
         }
     }
