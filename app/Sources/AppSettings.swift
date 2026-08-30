@@ -44,6 +44,11 @@ struct AppSettings: Codable, Equatable {
     var detector = DetectorSettings()
     var bat = BatTracker.Settings()
     var trackBat = true
+    /// Whether the setup overlay has ever been opened. It auto-opens once, on
+    /// a first run, and never again — it used to auto-open whenever no
+    /// distance was set, which is now the normal state rather than an unfinished
+    /// one.
+    var hasCompletedFirstSetup = false
     /// Run the body-pose pass over each clip. On by default — the sagittal
     /// metrics are the point of it — but a switch, because it is a third decode
     /// pass and a phone already at 240fps is the phone most likely to be hot.
@@ -170,6 +175,7 @@ extension AppSettings {
         detector = take(.detector, d.detector)
         bat = take(.bat, d.bat)
         trackBat = take(.trackBat, d.trackBat)
+        hasCompletedFirstSetup = take(.hasCompletedFirstSetup, d.hasCompletedFirstSetup)
         trackBody = take(.trackBody, d.trackBody)
         triggerDb = take(.triggerDb, d.triggerDb)
         preRollS = take(.preRollS, d.preRollS)

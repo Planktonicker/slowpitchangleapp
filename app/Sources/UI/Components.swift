@@ -225,3 +225,61 @@ struct ShareSheet: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
+
+/// One body reading, explained in full.
+///
+/// The list can only afford two lines per note, and a two-line explanation cut
+/// mid-sentence — "A long stride the hips do not fol…" — is worse than none:
+/// it reads as a complete thought that stopped making sense, and the part that
+/// says what to do about it is exactly the part that gets cut.
+///
+/// So the list is a summary and this is the text. It is a sheet rather than an
+/// expanding row because these are read one at a time, and a list that grows by
+/// six lines under your thumb loses the thing you were about to tap.
+struct BodyNoteCard: View {
+    let note: SwingRead.Note
+    var onDone: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text(note.title)
+                        .font(.system(size: 24, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                    if note.isConvention {
+                        HStack(spacing: 7) {
+                            Text("COACHING")
+                                .font(Theme.label(9)).tracking(1)
+                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(Theme.surface, in: Capsule())
+                                .foregroundStyle(Theme.yellow)
+                            Text("convention or physics — not measured against you")
+                                .font(.caption).foregroundStyle(Theme.steel)
+                        }
+                    }
+                    Text(note.text)
+                        .font(.body)
+                        .foregroundStyle(.white.opacity(0.9))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Divider().background(Theme.steel.opacity(0.3))
+                    Text("There are no published slow-pitch swing norms, so nothing here is a score. What this is good for is watching your own number move across a session.")
+                        .font(.caption).foregroundStyle(Theme.steel)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(20)
+            }
+            .background(Theme.black)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", action: onDone).fontWeight(.bold)
+                }
+            }
+        }
+        .tint(Theme.yellow)
+        .preferredColorScheme(.dark)
+        .presentationDetents([.medium, .large])
+    }
+}

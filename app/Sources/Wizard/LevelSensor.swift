@@ -80,7 +80,19 @@ final class LevelSensor: ObservableObject {
         // Called from more than one screen; starting twice runs two update
         // streams and doubles the publishing load for nothing.
         guard !motion.isDeviceMotionActive else { return }
-        DispatchQueue.main.async { self.isAvailable = true }
+        DispatchQueue.main.async {
+            self.isAvailable = true
+            self.refreshOrientation()
+        }
+        // Rotating the phone is the ONE event that changes the offset, and it
+        // is the event this used to get wrong.
+        orientationObserver = NotificationCenter.default.addObserver(
+            forName: UIDevice.orientationDidChangeNotification,
+            object: nil, queue: .main) { [weak self] _ in
+                // The queue is `.main`, but `refreshOrientation` is
+                // `@MainActor` and the compiler cannot see that from here.
+                Task { @MainActor in self?.refreshOrientation() }
+            }
         motion.deviceMotionUpdateInterval = 1.0 / 30.0
         // Off the main queue: this used to publish 30 times a second onto the
         // main thread, and every one of those invalidated the whole view tree
@@ -93,15 +105,9 @@ final class LevelSensor: ObservableObject {
             // device is upright in portrait.
             let portraitRoll = atan2(g.x, -g.y) * 180 / .pi
             // Filming is landscape, so subtract the orientation's own quarter
-            // turn to get the horizon's tilt inside the frame.
-            let offset: Double
-            switch Self.currentOrientation() {
-            case .landscapeLeft:       offset = -90
-            case .landscapeRight:      offset = 90
-            case .portraitUpsideDown:  offset = 180
-            default:                   offset = 0
-            }
-            var roll = portraitRoll - offset - self.rollZero
+            // turn to get the horizon's tilt inside the frame. Read from a
+            // cache, NOT from UIKit — see `orientationOffset`.
+            var roll = portraitRoll - self.orientationOffset() - self.rollZero
             while roll > 180 { roll -= 360 }
             while roll < -180 { roll += 360 }
 
@@ -139,6 +145,10 @@ final class LevelSensor: ObservableObject {
 
     func stop() {
         motion.stopDeviceMotionUpdates()
+        if let orientationObserver {
+            NotificationCenter.default.removeObserver(orientationObserver)
+            self.orientationObserver = nil
+        }
         smoothedRoll = nil
         smoothedTilt = nil
     }
@@ -180,10 +190,44 @@ final class LevelSensor: ObservableObject {
         -asin(max(-1, min(1, gravityZ))) * 180 / .pi
     }
 
-    private static func currentOrientation() -> UIInterfaceOrientation {
-        let scene = UIApplication.shared.connectedScenes
+    // MARK: - Which way the phone is being held
+
+    /// The quarter turn to take out of the in-frame roll, cached.
+    ///
+    /// This used to call `UIApplication.shared.connectedScenes` **from the
+    /// CoreMotion queue**, which is a background thread, and those are
+    /// main-thread-only APIs. Off the main thread the lookup does not throw —
+    /// it returns nothing useful — so the `?? .portrait` fallback fired while
+    /// the phone was in landscape, the 90 degree offset was never subtracted,
+    /// and the spirit level read ninety degrees out for the whole orientation
+    /// the app is actually filmed in.
+    ///
+    /// So the orientation is sampled on the main thread, where it is legal to
+    /// ask, and the motion callback reads the answer behind a lock.
+    private var orientationObserver: NSObjectProtocol?
+    private let orientationLock = NSLock()
+    private var cachedOffset: Double = 0
+
+    private func orientationOffset() -> Double {
+        orientationLock.lock()
+        defer { orientationLock.unlock() }
+        return cachedOffset
+    }
+
+    @MainActor
+    func refreshOrientation() {
+        let orientation = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
-            .first
-        return scene?.interfaceOrientation ?? .portrait
+            .first?.interfaceOrientation ?? .portrait
+        let offset: Double
+        switch orientation {
+        case .landscapeLeft:       offset = -90
+        case .landscapeRight:      offset = 90
+        case .portraitUpsideDown:  offset = 180
+        default:                   offset = 0
+        }
+        orientationLock.lock()
+        cachedOffset = offset
+        orientationLock.unlock()
     }
 }

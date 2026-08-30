@@ -36,6 +36,7 @@ struct SwingDetailView: View {
     @State private var exportError: String?
     @State private var showReport = false
     @State private var reportText = ""
+    @State private var openNote: SwingRead.Note?
 
     var body: some View {
         List {
@@ -84,6 +85,9 @@ struct SwingDetailView: View {
             Task { await load() }
         }
         .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }
+        .sheet(item: $openNote) { note in
+            BodyNoteCard(note: note) { openNote = nil }
+        }
         .sheet(isPresented: $showReport) {
             DiagnosticsView(report: reportText,
                             clipURL: swing.clipFilename.map { ClipStore.clipURL(named: $0) })
@@ -306,23 +310,38 @@ struct SwingDetailView: View {
             // this camera cannot see. A hitter cannot act on "stride 41 cm";
             // they can act on what a stride the hips did not follow means.
             ForEach(SwingRead.body(body)) { note in
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(note.title)
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                        if note.isConvention {
-                            Text("COACHING")
-                                .font(Theme.label(8)).tracking(0.8)
-                                .padding(.horizontal, 5).padding(.vertical, 2)
-                                .background(Theme.surface, in: Capsule())
-                                .foregroundStyle(Theme.steel)
+                Button { openNote = note } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(note.title)
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                            if note.isConvention {
+                                Text("COACHING")
+                                    .font(Theme.label(8)).tracking(0.8)
+                                    .padding(.horizontal, 5).padding(.vertical, 2)
+                                    .background(Theme.surface, in: Capsule())
+                                    .foregroundStyle(Theme.steel)
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "info.circle")
+                                .font(.caption).foregroundStyle(Theme.steel)
                         }
+                        // Two lines here, all of it in the card. The list was
+                        // cutting explanations mid-sentence — "A long stride
+                        // the hips do not fol…" — which is worse than not
+                        // showing them, because a truncated reason reads as a
+                        // complete one that stopped making sense.
+                        Text(note.text)
+                            .font(.callout).foregroundStyle(Theme.steel)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
                     }
-                    Text(note.text).font(.callout).foregroundStyle(Theme.steel)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 2)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 2)
+                .buttonStyle(.plain)
             }
             Text("Anything marked COACHING is convention or physics, not something this app measured you against — there are no published slow-pitch norms to score a swing on. What these are genuinely good for is watching your own numbers move.")
                 .font(.caption2).foregroundStyle(Theme.steel.opacity(0.85))

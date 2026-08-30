@@ -224,18 +224,33 @@ final class PlacementWizard: ObservableObject {
         return m < 1.5 || m > 18
     }
 
-    /// The only hard precondition left: without a scale there is no way to turn
-    /// pixels into miles per hour, so there is nothing to record.
+    /// Nothing blocks arming any more.
     ///
-    /// Level used to gate this too. It no longer does. Roll is *corrected*
-    /// downstream in `SwingAnalyzer` — blocking on a quantity we already take
-    /// back out was self-defeating — and tilt, while genuinely uncorrectable,
-    /// degrades smoothly rather than falling off a cliff at 3°. Both are now
-    /// advisories that also flag the reading, so an off-level tripod produces
-    /// a measurement labelled for what it is instead of no measurement at all.
-    var isArmingAllowed: Bool {
-        scaleSource != .none && !isDistanceAbsurd
-    }
+    /// This gate has been shrinking as it turned out that each thing it
+    /// demanded was either corrected downstream or not used at all, and it has
+    /// now reached zero. The last item was the camera distance, and the reason
+    /// is worth writing down because it is not obvious: **the measurement does
+    /// not use it**. Exit velocity is pixels per second times metres per pixel,
+    /// and the metres per pixel come from the ball's own apparent diameter in
+    /// the flight frames — `analyze_track` computes it from the track and
+    /// hands it to the gravity solve as `scale_hint`. Nothing in `ClipAnalyzer`
+    /// reads the placement distance at all.
+    ///
+    /// So the app was refusing to record a swing it could measure perfectly,
+    /// pending a number it would then ignore. What the distance is genuinely
+    /// worth is the sound-travel correction on contact time (three frames at
+    /// 240fps) and a lens-height estimate. Both are improvements, neither is a
+    /// precondition, and the record says which swings were taken without them.
+    ///
+    /// Level went the same way earlier: roll is corrected downstream in
+    /// `SwingAnalyzer` — blocking on a quantity we already take back out was
+    /// self-defeating — and tilt is rectified, degrading smoothly rather than
+    /// falling off a cliff at 3 degrees.
+    var isArmingAllowed: Bool { true }
+
+    /// True when the swing about to be recorded will be missing something the
+    /// app could otherwise have had. Not a blocker — a caption.
+    var isMissingDistance: Bool { scaleSource == .none || isDistanceAbsurd }
 
     // MARK: - Tilt
 

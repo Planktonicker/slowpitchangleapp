@@ -69,7 +69,11 @@ struct CaptureScreen: View {
         if capture.isArmed { return .armed }
         if model.analysisProgress != nil { return .analysing }
         if capture.status != .running { return .starting }
-        if wizard.scaleSource == .none { return .needsSetup }
+        // Setup is no longer a precondition — see `isArmingAllowed`. The
+        // measurement takes its scale from the ball's own diameter in flight,
+        // so a camera that is running can record a swing it can measure. The
+        // primary button says ARM from the moment there is a picture, and
+        // setting the distance is the small button beside it.
         return .ready
     }
 
@@ -624,13 +628,17 @@ struct CaptureScreen: View {
         // Self-limiting: once a ball has been measured `scaleSource` is no
         // longer `.none`, so this stops firing and coming back to the tab does
         // not reopen it.
-        if wizard.scaleSource == .none, !didAutoOpenSetup {
+        // First run only. Opening setup on every round because no distance was
+        // set would now be opening it every round forever, since a distance is
+        // no longer something the app needs.
+        if !model.settings.hasCompletedFirstSetup, !didAutoOpenSetup {
             didAutoOpenSetup = true
             openSetup()
         }
     }
 
     private func openSetup() {
+        model.settings.hasCompletedFirstSetup = true
         showSetup = true
         capture.wantsSkeleton = true
         syncLiveMeasurement()
