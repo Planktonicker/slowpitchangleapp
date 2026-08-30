@@ -69,15 +69,20 @@ final class CaptureController: NSObject, ObservableObject {
 
     /// Set while the setup overlay is on screen. Only then does the controller
     /// keep a BGRA snapshot for tap-to-measure; the armed hot path stays clean.
-    var wantsLiveMeasurement = false {
-        didSet {
-            if !wantsLiveMeasurement {
-                snapshotLock.lock()
-                latestBGRASnapshot = nil
-                snapshotLock.unlock()
-            }
+    ///
+    /// Behind `snapshotLock`: written on the main thread, read per frame on
+    /// the video queue, and both sides already take this lock for the
+    /// snapshot itself.
+    var wantsLiveMeasurement: Bool {
+        get { snapshotLock.lock(); defer { snapshotLock.unlock() }; return _wantsLiveMeasurement }
+        set {
+            snapshotLock.lock()
+            _wantsLiveMeasurement = newValue
+            if !newValue { latestBGRASnapshot = nil }
+            snapshotLock.unlock()
         }
     }
+    private var _wantsLiveMeasurement = false
 
     /// Overrides `visionOrientation` when the user pins it in Settings. The
     /// 0/90/180/270 mapping is the classic thing to get backwards, and a wrong
@@ -136,7 +141,11 @@ final class CaptureController: NSObject, ObservableObject {
     private let pipelineQueue = DispatchQueue(label: "swinglab.pipeline")
 
     private var device: AVCaptureDevice?
+    /// Guarded by `encoderLock` — written on sessionQueue during
+    /// stop/configure, read on videoQueue at 240fps. See `VideoEncoder` for
+    /// why the pointer handoff is the part that must be synchronized.
     private var encoder: VideoEncoder?
+    private let encoderLock = NSLock()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let audioOutput = AVCaptureAudioDataOutput()
     private let videoRing = SampleRing(maxDuration: SLA.preRollS, keyframeAligned: true)
@@ -492,8 +501,11 @@ final class CaptureController: NSObject, ObservableObject {
         sessionQueue.async { [weak self] in
             guard let self else { return }
             if self.session.isRunning { self.session.stopRunning() }
-            self.encoder?.invalidate()
+            self.encoderLock.lock()
+            let enc = self.encoder
             self.encoder = nil
+            self.encoderLock.unlock()
+            enc?.invalidate()
             self.setStatus(.idle)
         }
         pipelineQueue.async { [weak self] in
@@ -534,8 +546,11 @@ final class CaptureController: NSObject, ObservableObject {
         }
         for input in session.inputs { session.removeInput(input) }
         for output in session.outputs { session.removeOutput(output) }
-        encoder?.invalidate()
+        encoderLock.lock()
+        let oldEncoder = encoder
         encoder = nil
+        encoderLock.unlock()
+        oldEncoder?.invalidate()
 
         // `.inputPriority` keeps our chosen 240fps format; a preset would
         // override it.
@@ -582,7 +597,9 @@ final class CaptureController: NSObject, ObservableObject {
         enc.onEncoded = { [weak self] sb in
             self?.pipelineQueue.async { self?.handleEncoded(sb) }
         }
+        encoderLock.lock()
         encoder = enc
+        encoderLock.unlock()
 
         // Read once here rather than off the @Published `fps` in the video
         // delegate, which was a genuine data race across two queues.
@@ -888,7 +905,10 @@ extension CaptureController: AVCaptureVideoDataOutputSampleBufferDelegate,
             }
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             let duration = CMSampleBufferGetDuration(sampleBuffer)
-            encoder?.encode(pixelBuffer: pb, pts: pts, duration: duration)
+            encoderLock.lock()
+            let liveEncoder = encoder
+            encoderLock.unlock()
+            liveEncoder?.encode(pixelBuffer: pb, pts: pts, duration: duration)
         } else {
             trigger.process(sampleBuffer: sampleBuffer)
             // Peak since the last read, not the final window of this buffer:

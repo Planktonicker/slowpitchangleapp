@@ -131,8 +131,14 @@ final class PlacementWizard: ObservableObject {
 
     /// Recompute scale from the plate markers. Call whenever a handle moves.
     func applyPlateMeasurement() {
+        // Per-axis: the marker positions are normalised per-axis by the view
+        // (x over width, y over height), so converting BOTH with the width
+        // overweighted any vertical component by the aspect ratio — 1.78x on
+        // 16:9 — and the plate-based scale, distance, and every flag derived
+        // from them came out wrong whenever the plate edge was not perfectly
+        // horizontal in frame.
         let dx = (plateEnd.x - plateStart.x) * imageWidthPx
-        let dy = (plateEnd.y - plateStart.y) * imageWidthPx
+        let dy = (plateEnd.y - plateStart.y) * imageHeightPx
         let separation = (dx * dx + dy * dy).squareRoot()
         guard separation > 4 else { return }
         measuredPxPerM = separation / Self.plateWidthM

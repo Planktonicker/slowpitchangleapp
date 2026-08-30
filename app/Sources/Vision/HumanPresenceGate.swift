@@ -73,7 +73,15 @@ final class HumanPresenceGate {
     ///
     /// Set to `nil` when nothing is drawing it: the conversion and the main-queue
     /// hop are pure cost otherwise.
-    var onPose: (([PoseJoint: CGPoint]?) -> Void)?
+    ///
+    /// Written from the main thread when the setup overlay opens and closes,
+    /// read on the gate's utility queue per submitted frame — so it goes
+    /// through the lock like the rest of the cross-thread state.
+    var onPose: (([PoseJoint: CGPoint]?) -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return _onPose }
+        set { lock.lock(); _onPose = newValue; lock.unlock() }
+    }
+    private var _onPose: (([PoseJoint: CGPoint]?) -> Void)?
 
     /// Seconds the gate may go without ever seeing anyone before the caller is
     /// told to stop trusting it. Pose detection can fail for reasons we cannot

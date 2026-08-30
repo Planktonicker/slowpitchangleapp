@@ -30,7 +30,15 @@ final class VideoEncoder {
     /// Called on the encoder's own queue for every encoded frame.
     var onEncoded: ((CMSampleBuffer) -> Void)?
 
+    /// Guarded by `sessionLock`: `encode` runs on the 240fps video queue
+    /// while `invalidate` runs on the session queue during stop/reconfigure,
+    /// and an unsynchronized strong `var` read against its release is a data
+    /// race — at best encoding into a session mid-teardown, at worst a torn
+    /// reference. The lock covers only the pointer handoff; the encode call
+    /// itself runs on a local strong reference, and VideoToolbox returns an
+    /// error (not UB) for a frame submitted to an invalidated session.
     private var session: VTCompressionSession?
+    private let sessionLock = NSLock()
     private(set) var codec: CMVideoCodecType = kCMVideoCodecType_HEVC
 
     init(width: Int, height: Int, fps: Double, bitrate: Int? = nil) throws {
@@ -88,6 +96,9 @@ final class VideoEncoder {
     }
 
     func encode(pixelBuffer: CVPixelBuffer, pts: CMTime, duration: CMTime) {
+        sessionLock.lock()
+        let session = self.session
+        sessionLock.unlock()
         guard let session else { return }
         VTCompressionSessionEncodeFrame(
             session,
@@ -103,10 +114,13 @@ final class VideoEncoder {
     }
 
     func invalidate() {
+        sessionLock.lock()
+        let session = self.session
+        self.session = nil
+        sessionLock.unlock()
         guard let session else { return }
         VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: .invalid)
         VTCompressionSessionInvalidate(session)
-        self.session = nil
     }
 
     deinit { invalidate() }

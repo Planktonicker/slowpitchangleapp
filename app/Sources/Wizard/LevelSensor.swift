@@ -58,12 +58,23 @@ final class LevelSensor: ObservableObject {
         q.qualityOfService = .utility
         return q
     }()
+    /// Everything below is guarded by `stateLock`. The motion callback runs
+    /// on its own OperationQueue at 30 Hz while zeroHere/clearZero/stop mutate
+    /// the same vars from the main thread; unsynchronized, a tap on "zero
+    /// here" mid-update was instantly undone (or half-applied) by a callback
+    /// still working from the pre-zero values — and the corrupted roll and
+    /// tilt flow into the correction subtracted from every launch angle.
+    /// `lastPublishedRoll/Tilt` shadow the @Published values so the callback
+    /// never has to READ main-thread state either.
     private var rollZero = 0.0
     private var tiltZero = 0.0
     private var smoothedRoll: Double?
     private var smoothedTilt: Double?
     private var latched = true
     private var lastPublished = CFAbsoluteTimeGetCurrent()
+    private var lastPublishedRoll = Double.infinity
+    private var lastPublishedTilt = Double.infinity
+    private let stateLock = NSLock()
 
     var isRollOK: Bool { abs(rollDeg) <= rollToleranceDeg }
     var isTiltOK: Bool { abs(tiltDeg) <= tiltToleranceDeg }
@@ -104,10 +115,12 @@ final class LevelSensor: ObservableObject {
             // Rotation of gravity within the screen plane, zero when the
             // device is upright in portrait.
             let portraitRoll = atan2(g.x, -g.y) * 180 / .pi
+            let offset = self.orientationOffset()
+
+            self.stateLock.lock()
             // Filming is landscape, so subtract the orientation's own quarter
-            // turn to get the horizon's tilt inside the frame. Read from a
-            // cache, NOT from UIKit — see `orientationOffset`.
-            var roll = portraitRoll - self.orientationOffset() - self.rollZero
+            // turn to get the horizon's tilt inside the frame.
+            var roll = portraitRoll - offset - self.rollZero
             while roll > 180 { roll -= 360 }
             while roll < -180 { roll += 360 }
 
@@ -127,13 +140,22 @@ final class LevelSensor: ObservableObject {
             else if backInside { self.latched = true }
             let level = self.latched
 
-            // Publish at ~10 Hz, and only when a displayed value moved.
+            // Publish at ~10 Hz, and only when a displayed value moved —
+            // compared against the lock-guarded shadows, never the @Published
+            // main-thread values.
             let now = CFAbsoluteTimeGetCurrent()
-            let moved = abs(sr - self.rollDeg) >= 0.1 || abs(st - self.tiltDeg) >= 0.1
-            guard now - self.lastPublished >= 0.1,
-                  moved || level != self.isLevelLatched || !self.hasReading else { return }
-            self.lastPublished = now
+            let moved = abs(sr - self.lastPublishedRoll) >= 0.1
+                || abs(st - self.lastPublishedTilt) >= 0.1
+            let firstReading = self.lastPublishedRoll == .infinity
+            let shouldPublish = now - self.lastPublished >= 0.1 && (moved || firstReading)
+            if shouldPublish {
+                self.lastPublished = now
+                self.lastPublishedRoll = sr
+                self.lastPublishedTilt = st
+            }
+            self.stateLock.unlock()
 
+            guard shouldPublish else { return }
             DispatchQueue.main.async {
                 self.rollDeg = sr
                 self.tiltDeg = st
@@ -149,28 +171,43 @@ final class LevelSensor: ObservableObject {
             NotificationCenter.default.removeObserver(orientationObserver)
             self.orientationObserver = nil
         }
+        stateLock.lock()
         smoothedRoll = nil
         smoothedTilt = nil
+        lastPublishedRoll = .infinity
+        lastPublishedTilt = .infinity
+        stateLock.unlock()
     }
 
     /// Treat the current pose as level. For a tripod head that is trustworthy
     /// but not perfectly calibrated, or a phone mount with a built-in offset.
     func zeroHere() {
-        rollZero += rollDeg
-        tiltZero += tiltDeg
-        rollDeg = 0
-        tiltDeg = 0
+        stateLock.lock()
+        // Zero against the SMOOTHED state the callback owns, not the published
+        // copy — they lag each other by up to a publish tick, and the callback
+        // must observe the zero and the reset smoothing atomically.
+        rollZero += smoothedRoll ?? rollDeg
+        tiltZero += smoothedTilt ?? tiltDeg
         smoothedRoll = 0
         smoothedTilt = 0
         latched = true
+        lastPublishedRoll = 0
+        lastPublishedTilt = 0
+        stateLock.unlock()
+        rollDeg = 0
+        tiltDeg = 0
         isLevelLatched = true
     }
 
     func clearZero() {
+        stateLock.lock()
         rollZero = 0
         tiltZero = 0
         smoothedRoll = nil
         smoothedTilt = nil
+        lastPublishedRoll = .infinity
+        lastPublishedTilt = .infinity
+        stateLock.unlock()
     }
 
     /// Camera pitch in degrees from `CMDeviceMotion.gravity`'s z component,
