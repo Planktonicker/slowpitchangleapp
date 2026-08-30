@@ -26,14 +26,18 @@ struct TrajectoryHint: Sendable {
 
     /// Vertical corridor around the path, fitted from the hint points.
     private var fit: (a: Double, b: Double, c: Double)?
+    /// The x range the fit was actually made over. Outside it the curve is an
+    /// extrapolation and is trusted less, in proportion to how far outside.
+    private var xSpan: (lo: Double, hi: Double) = (0, 0)
 
     init(pointsPx: [CGPoint], startTime: Double, endTime: Double) {
         self.pointsPx = pointsPx
         self.startTime = startTime
         self.endTime = endTime
+        let xs = pointsPx.map { Double($0.x) }
+        self.xSpan = (xs.min() ?? 0, xs.max() ?? 0)
         if pointsPx.count >= 3 {
-            let f = Geometry.fitQuadratic(ts: pointsPx.map { Double($0.x) },
-                                          vs: pointsPx.map { Double($0.y) })
+            let f = Geometry.fitQuadratic(ts: xs, vs: pointsPx.map { Double($0.y) })
             self.fit = (f.a, f.b, f.c)
         } else {
             self.fit = nil
@@ -41,10 +45,25 @@ struct TrajectoryHint: Sendable {
     }
 
     /// True when a candidate at (x, y) is plausibly on this trajectory.
+    ///
+    /// The corridor widens away from the data. Vision reports the stretch it
+    /// is confident about, which can be a couple of hundred pixels of a
+    /// flight that crosses the whole frame — and a quadratic fitted to that
+    /// stretch says almost nothing three times its own length away. Holding a
+    /// fixed tolerance out there claims a precision the fit does not have, and
+    /// what it actually rejects is the real ball, because the extrapolated
+    /// curve has drifted off it.
+    ///
+    /// Linear widening is the conservative reading: quadratic extrapolation
+    /// error grows faster than that, so this still under-states the
+    /// uncertainty rather than over-stating it. Capped, so the corridor never
+    /// becomes "accept anything" and stops doing its job near the data.
     func admits(x: Double, y: Double, corridorPx: Double) -> Bool {
         if let f = fit {
             let yHat = f.a * x * x + f.b * x + f.c
-            if abs(y - yHat) <= corridorPx { return true }
+            let outside = max(0, max(xSpan.lo - x, x - xSpan.hi))
+            let widened = corridorPx + min(corridorPx * 3, outside * 0.5)
+            if abs(y - yHat) <= widened { return true }
         }
         for p in pointsPx {
             let dx = x - Double(p.x), dy = y - Double(p.y)

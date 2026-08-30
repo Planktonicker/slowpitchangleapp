@@ -206,6 +206,28 @@ final class TrajectoryHintROITests: XCTestCase {
         XCTAssertGreaterThan(roi.x1, 450)
     }
 
+    /// A candidate far outside the fitted span must survive the corridor, or
+    /// the ball is rejected precisely where the fit knows least about it.
+    func testCorridorWidensAwayFromTheFittedData() {
+        let hint = risingHint()          // fitted over x 200...500
+        let corridor = 90.0
+        // A point 400 px past the data, 200 px off the extrapolated curve.
+        let x = 900.0
+        let yHat = 0.0008 * (x - 900) * (x - 900) + 300
+        XCTAssertTrue(hint.admits(x: x, y: yHat + 200, corridorPx: corridor),
+                      "an extrapolated corridor must not claim 90 px precision 400 px from the data")
+    }
+
+    /// Near the data it must still be tight, or it stops rejecting anything.
+    func testCorridorStaysTightInsideTheFittedData() {
+        let hint = risingHint()
+        let x = 350.0
+        let yHat = 0.0008 * (x - 900) * (x - 900) + 300
+        XCTAssertTrue(hint.admits(x: x, y: yHat + 50, corridorPx: 90))
+        XCTAssertFalse(hint.admits(x: x, y: yHat + 400, corridorPx: 90),
+                       "inside the fitted span the corridor is the corridor")
+    }
+
     func testNoPointsGivesNoRegion() {
         let hint = TrajectoryHint(pointsPx: [], startTime: 0, endTime: 0)
         XCTAssertNil(hint.searchROI(corridorPx: 90, width: width, height: height))

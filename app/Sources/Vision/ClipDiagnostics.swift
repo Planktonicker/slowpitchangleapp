@@ -57,6 +57,13 @@ final class ClipDiagnostics {
 
     // Stage 1 — Vision's trajectory hint
     var hintPoints: Int?
+    /// How wide, in pixels, the stretch of flight Vision reported was. A short
+    /// span is the signal that the corridor built on it is an extrapolation
+    /// almost everywhere, and that a wrong hint could be steering the search.
+    var hintSpanPx: Double?
+    /// Set when the hint produced too short a track and the clip was measured
+    /// again with the search unconstrained.
+    var retriedWithoutHint = false
 
     // Stage 2 — colour and shape
     /// Frames probed for raw colour coverage. A handful, spread through the
@@ -126,8 +133,15 @@ final class ClipDiagnostics {
         }
 
         out.append("")
-        out.append("1 vision   " + (hintPoints.map { "flight found, \($0) points" }
-                                    ?? "no flight found (fell back to full-frame)"))
+        var visionLine = hintPoints.map { "flight found, \($0) points" }
+            ?? "no flight found (fell back to full-frame)"
+        if let span = hintSpanPx {
+            visionLine += String(format: " spanning %.0f px", span)
+        }
+        if retriedWithoutHint {
+            visionLine += " — too short a track, re-measured without the hint"
+        }
+        out.append("1 vision   " + visionLine)
 
         let framePixels = max(1, width * height)
         if probedFrames > 0 {

@@ -169,6 +169,10 @@ enum ClipAnalyzer {
             }
             hint = detector.hint()
             diagnostics?.hintPoints = hint.map { $0.pointsPx.count }
+            diagnostics?.hintSpanPx = hint.map {
+                let xs = $0.pointsPx.map { Double($0.x) }
+                return (xs.max() ?? 0) - (xs.min() ?? 0)
+            }
         }
 
         // --- pass 2: measure ---
@@ -242,14 +246,31 @@ enum ClipAnalyzer {
         diagnostics?.bestTrackFrames = tracks.map(\.count).max() ?? 0
         var selected = TrackBuilder.selectOutboundTrack(tracks, direction: options.direction)
 
-        // Vision saw a flight but the corridor filter starved the tracker:
-        // retry unconstrained rather than reporting nothing.
-        if selected == nil && hint != nil && !options.forceFallbackDetector {
+        // Vision's hint is an accelerator, not an authority, and it is allowed
+        // to be wrong about WHICH object is the ball. When it is, the
+        // constrained pass does not fail — it succeeds on the wrong thing, and
+        // a short confident track then blocked the unconstrained retry that
+        // would have found the real flight. The retry used to require `nil`,
+        // so a nineteen-frame track of something that was not a ball counted
+        // as an answer while the ball sat in plain sight outside the corridor.
+        //
+        // Now anything short of a usable track triggers the second pass, and
+        // the better of the two wins rather than the first one to exist.
+        let constrainedCount = selected?.count ?? 0
+        if hint != nil, !options.forceFallbackDetector,
+           constrainedCount < SLA.minTrackFrames {
             var retry = options
             retry.forceFallbackDetector = true
-            return try await analyze(url: url, contactTime: contactTime,
-                                     options: retry, diagnostics: diagnostics,
-                                     progress: progress)
+            diagnostics?.retriedWithoutHint = true
+            let unconstrained = try? await analyze(url: url, contactTime: contactTime,
+                                                   options: retry, diagnostics: diagnostics,
+                                                   progress: progress)
+            if let unconstrained, unconstrained.track.count > constrainedCount {
+                return unconstrained
+            }
+            // The retry did no better. Fall through and report what the hint
+            // found, rather than throwing away a short track for nothing — and
+            // if there was nothing either way, the guard below says so.
         }
         if selected == nil, !tracks.isEmpty {
             tracks.sort { $0.count > $1.count }
