@@ -84,9 +84,12 @@ struct SessionSummaryView: View {
 
     private var headline: some View {
         HStack(spacing: 16) {
+            // Through the unit setting, like every sibling screen — a km/h
+            // user was reading mph numbers labelled mph here while the swing
+            // list showed the same swing in km/h.
             MetricTile(label: "Best exit velo",
-                       value: summary.bestExitVeloMph.map { String(format: "%.0f", $0) } ?? "—",
-                       unit: "mph")
+                       value: summary.bestExitVeloMph.map { model.settings.speedUnit.format(mph: $0) } ?? "—",
+                       unit: model.settings.speedUnit.suffix)
             MetricTile(label: "Median launch",
                        value: summary.medianLaunchAngleDeg.map { String(format: "%.0f", $0) } ?? "—",
                        unit: "°")
@@ -167,7 +170,7 @@ struct SessionSummaryView: View {
     private func row(_ s: SwingDTO, dim: Bool = false) -> some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(String(format: "%.0f mph   %+.0f°", s.exitVeloMph, s.launchAngleDeg))
+                Text("\(model.settings.speedUnit.format(mph: s.exitVeloMph)) \(model.settings.speedUnit.suffix)   " + String(format: "%+.0f°", s.launchAngleDeg))
                     .font(.system(size: 17, weight: .bold, design: .rounded))
                     .foregroundStyle(dim ? Theme.steel : .white)
                     .monospacedDigit()

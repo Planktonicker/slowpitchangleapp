@@ -24,16 +24,23 @@ enum FrameExporter {
     /// scaling happens. A downscaled frame would make the ball smaller in
     /// pixels than it really was, which is the one number the size gate is
     /// judged against.
+    /// The one place the exact-seek contract is written down. The default
+    /// tolerance is half a second — 120 frames at 240fps, enough to land
+    /// after the ball has left the picture — and CLAUDE.md calls it a known
+    /// trap; every generator in the app comes from here so the next screen
+    /// cannot reintroduce it by hand-configuring its own.
+    static func exactSeekGenerator(for asset: AVAsset) -> AVAssetImageGenerator {
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        return generator
+    }
+
     static func extract(from url: URL, at times: [Double],
                         namePrefix: String) async throws -> [URL] {
         let asset = AVURLAsset(url: url)
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        // Exact frames. The default tolerance is half a second, which on a
-        // 240fps clip is 120 frames away from the moment asked for — enough to
-        // land after the ball has left the picture entirely.
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
+        let generator = exactSeekGenerator(for: asset)
 
         var out: [URL] = []
         for (i, seconds) in times.enumerated() {

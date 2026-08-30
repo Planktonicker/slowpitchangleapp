@@ -20,9 +20,12 @@ final class AppModel: ObservableObject {
     @Published var currentSetting: SwingSetting = .tee
     @Published private(set) var analysisProgress: Double?
     @Published private(set) var lastSwing: SwingDTO?
-    /// Swings captured since the last arm. Shown on the HUD so a player can
-    /// see the session is progressing without walking back to the phone.
-    @Published private(set) var sessionSwingCount = 0
+    /// Swings in the round so far — DERIVED, never stored. Five writers used
+    /// to hand-maintain a counter and disagreed: arm() zeroed it mid-round, so
+    /// hitting three, tapping Stop and re-arming showed "no swings yet" on the
+    /// HUD while "This round" listed three; imports joined the round without
+    /// bumping it. The store is the truth, so count the store.
+    var sessionSwingCount: Int { sessionSwings.count }
     @Published var banner: Banner?
     /// Stage-by-stage report from the last imported clip, kept whether the
     /// analysis succeeded or failed. The failures are the ones worth reading,
@@ -143,7 +146,6 @@ final class AppModel: ObservableObject {
         session = Session(mode: mode)
         currentSetting = mode.swingSetting
         finishedSession = nil
-        sessionSwingCount = 0
         hitterGateDisabledForSession = false
         // The camera is NOT started here. `CaptureView.begin()` asks for
         // permission first and starts it after, and starting a 240fps session
@@ -203,7 +205,6 @@ final class AppModel: ObservableObject {
         session = reopened
         currentSetting = round.mode.swingSetting
         finishedSession = nil
-        sessionSwingCount = sessionSwings.count
         hitterGateDisabledForSession = false
         banner = Banner(kind: .info,
                         text: "Back in that round — \(sessionSwingCount) swing"
@@ -222,7 +223,6 @@ final class AppModel: ObservableObject {
         var updated = swing
         updated.sessionID = id
         update(updated)
-        sessionSwingCount = sessionSwings.count
     }
 
     /// Take it back out. Leaves the swing in the full history — this changes
@@ -232,7 +232,6 @@ final class AppModel: ObservableObject {
         var updated = swing
         updated.sessionID = nil
         update(updated)
-        sessionSwingCount = sessionSwings.count
     }
 
     /// Discard a round that recorded nothing, without showing a summary of
@@ -261,7 +260,6 @@ final class AppModel: ObservableObject {
         }
         capture.isArmed = true
         armedAt = CACurrentMediaTime()
-        sessionSwingCount = 0
         // Zero, not `capture.droppedFrameCount`. Arming resets that counter,
         // but asynchronously — `isArmed`'s didSet hops to the pipeline queue,
         // then the session queue, then back to main — so reading it here
@@ -846,7 +844,6 @@ final class AppModel: ObservableObject {
             + (gateWasOff ? [.hitterGateDisabled] : [])
             + (droppedFrames ? [.framesDropped] : [])
         dto.sessionID = sessionID
-        sessionSwingCount += 1
 
         do {
             try store.save(dto)

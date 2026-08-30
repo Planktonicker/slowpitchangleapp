@@ -513,11 +513,14 @@ struct SetupOverlay: View {
                         footFraction: isLandscape ? 0.80 : 0.64)
         guard fov > 5 else { return fallback }
 
-        let horizontalHalf = fov * .pi / 360
-        let visibleVerticalHalf = isLandscape
-            ? atan(tan(horizontalHalf) / max(0.1, screenAspect))
-            : horizontalHalf
-        let visibleMetres = 2 * targetDistanceM * tan(visibleVerticalHalf)
+        // Through CameraPose, which also places the horizon guide on this
+        // same preview. Two framing aids deriving the crop independently is
+        // how a future correction moves one and not the other, and the two
+        // contradict each other on the one screen meant to be trusted.
+        guard let vHalfDeg = CameraPose.visibleVerticalHalfAngleDeg(
+            horizontalFovDeg: fov, isLandscape: isLandscape,
+            screenAspect: screenAspect) else { return fallback }
+        let visibleMetres = 2 * targetDistanceM * tan(vHalfDeg * .pi / 180)
         guard visibleMetres > 0.1 else { return fallback }
 
         // The lens is at contact height, so the ground is `lensHeightM` below

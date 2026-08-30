@@ -95,10 +95,11 @@ enum BallDetector {
         var count = 0
         var y = 0
         while y < image.height {
+            let row = image.base + y * image.bytesPerRow
             var x = 0
             while x < image.width {
-                let p = image.pixel(x: x, y: y)
-                if HSVConvert.inRange(b: p.b, g: p.g, r: p.r,
+                let p = row + x * 4
+                if HSVConvert.inRange(b: Double(p[0]), g: Double(p[1]), r: Double(p[2]),
                                       lo: settings.hsvLo, hi: settings.hsvHi) {
                     count += 1
                 }
@@ -124,6 +125,62 @@ enum BallDetector {
     ///   in the app than on the Mac. That is precisely the drift the parity
     ///   rule exists to prevent, and a diameter is a scale, so it would move
     ///   every reported number.
+    /// The mask stage every detector shares: colour threshold, open+close,
+    /// then the motion gate — in that order, ALWAYS in that order.
+    ///
+    /// One function on purpose. The gate-after-morphology rule is
+    /// parity-load-bearing (gating earlier changes the measured blob size,
+    /// which is a scale), and it used to be enforced by convention across
+    /// three hand-rolled copies with subtly different index arithmetic — a
+    /// fix to one left the other two behind, and the bat's mask would get cut
+    /// differently from the ball's. Mirrors the mask stage of
+    /// `detect_ball_candidates`.
+    ///
+    /// The colour loop reads through a per-row pointer rather than
+    /// `image.pixel(x:y:)`: the loop bounds already guarantee in-range
+    /// coordinates, and the per-pixel clamp-and-multiply defeated
+    /// vectorisation on a loop that walks two million pixels a frame. Same
+    /// bytes, same mask.
+    static func maskAfterMorphology(image: PixelImage,
+                                    roi r: ROI,
+                                    lo: HSVBounds, hi: HSVBounds,
+                                    motion: [Bool]? = nil,
+                                    close: Bool = true) -> [UInt8] {
+        let w = r.x1 - r.x0
+        let h = r.y1 - r.y0
+        guard w > 0, h > 0 else { return [] }
+
+        // --- colour threshold ---
+        var mask = [UInt8](repeating: 0, count: w * h)
+        for yy in 0..<h {
+            let row = image.base + (r.y0 + yy) * image.bytesPerRow + r.x0 * 4
+            let rowBase = yy * w
+            for xx in 0..<w {
+                let p = row + xx * 4
+                if HSVConvert.inRange(b: Double(p[0]), g: Double(p[1]), r: Double(p[2]),
+                                      lo: lo, hi: hi) {
+                    mask[rowBase + xx] = 255
+                }
+            }
+        }
+
+        // --- morphological open then close, 3x3 cross (OpenCV's 3x3 ellipse) ---
+        Morphology.open(&mask, width: w, height: h)
+        if close { Morphology.close(&mask, width: w, height: h) }
+
+        // --- motion gate, after the morphology ---
+        if let motion, motion.count == image.width * image.height {
+            for yy in 0..<h {
+                let rowBase = yy * w
+                let motionRow = (r.y0 + yy) * image.width + r.x0
+                for xx in 0..<w where !motion[motionRow + xx] {
+                    mask[rowBase + xx] = 0
+                }
+            }
+        }
+        return mask
+    }
+
     static func detect(image: PixelImage,
                        frame: Int,
                        t: Double,
@@ -136,35 +193,9 @@ enum BallDetector {
         let h = r.y1 - r.y0
         guard w > 2, h > 2 else { return [] }
 
-        // --- colour threshold ---
-        var mask = [UInt8](repeating: 0, count: w * h)
-        for yy in 0..<h {
-            let iy = r.y0 + yy
-            let rowBase = yy * w
-            for xx in 0..<w {
-                let p = image.pixel(x: r.x0 + xx, y: iy)
-                if HSVConvert.inRange(b: p.b, g: p.g, r: p.r,
-                                      lo: settings.hsvLo, hi: settings.hsvHi) {
-                    mask[rowBase + xx] = 255
-                }
-            }
-        }
-
-        // --- morphological open then close, 3x3 cross (OpenCV's 3x3 ellipse) ---
-        Morphology.open(&mask, width: w, height: h)
-        Morphology.close(&mask, width: w, height: h)
-
-        // --- motion gate ---
-        if let motion, motion.count == image.width * image.height {
-            for yy in 0..<h {
-                let iy = r.y0 + yy
-                let rowBase = yy * w
-                let motionRow = iy * image.width + r.x0
-                for xx in 0..<w where !motion[motionRow + xx] {
-                    mask[rowBase + xx] = 0
-                }
-            }
-        }
+        let mask = maskAfterMorphology(image: image, roi: r,
+                                       lo: settings.hsvLo, hi: settings.hsvHi,
+                                       motion: motion)
 
         // --- connected components ---
         let blobs = ConnectedComponents.label(mask: mask, width: w, height: h)

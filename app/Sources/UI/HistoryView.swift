@@ -168,6 +168,23 @@ struct HistoryView: View {
                 }
             }
             .overlay(alignment: .bottom) { importProgress }
+            // Hosted HERE, not on RootView: both pickers live on this screen,
+            // and this screen is sometimes itself a sheet over the start
+            // screen — an alert hosted on the covered RootView cannot present,
+            // so the long-clip prompt silently never appeared and the import
+            // never started.
+            .alert("That is a long clip",
+                   isPresented: Binding(get: { model.longClipPrompt != nil },
+                                        set: { if !$0 { model.longClipPrompt = nil } }),
+                   presenting: model.longClipPrompt) { prompt in
+                Button("Measure it anyway") {
+                    model.longClipPrompt = nil
+                    model.beginAnalysis(of: prompt.url)
+                }
+                Button("Cancel", role: .cancel) { model.longClipPrompt = nil }
+            } message: { prompt in
+                Text(prompt.message)
+            }
             .onChange(of: model.lastDiagnostics) { _, report in
                 // Opened automatically. A report nobody looks at is the same as
                 // no report, and the moment it is worth reading is the moment

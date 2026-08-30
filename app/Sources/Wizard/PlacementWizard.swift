@@ -148,12 +148,14 @@ final class PlacementWizard: ObservableObject {
     /// Fallback: trust a tape-measured distance and predict the scale from
     /// the lens geometry instead of measuring it.
     func applyManualDistance() {
-        guard fieldOfViewDeg > 0, manualDistanceM > 0 else { return }
-        let d = manualDistanceM
-        let halfFov = fieldOfViewDeg / 2 * .pi / 180
-        let widthAtDistanceM = 2 * d * tan(halfFov)
-        guard widthAtDistanceM > 0 else { return }
-        measuredPxPerM = imageWidthPx / widthAtDistanceM
+        // px/m at distance d is focal/d — through the parity-pinned focal
+        // model rather than an inline copy of the FOV relation, so the wizard
+        // and TiltRectifier can never disagree about the same lens (and this
+        // inherits focalPx's fov<180 guard the copy lacked).
+        guard manualDistanceM > 0 else { return }
+        let focal = TiltRectifier.focalPx(widthPx: imageWidthPx, fovDeg: fieldOfViewDeg)
+        guard focal > 0 else { return }
+        measuredPxPerM = focal / manualDistanceM
         scaleSource = .manual
         showPlateMarkers = false
     }
@@ -173,10 +175,10 @@ final class PlacementWizard: ObservableObject {
     /// value.
     var derivedDistanceM: Double? {
         if scaleSource == .manual { return manualDistanceM }
-        guard let pxPerM = measuredPxPerM, pxPerM > 0, fieldOfViewDeg > 0 else { return nil }
-        let halfFov = fieldOfViewDeg / 2 * .pi / 180
-        let widthAtDistanceM = imageWidthPx / pxPerM
-        return widthAtDistanceM / (2 * tan(halfFov))
+        guard let pxPerM = measuredPxPerM, pxPerM > 0 else { return nil }
+        let focal = TiltRectifier.focalPx(widthPx: imageWidthPx, fovDeg: fieldOfViewDeg)
+        guard focal > 0 else { return nil }
+        return focal / pxPerM
     }
 
     /// How high the lens is above the ground, solved from the hitter's feet.

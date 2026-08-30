@@ -59,7 +59,17 @@ struct SettingsView: View {
                     }
                     stepper("Threshold over noise floor", value: $model.settings.triggerDb,
                             range: 6...30, step: 1, unit: "dB")
+                    // Only inside a round: calibration listens through the
+                    // capture session, and from the start screen no session is
+                    // running — the meter would sit at 0 dB, the countdown
+                    // would "measure" silence, and "hit 3 balls" would wait
+                    // forever for hits the mic never hears.
                     Button("Calibrate at this venue") { showTriggerCalibration = true }
+                        .disabled(!model.isInSession)
+                    if !model.isInSession {
+                        Text("Start a session first — calibration listens through the live camera session, which only runs during a round.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     Text("15 dB is the pass/fail gate the validation uses, not a good working threshold for any particular place — too high for a quiet garden, too low for a cage. Calibrating listens to the background, records a few real hits, and puts the number between them. It also says when no threshold can work here, which is worth knowing before a session rather than after.")
                         .font(.caption).foregroundStyle(.secondary)
                     stepper("Pre-roll", value: $model.settings.preRollS,

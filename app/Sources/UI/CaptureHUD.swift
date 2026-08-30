@@ -28,9 +28,11 @@ import SwiftUI
 /// in one place matters: a HUD that lies about the state is worse than the
 /// cluttered one it replaces.
 enum HUDState: Equatable {
+    // No `needsSetup` case: setup stopped being a precondition when the
+    // measurement stopped needing a distance, and a state no producer can
+    // reach leaves branches that read as tunable and can never run.
     case starting
     case interrupted
-    case needsSetup
     case ready
     case armed
     case recording
@@ -40,7 +42,6 @@ enum HUDState: Equatable {
         switch self {
         case .starting: return "Wait"
         case .interrupted: return "Paused"
-        case .needsSetup: return "Set up"
         case .ready: return "Ready"
         case .armed: return "Armed"
         case .recording: return "Rec"
@@ -52,7 +53,6 @@ enum HUDState: Equatable {
         switch self {
         case .starting: return "camera.fill"
         case .interrupted: return "exclamationmark.triangle.fill"
-        case .needsSetup: return "viewfinder"
         case .ready: return "checkmark.circle.fill"
         case .armed: return "dot.radiowaves.left.and.right"
         case .recording: return "record.circle.fill"
@@ -64,7 +64,7 @@ enum HUDState: Equatable {
         switch self {
         case .starting: return Theme.surface
         case .interrupted: return Theme.fail
-        case .needsSetup, .ready, .armed, .analysing: return Theme.yellow
+        case .ready, .armed, .analysing: return Theme.yellow
         case .recording: return Theme.fail
         }
     }

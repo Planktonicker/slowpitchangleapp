@@ -158,9 +158,12 @@ struct SessionSummary: Identifiable, Equatable, Sendable {
     var bestExitVeloMph: Double? { confident.map(\.exitVeloMph).max() }
 
     var medianLaunchAngleDeg: Double? {
-        let xs = confident.map(\.launchAngleDeg).sorted()
+        // Same median as the G2 gate (Geometry.median, even counts averaged),
+        // not a third hand-rolled convention — the summary tile and the
+        // scoreboard must mean the same thing by the same word.
+        let xs = confident.map(\.launchAngleDeg)
         guard !xs.isEmpty else { return nil }
-        return xs[xs.count / 2]
+        return Geometry.median(xs[...])
     }
 
     /// Swings whose launch angle sat in the slow-pitch line-drive band.
@@ -170,10 +173,10 @@ struct SessionSummary: Identifiable, Equatable, Sendable {
     /// slow-pitch swing-kinematics norms to score against. Shown as a count,
     /// never as a grade.
     var inLaunchWindow: Int {
-        confident.filter {
-            $0.launchAngleDeg >= SLA.slowpitchLaunchLo
-                && $0.launchAngleDeg <= SLA.slowpitchLaunchHi
-        }.count
+        // Through the parity-pinned helper, not an inline copy of its bounds:
+        // three private copies of a band is how a change to the Python leaves
+        // two of them silently disagreeing with the reference.
+        confident.filter { SLA.inSlowpitchLaunchWindow($0.launchAngleDeg) }.count
     }
 
     /// Nothing to show and a reason why. The empty state carries the whole

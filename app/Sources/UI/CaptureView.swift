@@ -219,7 +219,7 @@ struct CaptureScreen: View {
                     .padding(.bottom, 6)
                 }
 
-                if hudState != .starting && hudState != .needsSetup {
+                if hudState != .starting {
                     SeamMeter(db: capture.triggerLevelDb,
                               thresholdDb: model.settings.triggerDb)
                         .padding(.horizontal, 16)
@@ -335,9 +335,6 @@ struct CaptureScreen: View {
         case .interrupted:
             Button { model.startCapture() } label: { Text("Retry") }
                 .buttonStyle(SlabButtonStyle(size: 17, verticalPadding: 0, minHeight: Self.controlHeight))
-        case .needsSetup:
-            Button { openSetup() } label: { Text("1 · Set up camera") }
-                .buttonStyle(SlabButtonStyle(size: 15, verticalPadding: 0, minHeight: Self.controlHeight))
         case .ready:
             Button { model.arm() } label: { Text("2 · Arm") }
                 .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 0, minHeight: Self.controlHeight))
@@ -360,7 +357,7 @@ struct CaptureScreen: View {
 
     private var contextAction: (symbol: String, caption: String, disabled: Bool, action: () -> Void)? {
         switch hudState {
-        case .starting, .needsSetup, .interrupted:
+        case .starting, .interrupted:
             return nil   // exactly one control when there is exactly one thing to do
         case .ready:
             // No FRAME button here. Setup has a permanent home in the ribbon,
@@ -380,7 +377,6 @@ struct CaptureScreen: View {
     private var bugLabel: String {
         switch hudState {
         case .ready: return "Metres"
-        case .needsSetup: return ""
         case .analysing: return "Percent"
         default: return "Status"
         }
@@ -388,10 +384,6 @@ struct CaptureScreen: View {
 
     private var bugValue: String {
         switch hudState {
-        case .needsSetup:
-            // Short and imperative. The full advisory is long and turned the
-            // bug into a paragraph, which is not what a glanceable readout is.
-            return "Tap the ball"
         case .ready:
             if let m = wizard.derivedDistanceM { return String(format: "%.1f", m) }
             return "SET"

@@ -80,7 +80,6 @@ final class TriggerCalibration: ObservableObject {
     /// the ring-out without merging two swings.
     private let burstWindowS: Double = 0.25
 
-    var isRunning: Bool { phase != .idle && !isDone }
     var isDone: Bool { if case .done = phase { return true }; return false }
 
     func startBackground() {

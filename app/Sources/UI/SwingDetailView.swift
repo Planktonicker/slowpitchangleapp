@@ -27,8 +27,12 @@ struct SwingDetailView: View {
     /// encoded-buffer space over a picture the player has already turned — see
     /// `VideoOverlayGeometry`.
     @State private var videoTransform: CGAffineTransform = .identity
-    @State private var hangText = ""
-    @State private var carryText = ""
+    // Optional Doubles bound with .number formatting, NOT strings parsed with
+    // Double(String): the decimal pad produces a comma in most non-US locales,
+    // Double("1,5") is nil, and Save silently wiped previously saved ground
+    // truth with no error either way.
+    @State private var hangEntry: Double?
+    @State private var carryEntry: Double?
     /// What is on top, if anything. One optional instead of three booleans —
     /// see the note on the `.sheet` modifier.
     enum DetailSheet: Identifiable {
@@ -470,7 +474,7 @@ struct SwingDetailView: View {
             HStack {
                 Text("Hang time")
                 Spacer()
-                TextField("s", text: $hangText)
+                TextField("s", value: $hangEntry, format: .number.precision(.fractionLength(0...2)))
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 80)
@@ -478,7 +482,7 @@ struct SwingDetailView: View {
             HStack {
                 Text("Carry, paced off")
                 Spacer()
-                TextField("m", text: $carryText)
+                TextField("m", value: $carryEntry, format: .number.precision(.fractionLength(0...1)))
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 80)
@@ -637,8 +641,8 @@ struct SwingDetailView: View {
     // MARK: - Loading
 
     private func load() async {
-        hangText = swing.hangS.map { String(format: "%.2f", $0) } ?? ""
-        carryText = swing.carryM.map { String(format: "%.1f", $0) } ?? ""
+        hangEntry = swing.hangS
+        carryEntry = swing.carryM
 
         if let name = swing.trackCSVFilename,
            let text = try? String(contentsOf: ClipStore.trackURL(named: name), encoding: .utf8) {
@@ -729,7 +733,8 @@ struct SwingDetailView: View {
         var options = OverlayVideoExporter.Options()
         options.caption = SwingRead.exportCaption(launchAngleDeg: swing.launchAngleDeg,
                                                   exitVeloMph: swing.exitVeloMph,
-                                                  smash: swing.smashFactor)
+                                                  smash: swing.smashFactor,
+                                                  unit: model.settings.speedUnit)
         let batPath = swing.batPathPx
         let observations = track
         let contact = swing.contactTime
@@ -761,8 +766,8 @@ struct SwingDetailView: View {
 
     private func saveGroundTruth() {
         var updated = swing
-        updated.hangS = Double(hangText.trimmingCharacters(in: .whitespaces))
-        updated.carryM = Double(carryText.trimmingCharacters(in: .whitespaces))
+        updated.hangS = hangEntry
+        updated.carryM = carryEntry
         swing = updated
         model.update(updated)
     }

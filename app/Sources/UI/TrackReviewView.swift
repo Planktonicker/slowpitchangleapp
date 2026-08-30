@@ -464,8 +464,21 @@ struct TrackReviewView: View {
             HStack(spacing: 20) {
                 stepButton("backward.frame.fill", frames: -1)
                 Button {
-                    if player?.timeControlStatus == .playing { player?.pause() }
-                    else { player?.play() }
+                    guard let player else { return }
+                    if player.timeControlStatus == .playing {
+                        player.pause()
+                    } else {
+                        // At the end, play() without a seek is a silent no-op
+                        // — routine on a screen whose clips run under two
+                        // seconds, and it read as a dead button. Rewind first.
+                        let now = player.currentTime().seconds
+                        if durationS > 0, now >= durationS - 0.02 {
+                            player.seek(to: .zero, toleranceBefore: .zero,
+                                        toleranceAfter: .zero) { _ in player.play() }
+                        } else {
+                            player.play()
+                        }
+                    }
                 } label: {
                     Image(systemName: player?.timeControlStatus == .playing
                           ? "pause.fill" : "play.fill")

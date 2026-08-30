@@ -29,11 +29,24 @@ struct TrendsView: View {
         NavigationStack {
             Group {
                 if swings.count < 2 {
-                    ContentUnavailableView(
-                        "Not enough swings",
-                        systemImage: "chart.xyaxis.line",
-                        description: Text("Trends need at least two tracked swings. Turn off the high-confidence filter to include flagged readings.")
-                    )
+                    // The action lives IN the empty state. The old copy told
+                    // the user to turn off a filter that only rendered in the
+                    // content branch this screen was replacing — an
+                    // instruction pointing at a control that did not exist,
+                    // and with the filter defaulting on, that was the
+                    // first-run experience.
+                    ContentUnavailableView {
+                        Label("Not enough swings", systemImage: "chart.xyaxis.line")
+                    } description: {
+                        Text(highConfidenceOnly
+                             ? "Trends need at least two tracked swings. Flagged readings are currently hidden."
+                             : "Trends need at least two tracked swings.")
+                    } actions: {
+                        if highConfidenceOnly {
+                            Button("Include flagged readings") { highConfidenceOnly = false }
+                                .buttonStyle(.borderedProminent)
+                        }
+                    }
                 } else {
                     content
                 }
@@ -107,11 +120,8 @@ struct TrendsView: View {
 
     private func stats(_ values: [Double], unit: String) -> some View {
         let mean = values.reduce(0, +) / Double(values.count)
-        let sd: Double = {
-            guard values.count >= 2 else { return 0 }
-            let ss = values.reduce(0) { $0 + ($1 - mean) * ($1 - mean) }
-            return (ss / Double(values.count - 1)).squareRoot()
-        }()
+        // The same ddof=1 statistic the G4 gate reports, from the same home.
+        let sd = Geometry.sampleStdDev(values) ?? 0
         return HStack {
             Text(String(format: "mean %.1f %@", mean, unit))
             Spacer()

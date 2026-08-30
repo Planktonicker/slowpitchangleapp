@@ -173,4 +173,16 @@ enum Geometry {
         if n % 2 == 1 { return s[n / 2] }
         return (s[n / 2 - 1] + s[n / 2]) / 2
     }
+
+    /// Sample standard deviation (ddof = 1), matching `np.std(..., ddof=1)`.
+    ///
+    /// One home for the statistic the G4 repeatability gate and the Trends
+    /// screen both report — two private copies is how the gate and the trend
+    /// readout end up describing different spreads for the same swings.
+    static func sampleStdDev(_ xs: [Double]) -> Double? {
+        guard xs.count >= 2 else { return nil }
+        let mean = xs.reduce(0, +) / Double(xs.count)
+        let ss = xs.reduce(0) { $0 + ($1 - mean) * ($1 - mean) }
+        return (ss / Double(xs.count - 1)).squareRoot()
+    }
 }
