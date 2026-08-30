@@ -15,6 +15,12 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var showTriggerCalibration = false
     @State private var showDeleteConfirm = false
+    /// Measured when the screen appears, not in the body. `totalClipBytes()`
+    /// enumerates the clips directory and stats every file in it, and a body
+    /// re-runs on every publish from `AppModel` — so while an analysis was
+    /// running this screen scanned the disk once per progress tick, on the
+    /// main thread, for a number nobody watches change.
+    @State private var clipBytes: Int64 = 0
 
     var body: some View {
         NavigationStack {
@@ -95,7 +101,7 @@ struct SettingsView: View {
                     HStack {
                         Text("Clips on device")
                         Spacer()
-                        Text(byteText(ClipStore.totalClipBytes()))
+                        Text(byteText(clipBytes))
                             .foregroundStyle(.secondary).monospacedDigit()
                     }
                     Text("Keeping clips is what makes a suspicious reading recoverable — the Python pipeline can be pointed at the same footage. 240fps fills a phone quickly, so watch this number.")
@@ -122,6 +128,20 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .task {
+                let bytes = await Task.detached(priority: .utility) {
+                    ClipStore.totalClipBytes()
+                }.value
+                clipBytes = bytes
+            }
+            .onChange(of: model.swings.count) { _, _ in
+                Task {
+                    let bytes = await Task.detached(priority: .utility) {
+                        ClipStore.totalClipBytes()
+                    }.value
+                    clipBytes = bytes
+                }
+            }
             .toolbar {
                 if isModal {
                     ToolbarItem(placement: .confirmationAction) {

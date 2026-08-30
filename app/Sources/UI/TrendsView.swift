@@ -48,7 +48,7 @@ struct TrendsView: View {
                         }
                     }
                 } else {
-                    content
+                    content(swings)
                 }
             }
             .navigationTitle("Trends")
@@ -76,7 +76,10 @@ struct TrendsView: View {
         }
     }
 
-    private var content: some View {
+    /// Takes the rows rather than reading `swings`, which filters three times
+    /// and sorts on every access — and the body used to access it six times
+    /// per render, once for the count and once for each chart and stat line.
+    private func content(_ swings: [SwingDTO]) -> some View {
         List {
             Section {
                 Toggle("High-confidence swings only", isOn: $highConfidenceOnly)

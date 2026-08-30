@@ -56,9 +56,69 @@ final class AppModel: ObservableObject {
         var text: String
     }
 
-    var scoreboard: ValidationScoreboard { ValidationScoreboard.build(from: swings) }
+    /// Bumped by `reload()`, which is the only place `swings` is ever
+    /// assigned. Everything derived from the swings and cached below keys off
+    /// this rather than comparing arrays: an equality check over every stored
+    /// swing is not free either, and this is O(1).
+    private var swingsRevision = 0
+
+    /// The go/no-go scoreboard, rebuilt only when the swings change.
+    ///
+    /// This was a computed property, and `ValidationView` reads it eighteen
+    /// times per render — once per number on the screen — so opening that
+    /// screen rebuilt the whole board from every stored swing eighteen times,
+    /// and again on every one of the hundreds of publishes an analysis used to
+    /// emit.
+    private var cachedScoreboard: (revision: Int, board: ValidationScoreboard)?
+    var scoreboard: ValidationScoreboard {
+        if let c = cachedScoreboard, c.revision == swingsRevision { return c.board }
+        let board = ValidationScoreboard.build(from: swings)
+        cachedScoreboard = (swingsRevision, board)
+        return board
+    }
 
     var isAnalyzing: Bool { analysisProgress != nil }
+
+    /// A progress callback that only reaches the main actor when the number a
+    /// human could read actually changes.
+    ///
+    /// `ClipAnalyzer` calls its progress closure once per decoded frame, in
+    /// each of three passes: about 2,500 calls for a three-second 240fps clip.
+    /// Every one of them hopped to the main actor and set an `@Published`
+    /// property, and setting that invalidates every view observing `AppModel`
+    /// — including, if they happened to be on screen, the Settings screen
+    /// (which enumerated the clips directory in its body) and the Validation
+    /// screen (which rebuilt its scoreboard from every stored swing, eighteen
+    /// times over). That is where the analysis lag came from: not the decoding,
+    /// which is on a background thread, but a main thread asked to re-render
+    /// the app a thousand times while it ran.
+    ///
+    /// A progress bar has about a hundred distinguishable states. Publishing
+    /// only when the whole percent changes cuts the hops by twenty-five times
+    /// and looks identical.
+    private func throttledProgress() -> @Sendable (Double) -> Void {
+        let lastPercent = LockedInt(-1)
+        return { [weak self] p in
+            let pct = Int((p * 100).rounded(.down))
+            guard lastPercent.setIfDifferent(pct) else { return }
+            Task { @MainActor [weak self] in self?.analysisProgress = p }
+        }
+    }
+
+    /// Minimal thread-safe box. The progress closure is `@Sendable` and called
+    /// from whichever thread the analysis pass is on.
+    private final class LockedInt: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: Int
+        init(_ v: Int) { value = v }
+        /// True when the value changed, i.e. when it is worth publishing.
+        func setIfDifferent(_ v: Int) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard v != value else { return false }
+            value = v
+            return true
+        }
+    }
 
     init(store: SwingStoring) {
         self.store = store
@@ -178,12 +238,35 @@ final class AppModel: ObservableObject {
     /// Derived rather than stored — see `Session.derived`. The round in
     /// progress is excluded: it is not finished, and offering to reopen the
     /// thing you are already in is a button that can only confuse.
+    /// Cached for the same reason as `scoreboard`: `RoundsView` reads
+    /// `pastRounds` twice per render — once to ask whether it is empty, once
+    /// to build the list — and each read regrouped every stored swing.
+    private var cachedRounds: (revision: Int, rounds: [Session])?
     var pastRounds: [Session] {
-        Session.allDerived(from: swings).filter { $0.id != session?.id }
+        let all: [Session]
+        if let c = cachedRounds, c.revision == swingsRevision {
+            all = c.rounds
+        } else {
+            all = Session.allDerived(from: swings)
+            cachedRounds = (swingsRevision, all)
+        }
+        // Filtered outside the cache: the round in progress can change without
+        // the swings changing.
+        return all.filter { $0.id != session?.id }
     }
 
+    /// Cached per round. This is called from inside `RoundsView`'s row builder,
+    /// so a list of ten finished rounds rebuilt ten summaries — each a pass
+    /// over every stored swing — every time anything published.
+    private var cachedSummaries: (revision: Int, byRound: [UUID: SessionSummary]) = (-1, [:])
     func summary(for round: Session) -> SessionSummary {
-        SessionSummary.build(session: round, swings: swings)
+        if cachedSummaries.revision != swingsRevision {
+            cachedSummaries = (swingsRevision, [:])
+        }
+        if let hit = cachedSummaries.byRound[round.id] { return hit }
+        let built = SessionSummary.build(session: round, swings: swings)
+        cachedSummaries.byRound[round.id] = built
+        return built
     }
 
     /// Pick a finished round back up and keep hitting into it.
@@ -503,9 +586,7 @@ final class AppModel: ObservableObject {
                 analysis = try await ClipAnalyzer.analyze(
                     url: stored, contactTime: nil, options: options,
                     diagnostics: diagnostics,
-                    progress: { p in
-                        Task { @MainActor [weak self] in self?.analysisProgress = p }
-                    })
+                    progress: self.throttledProgress())
             } catch {
                 failure = error.localizedDescription
                 diagnostics.failure = failure
@@ -776,9 +857,7 @@ final class AppModel: ObservableObject {
                             distanceM: wasManual ? nil : placement.distanceM),
                         options: options,
                         diagnostics: diagnostics,
-                        progress: { p in
-                            Task { @MainActor [weak self] in self?.analysisProgress = p }
-                        }
+                        progress: self.throttledProgress()
                     )
                 }
             } catch {
@@ -939,9 +1018,7 @@ final class AppModel: ObservableObject {
                         && swing.contactTime > 0 ? swing.contactTime : nil,
                     options: options,
                     diagnostics: diagnostics,
-                    progress: { p in
-                        Task { @MainActor [weak self] in self?.analysisProgress = p }
-                    })
+                    progress: self.throttledProgress())
                 }
                 let report = diagnostics.report(detector: options.detector)
                 await MainActor.run {
@@ -1012,6 +1089,8 @@ final class AppModel: ObservableObject {
     func reload() {
         do {
             swings = try store.all()
+            // Every derived-and-cached view of the swings keys off this.
+            swingsRevision &+= 1
         } catch {
             banner = Banner(kind: .error, text: "Could not read stored swings: \(error.localizedDescription)")
         }
