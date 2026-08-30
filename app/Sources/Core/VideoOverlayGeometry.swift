@@ -69,7 +69,13 @@ enum VideoOverlayGeometry {
         let dx = (p.x - rect.minX) * (display.width / rect.width)
         let dy = (p.y - rect.minY) * (display.height / rect.height)
         // Undo the preferred transform to land back in encoded coordinates.
-        guard transform.isInvertible else { return CGPoint(x: dx, y: dy) }
+        //
+        // Checked by determinant rather than by asking the transform: there is
+        // no `isInvertible`, and `inverted()` returns the transform UNCHANGED
+        // when it cannot invert — so a degenerate transform would silently
+        // hand back a point in the wrong space instead of failing.
+        let det = transform.a * transform.d - transform.b * transform.c
+        guard abs(det) > 1e-12 else { return CGPoint(x: dx, y: dy) }
         return CGPoint(x: dx, y: dy).applying(transform.inverted())
     }
 
