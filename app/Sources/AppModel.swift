@@ -366,15 +366,26 @@ final class AppModel: ObservableObject {
     /// pipeline could not, and second-guessing them would defeat the point of
     /// asking.
     private func confirmBall(_ analysis: ClipAnalysis, into dto: inout SwingDTO) {
+        // Any previous verdict goes first, so re-analysing repeatedly cannot
+        // stack a column of near-identical notes — and so a run that now finds
+        // the ball leaves no trace of the one that did not.
+        let kept = (dto.notes ?? "")
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .filter { !$0.hasPrefix(Self.ballNotIdentifiedPrefix) }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        dto.notes = kept.isEmpty ? nil : kept
+
         guard !analysis.trace.usedBallSeed else { return }
-        if let reason = TrackPlausibility.rejection(track: analysis.track,
-                                                    launchAngleDeg: dto.launchAngleDeg,
-                                                    flags: dto.flags) {
-            dto.captureFlags.append(.ballUnconfirmed)
-            dto.notes = [dto.notes, "Ball not identified: " + reason]
-                .compactMap { $0 }.joined(separator: "\n")
-        }
+        guard let reason = TrackPlausibility.rejection(track: analysis.track,
+                                                       launchAngleDeg: dto.launchAngleDeg,
+                                                       flags: dto.flags) else { return }
+        dto.captureFlags.append(.ballUnconfirmed)
+        dto.notes = [dto.notes, Self.ballNotIdentifiedPrefix + reason]
+            .compactMap { $0 }.joined(separator: "\n")
     }
+
+    private static let ballNotIdentifiedPrefix = "Ball not identified: "
 
     /// Write the ball track and the pose track beside the clip, and point the
     /// record at them.

@@ -290,8 +290,10 @@ enum ClipAnalyzer {
             if let seeded, seeded.count >= 3 {
                 selected = seeded
                 tracks = [seeded] + tracks
+                trace.usedBallSeed = true
                 diagnostics?.usedBallSeed = true
             } else {
+                trace.ballSeedFoundNothing = true
                 diagnostics?.ballSeedFoundNothing = true
             }
         }

@@ -96,6 +96,19 @@ struct DetectionTrace: Codable, Sendable, Equatable {
     /// finding from a small number.
     var tracksBuilt = 0
 
+    /// The user pointed at the ball and the track was followed from there,
+    /// bypassing automatic selection.
+    ///
+    /// Recorded HERE as well as in the diagnostics because the trace is what
+    /// survives to disk and gets read back. Whether a reading was hand-picked
+    /// decides whether it may be second-guessed — `confirmBall` will not stamp
+    /// BALL_UNCONFIRMED on a track the user chose — so the fact has to outlive
+    /// the analysis run that produced it.
+    var usedBallSeed = false
+    /// They pointed, and nothing was DETECTED near the tap: a detection
+    /// failure rather than a selection one, and the two want opposite fixes.
+    var ballSeedFoundNothing = false
+
     /// For the fastest few chains that did NOT join each other: which stitch
     /// gate refused, with the measured value against its limit. One line per
     /// ordered pair, e.g. "0.795s -> 0.824s  gap 29ms: direction differs 63
