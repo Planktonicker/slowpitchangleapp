@@ -22,7 +22,6 @@ struct StartView: View {
     @State private var showSwings = false
     @State private var showSettings = false
     @State private var showTrends = false
-    @State private var showValidation = false
 
     var body: some View {
         NavigationStack {
@@ -60,7 +59,6 @@ struct StartView: View {
             .sheet(isPresented: $showSwings) { HistoryView() }
             .sheet(isPresented: $showSettings) { SettingsView() }
             .sheet(isPresented: $showTrends) { TrendsView() }
-            .sheet(isPresented: $showValidation) { ValidationView() }
         }
         .tint(Theme.yellow)
     }
@@ -145,16 +143,13 @@ struct StartView: View {
         .buttonStyle(.plain)
     }
 
-    /// Trends and Validation, which are things you read BETWEEN rounds. They
-    /// used to be tabs, which put them one tap from a hitter mid-session and
-    /// four taps of clutter around the two screens that matter there.
+    /// Your own numbers over time — the one thing on this screen that is about
+    /// hitting rather than about the app. Validation is not here: it is a
+    /// go/no-go scoreboard for the measurement gates, which belongs with the
+    /// rest of the specialist screens under Settings.
     private var betweenSessions: some View {
-        HStack(spacing: 12) {
-            Button("Trends") { showTrends = true }
-                .buttonStyle(OutlineButtonStyle())
-            Button("Validation") { showValidation = true }
-                .buttonStyle(OutlineButtonStyle())
-        }
+        Button("Trends") { showTrends = true }
+            .buttonStyle(OutlineButtonStyle())
     }
 
     /// The standing caveat, on the screen every session starts from.
