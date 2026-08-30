@@ -101,9 +101,16 @@ side-on, 4–6 m away — or use footage you already have.
      render and every speed comes out 8× wrong.
 2. Wait through "Measuring the clip…".
 3. A sheet titled **"Clip diagnostics"** opens by itself. Read two lines:
-   - the `clip` line: it must say **240 fps** (or 200/120 — whatever you filmed).
-     If it says **30 fps**: Settings → Analysis → **"Imported clip frame rate"**
-     → "240 fps", then re-import the same clip.
+   - the `clip` line: the frame rate is **measured from the clip's own frame
+     timing**, so it reads whatever you actually filmed — 240, 200, 198.94 —
+     and the word after it says where the number came from. `(measured)` is
+     what you want. If the container disagreed, the next line says so; that is
+     normal for slow motion and nothing to fix.
+     - If it says **30 fps (measured)**, the file really is 30 fps: you filmed
+       in normal video, or exported the slow-motion *edit*. Re-film in Slo-mo
+       and import with **"From Photos"**.
+     - There is no frame-rate preset to choose any more. The override in
+       Settings → Analysis is off by default and should stay off.
    - the `verdict` line at the bottom. Find it in this table:
 
 | verdict says | meaning | what you do |

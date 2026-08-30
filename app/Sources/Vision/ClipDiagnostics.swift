@@ -35,7 +35,19 @@ final class ClipDiagnostics {
     var height = 0
     var durationS: Double = 0
     var framesDecoded = 0
-    var fpsWasOverridden = false
+    /// Where the frame rate came from. Worth reporting on its own line: a
+    /// wrong rate is invisible in every other number, because everything
+    /// downstream is simply scaled by it and stays plausible.
+    enum FPSSource: String { case measured, container, override }
+    var fpsSource: FPSSource = .container
+    /// What the container claimed, when it claimed anything. Kept even when
+    /// the measurement wins, because the two disagreeing is the signature of
+    /// slow-motion footage and worth seeing.
+    var containerFps: Double?
+    /// Fraction of frame intervals well away from the median — variable frame
+    /// rate, which breaks the constant-interval assumption every timing
+    /// measurement rests on.
+    var frameIntervalIrregularFraction: Double?
     /// Set when the radius gates were rescaled for a non-1080p clip.
     var radiusScale: Double?
     /// Wall-clock seconds for the whole analysis. Reported because "it takes
@@ -87,9 +99,19 @@ final class ClipDiagnostics {
     func report(detector: DetectorSettings) -> String {
         var out = ["SwingLab clip diagnostics"]
         out.append("--------------------------------")
-        out.append(String(format: "clip     %dx%d  %.1fs  %.0f fps%@  %d frames decoded",
+        out.append(String(format: "clip     %dx%d  %.1fs  %.2f fps (%@)  %d frames decoded",
                           width, height, durationS, fps,
-                          fpsWasOverridden ? " (overridden)" : "", framesDecoded))
+                          fpsSource.rawValue, framesDecoded))
+        // Printed whenever the two disagree at all. This single line is the
+        // whole slow-motion story: a 240 fps original wearing a 30 fps label.
+        if let container = containerFps, abs(container - fps) > 0.5 {
+            out.append(String(format: "         container metadata says %.2f fps — measured timing used instead",
+                              container))
+        }
+        if let irregular = frameIntervalIrregularFraction, irregular > 0.05 {
+            out.append(String(format: "         %.0f%% of frame intervals are irregular — variable frame rate, timing is unreliable",
+                              irregular * 100))
+        }
         if let elapsed = elapsedS {
             out.append(String(format: "took     %.1fs (%.0f ms per decoded frame)",
                               elapsed, 1000 * elapsed / Double(max(1, framesDecoded))))
@@ -158,9 +180,17 @@ final class ClipDiagnostics {
     private func notes() -> [String] {
         var out: [String] = []
         if fps > 0 && fps < 100 {
+            // The rate is now measured from the sample timing rather than read
+            // off the container, so a low number here is far more likely to be
+            // true than it used to be — the advice changed with it.
             out.append(String(format:
-                "%.0f fps, not 240. Exit velocity scales directly with frame rate, so if this is really slow-motion footage the rate is being read wrong — set Settings → Analysis → \"Imported clip frame rate\". If it is genuinely %.0f fps, the ball moves too far between frames to track.",
+                "%.0f fps, measured from the clip's own frame timing rather than its metadata. At this rate the ball moves too far between frames to track: film in slow motion (Camera → Slo-Mo) and import with \"From Photos\", which is the only route that keeps the original high-rate frames. Every other way of getting a clip off the phone renders the slow-motion EDIT, which really is %.0f fps.",
                 fps, fps))
+        }
+        if let irregular = frameIntervalIrregularFraction, irregular > 0.05 {
+            out.append(String(format:
+                "%.0f%% of the frame intervals differ from the typical one. Every timing measurement here — exit velocity above all — assumes frames arrive evenly, so this footage will read wrong by however uneven it is. Re-record rather than re-encode: a variable-rate file cannot be repaired after the fact.",
+                irregular * 100))
         }
         if durationS > 20 {
             out.append(String(format:

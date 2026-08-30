@@ -213,3 +213,62 @@ final class CameraPoseTests: XCTestCase {
                                                orientation: .up))
     }
 }
+
+/// Frame rate measured from a clip's own sample timing.
+///
+/// The reason this is not a setting any more: real footage is not limited to
+/// the round rates a picker can list. The first clip this app was handed was
+/// 198.94 fps, which no preset could express — and exit velocity scales
+/// directly with this number, so "near enough" is a proportional error in
+/// every speed the app reports.
+final class FrameTimingTests: XCTestCase {
+
+    private func intervals(fps: Double, count: Int) -> [Double] {
+        Array(repeating: 1 / fps, count: count)
+    }
+
+    func testRecoversARoundRate() throws {
+        let t = try XCTUnwrap(ClipAnalyzer.frameTiming(fromIntervals: intervals(fps: 240, count: 60)))
+        XCTAssertEqual(t.fps, 240, accuracy: 1e-9)
+        XCTAssertEqual(t.irregularFraction, 0, accuracy: 1e-9)
+    }
+
+    /// The rate the owner's own phone records at. A four-preset picker could
+    /// only offer 200, which is a 0.5% error presented as a choice.
+    func testRecoversAnAwkwardRate() throws {
+        let t = try XCTUnwrap(ClipAnalyzer.frameTiming(fromIntervals: intervals(fps: 198.94, count: 60)))
+        XCTAssertEqual(t.fps, 198.94, accuracy: 1e-6)
+    }
+
+    /// A dropped frame doubles one interval. The median must not notice; a
+    /// mean would have pulled the rate down and every speed with it.
+    func testASingleDroppedFrameDoesNotMoveTheRate() throws {
+        var ints = intervals(fps: 240, count: 60)
+        ints[30] *= 2
+        let t = try XCTUnwrap(ClipAnalyzer.frameTiming(fromIntervals: ints))
+        XCTAssertEqual(t.fps, 240, accuracy: 1e-9)
+        XCTAssertEqual(t.irregularFraction, 1.0 / 60, accuracy: 1e-9)
+    }
+
+    /// Variable frame rate has to be visible, not averaged away: every timing
+    /// measurement downstream assumes an even interval.
+    func testVariableRateIsReportedAsIrregular() throws {
+        var ints = intervals(fps: 240, count: 60)
+        for i in stride(from: 0, to: 60, by: 2) { ints[i] *= 1.6 }
+        let t = try XCTUnwrap(ClipAnalyzer.frameTiming(fromIntervals: ints))
+        XCTAssertGreaterThan(t.irregularFraction, 0.4)
+    }
+
+    func testRefusesTooFewIntervals() {
+        XCTAssertNil(ClipAnalyzer.frameTiming(fromIntervals: [1.0 / 240, 1.0 / 240]))
+        XCTAssertNil(ClipAnalyzer.frameTiming(fromIntervals: []))
+    }
+
+    func testIgnoresNonPositiveAndNonFiniteIntervals() throws {
+        var ints = intervals(fps: 240, count: 20)
+        ints.append(contentsOf: [0, -1.0 / 240, .nan, .infinity])
+        let t = try XCTUnwrap(ClipAnalyzer.frameTiming(fromIntervals: ints))
+        XCTAssertEqual(t.fps, 240, accuracy: 1e-9)
+        XCTAssertEqual(t.intervals, 20)
+    }
+}

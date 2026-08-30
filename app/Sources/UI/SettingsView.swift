@@ -61,14 +61,28 @@ struct SettingsView: View {
                     }
                     Text("Direction only matters when an inbound pitch is also in frame. Auto takes the fastest track.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Picker("Imported clip frame rate", selection: $model.settings.fpsOverride) {
-                        Text("Trust the file").tag(Double?.none)
-                        Text("240 fps").tag(Double?.some(240))
-                        Text("120 fps").tag(Double?.some(120))
-                        Text("60 fps").tag(Double?.some(60))
-                        Text("30 fps").tag(Double?.some(30))
+                    // A free number, not a menu of four. Real footage is not
+                    // limited to the round rates a picker can list — the first
+                    // clip this app was given was 198.94 fps, which no preset
+                    // could express, and picking "200" from a list would have
+                    // been a half-percent error presented as a choice.
+                    Toggle("Override imported clip frame rate", isOn: Binding(
+                        get: { model.settings.fpsOverride != nil },
+                        set: { model.settings.fpsOverride = $0 ? 240 : nil }))
+                    if model.settings.fpsOverride != nil {
+                        HStack {
+                            Text("Frames per second")
+                            Spacer()
+                            TextField("240", value: Binding(
+                                get: { model.settings.fpsOverride ?? 240 },
+                                set: { model.settings.fpsOverride = max(1, min(1000, $0)) }),
+                                      format: .number.precision(.fractionLength(0...3)))
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                                .frame(width: 96)
+                        }
                     }
-                    Text("Only matters for imported clips whose container lies about its rate — iPhone slow-motion exports often say 30 while holding every 240fps frame. Exit velocity scales directly with frame rate, so a wrong rate is a wrong speed by the same factor. Leave on \"Trust the file\" unless a diagnostics report told you otherwise.")
+                    Text("Leave this OFF. The frame rate is measured from the clip's own frame timing, which is right for any rate — 240, 200, 198.94 — and does not care what the file's metadata claims. Turn it on only if a diagnostics report shows a measured rate you know to be wrong, which means the footage was re-timed after recording. Exit velocity scales directly with frame rate, so a wrong number here is a wrong speed by exactly the same factor.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 

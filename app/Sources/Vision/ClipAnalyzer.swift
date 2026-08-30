@@ -78,9 +78,15 @@ enum ClipAnalyzer {
         /// Horizontal field of view of the capture format, degrees. Needed to
         /// turn tilt into a focal length; without it, tilt cannot be undone.
         var fieldOfViewDeg: Double = 0
-        /// Container frame rate is trusted for clips this app recorded. Set
-        /// this for imported footage whose metadata lies (iPhone slo-mo often
-        /// reports 30 fps with every 240 fps frame present).
+        /// Force a frame rate, bypassing both the measurement and the
+        /// container metadata.
+        ///
+        /// Almost never needed now that the rate is measured from the clip's
+        /// own sample timing (`measureFrameTiming`), which handles 198.94 fps
+        /// footage as happily as a round 240 and does not care what the
+        /// container claims. Kept as an escape hatch for footage whose timing
+        /// is itself wrong — a re-wrapped or re-timed file — where there is no
+        /// signal left to measure and the user simply knows the answer.
         var fpsOverride: Double?
         /// How far either side of Vision's parabola a candidate may sit.
         var corridorPx: Double = 90
@@ -123,13 +129,23 @@ enum ClipAnalyzer {
         let nominalFPS = try await videoTrack.load(.nominalFrameRate)
         let width = Int(abs(naturalSize.width).rounded())
         let height = Int(abs(naturalSize.height).rounded())
-        let fps = options.fpsOverride ?? (nominalFPS > 1 ? Double(nominalFPS) : SLA.targetFPS)
+        // Measured first, container second. See `measureFrameTiming`: the
+        // header is a claim, the sample timing is the footage. This is what
+        // lets 198.94 fps footage — an ordinary iPhone slow-motion rate —
+        // analyse correctly without anybody choosing a number from a list.
+        let timing = try? measureFrameTiming(asset: asset, track: videoTrack)
+        let fps = options.fpsOverride
+            ?? timing?.fps
+            ?? (nominalFPS > 1 ? Double(nominalFPS) : SLA.targetFPS)
         let duration = try await asset.load(.duration).seconds
         diagnostics?.fps = fps
         diagnostics?.width = width
         diagnostics?.height = height
         diagnostics?.durationS = duration
-        diagnostics?.fpsWasOverridden = options.fpsOverride != nil
+        diagnostics?.fpsSource = options.fpsOverride != nil ? .override
+            : (timing != nil ? .measured : .container)
+        diagnostics?.containerFps = nominalFPS > 1 ? Double(nominalFPS) : nil
+        diagnostics?.frameIntervalIrregularFraction = timing?.irregularFraction
 
         var options = options
         if options.scaleDetectorRadiiToFrameWidth, width > 0,
@@ -380,6 +396,99 @@ enum ClipAnalyzer {
     /// Decode every frame once, handing back (sampleBuffer, frameIndex,
     /// presentationSeconds). Frame time comes from the PTS rather than
     /// `index / fps`, so a dropped frame does not shift everything after it.
+    // MARK: - Frame rate
+
+    /// What the clip's own sample timing says its frame rate is.
+    struct FrameTiming: Sendable {
+        var fps: Double
+        /// How many intervals the answer is based on.
+        var intervals: Int
+        /// Fraction of intervals more than 20% away from the median.
+        ///
+        /// Everything downstream — exit velocity above all — assumes frames
+        /// arrive at a constant interval. Variable-rate footage breaks that
+        /// assumption silently, producing a number that looks ordinary and is
+        /// wrong, so it is measured rather than hoped for.
+        var irregularFraction: Double
+    }
+
+    /// Measure the frame rate from the clip itself, rather than believing the
+    /// container.
+    ///
+    /// `nominalFrameRate` is metadata: a field somebody wrote, not a fact
+    /// derived from the samples. iPhone slow motion is the case that matters
+    /// here — a 240 fps original carrying a slow-motion edit reports 30 — but
+    /// it is wrong in quieter ways too, rounding 198.94 to 199 or to 200, and
+    /// exit velocity scales *directly* with frame rate, so a 20% error in this
+    /// number is a 20% error in every mile per hour the app reports.
+    ///
+    /// The samples cannot lie in the same way: whatever the header says, the
+    /// presentation timestamps are what the frames actually are. This reads
+    /// them **without decoding** — `outputSettings: nil` hands back the
+    /// compressed samples — so it costs a fraction of a second even on a
+    /// gigabyte of 240 fps footage, and it needs no setting, no preset list
+    /// and no guess about which phone recorded it.
+    ///
+    /// The median, not the mean: one dropped frame doubles a single interval,
+    /// and a mean would quietly drag the rate down with it while a median does
+    /// not notice.
+    static func measureFrameTiming(asset: AVAsset,
+                                   track: AVAssetTrack,
+                                   sampleLimit: Int = 300) throws -> FrameTiming? {
+        let reader = try AVAssetReader(asset: asset)
+        // No output settings at all: passthrough of the compressed samples.
+        // Timing survives, the decoder is never woken, and this stays cheap
+        // enough to run before every analysis instead of being a setting.
+        let output = AVAssetReaderTrackOutput(track: track, outputSettings: nil)
+        output.alwaysCopiesSampleData = false
+        guard reader.canAdd(output) else { return nil }
+        reader.add(output)
+        guard reader.startReading() else { return nil }
+        defer { reader.cancelReading() }
+
+        var durations: [Double] = []
+        var stamps: [Double] = []
+        while durations.count < sampleLimit, stamps.count < sampleLimit,
+              let sb = output.copyNextSampleBuffer() {
+            let d = CMSampleBufferGetDuration(sb)
+            if d.isNumeric, d.seconds > 0 { durations.append(d.seconds) }
+            let pts = CMSampleBufferGetPresentationTimeStamp(sb)
+            if pts.isNumeric { stamps.append(pts.seconds) }
+        }
+
+        // Per-sample durations when the container carries them: they are
+        // already per-frame and immune to ordering.
+        var intervals = durations
+        if intervals.count < 8 {
+            // Otherwise fall back to the gaps between timestamps. Sorted
+            // first, because a passthrough reader emits in DECODE order, and
+            // any footage carrying B-frames would otherwise hand back negative
+            // intervals and a nonsense rate.
+            let ordered = stamps.sorted()
+            intervals = zip(ordered.dropFirst(), ordered).map { $0 - $1 }.filter { $0 > 0 }
+        }
+        return frameTiming(fromIntervals: intervals)
+    }
+
+    /// The arithmetic, split out from the reading so it can be tested without
+    /// a video file.
+    ///
+    /// The median, not the mean: one dropped frame doubles a single interval,
+    /// and a mean would quietly drag the rate down with it while a median does
+    /// not notice. That distinction is the whole reason this is a function
+    /// rather than a division.
+    static func frameTiming(fromIntervals intervals: [Double]) -> FrameTiming? {
+        let usable = intervals.filter { $0 > 0 && $0.isFinite }
+        guard usable.count >= 4 else { return nil }
+        let sorted = usable.sorted()
+        let median = sorted[sorted.count / 2]
+        guard median > 0, median.isFinite else { return nil }
+        let irregular = usable.filter { abs($0 - median) > median * 0.2 }.count
+        return FrameTiming(fps: 1 / median,
+                           intervals: usable.count,
+                           irregularFraction: Double(irregular) / Double(usable.count))
+    }
+
     private static func forEachSampleBuffer(asset: AVAsset,
                                             track: AVAssetTrack,
                                             _ body: (CMSampleBuffer, Int, Double) throws -> Void) throws {

@@ -15,7 +15,19 @@ enum FormatSelector {
 
     struct Choice {
         var format: AVCaptureDevice.Format
+        /// The frame rate this format will actually run at — derived from the
+        /// device's own `minFrameDuration`, not rounded to something tidy.
         var fps: Double
+        /// The exact interval to lock the device to.
+        ///
+        /// Carried as the `CMTime` the device reported rather than rebuilt
+        /// from `fps`. Rebuilding meant `CMTime(value: 1, timescale: 240)`,
+        /// which is a different number from a format whose real rate is
+        /// 239.76 — and asking a device for an interval shorter than it
+        /// supports is either refused or silently clamped, after which every
+        /// clip carries a frame rate it was not recorded at. Exit velocity
+        /// scales directly with that number.
+        var frameDuration: CMTime
         var width: Int
         var height: Int
         /// Horizontal field of view in degrees, used by the placement wizard
@@ -23,7 +35,13 @@ enum FormatSelector {
         var fieldOfViewDeg: Double
 
         var describes: String {
-            "\(width)x\(height) @ \(Int(fps.rounded()))fps"
+            // Whole rates read as whole rates; anything else keeps its
+            // decimals, because "199fps" and "198.94fps" are not the same
+            // claim and the difference belongs in the clip metadata.
+            let rate = abs(fps - fps.rounded()) < 0.01
+                ? String(Int(fps.rounded()))
+                : String(format: "%.2f", fps)
+            return "\(width)x\(height) @ \(rate)fps"
         }
     }
 
@@ -34,12 +52,22 @@ enum FormatSelector {
         var candidates: [Choice] = []
         for format in device.formats {
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-            let maxRate = format.videoSupportedFrameRateRanges
-                .map { $0.maxFrameRate }
-                .max() ?? 0
-            guard maxRate > 0 else { continue }
+            // The fastest range, and the interval IT reports. Taking the rate
+            // and the duration from the same range keeps them consistent; a
+            // rate from one place and a duration reconstructed in another is
+            // how a clip ends up labelled 240 while running at 239.76.
+            guard let fastest = format.videoSupportedFrameRateRanges
+                .max(by: { $0.maxFrameRate < $1.maxFrameRate }),
+                  fastest.maxFrameRate > 0 else { continue }
+            let duration = fastest.minFrameDuration
+            // Prefer the duration, which is exact; the advertised rate is a
+            // Float and rounds.
+            let rate = duration.isNumeric && duration.seconds > 0
+                ? 1 / duration.seconds
+                : fastest.maxFrameRate
             candidates.append(Choice(format: format,
-                                     fps: maxRate,
+                                     fps: rate,
+                                     frameDuration: duration,
                                      width: Int(dims.width),
                                      height: Int(dims.height),
                                      fieldOfViewDeg: Double(format.videoFieldOfView)))
@@ -70,8 +98,7 @@ enum FormatSelector {
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }
         device.activeFormat = choice.format
-        let frameDuration = CMTime(value: 1, timescale: CMTimeScale(choice.fps.rounded()))
-        device.activeVideoMinFrameDuration = frameDuration
-        device.activeVideoMaxFrameDuration = frameDuration
+        device.activeVideoMinFrameDuration = choice.frameDuration
+        device.activeVideoMaxFrameDuration = choice.frameDuration
     }
 }
