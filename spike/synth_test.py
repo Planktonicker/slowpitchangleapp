@@ -135,6 +135,36 @@ def run_pipeline(path: str):
     return track
 
 
+def check_tilt_against_pinhole(check) -> None:
+    """Rectify a track projected by an INDEPENDENT pinhole camera.
+
+    The round-trip test in `main` cannot catch a wrong tilt model, because it
+    projects with the algebraic inverse of the thing it is testing. This starts
+    from world coordinates — a ball at a known elevation, seen by a camera
+    pitched by a known angle — and asks whether rectification recovers what a
+    level camera would have seen. Nothing here shares code with
+    `rectify_tilt_point`, so agreement means the model is right, not merely
+    self-consistent.
+    """
+    w, h, fov = 1280, 720, 60.0
+    focal = sla.focal_px_from_fov(w, fov)
+    cx, cy = w / 2.0, h / 2.0
+
+    def image_y(elev_deg: float, tilt_deg: float) -> float:
+        # A ray at `elev` above horizontal sits (elev + tilt) above the optical
+        # axis of a camera pitched DOWN by `tilt`.
+        return cy - focal * math.tan(math.radians(elev_deg + tilt_deg))
+
+    worst = 0.0
+    for elev in (-10.0, 0.0, 5.0, 15.0):
+        for tilt in (8.0, -8.0, 16.0, -16.0):
+            _, y_rect, _ = sla.rectify_tilt_point(
+                cx, image_y(elev, tilt), tilt, focal, cx, cy)
+            worst = max(worst, abs(y_rect - image_y(elev, 0.0)))
+    check("tilt model matches an independent pinhole", worst < 1e-6,
+          f"worst error {worst:.4f} px (tol 1e-6)")
+
+
 def main():
     os.makedirs("out", exist_ok=True)
     path = os.path.join("out", "synthetic.mp4")
@@ -181,6 +211,14 @@ def main():
 
     # --- camera tilt: does the rectification actually recover the truth? ---
     #
+    # NOTE ON WHAT THIS DOES AND DOES NOT PROVE. The re-projection below is the
+    # algebraic inverse of `rectify_tilt`, so this half is a ROUND TRIP: it
+    # would pass even if both directions shared a wrong model or a flipped
+    # sign, because the error would cancel. It is still worth having — it pins
+    # the two against each other numerically — but it cannot tell you the model
+    # is right. The independent check that can is `check_tilt_against_pinhole`
+    # below, which starts from world geometry instead.
+    #
     # Re-project this very track through a camera pitched up at the contact
     # point (the mistake a short tripod invites), then rectify it back. The
     # uncorrected numbers are printed too, because the size of the error is the
@@ -216,6 +254,8 @@ def main():
 
     # flight model sanity: 65 mph @ 25 deg carries roughly 130-190 ft in air
     carry_m, hang_s, _apex = sla.simulate_flight(TRUE_EV_MPH / sla.MPH_PER_MPS, TRUE_LA_DEG)
+    check_tilt_against_pinhole(check)
+
     check("drag flight model sanity", 36 <= carry_m <= 61 and 1.5 <= hang_s <= 4.0,
           f"carry {carry_m:.1f} m, hang {hang_s:.2f} s")
 
