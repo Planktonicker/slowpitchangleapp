@@ -208,6 +208,16 @@ plays full screen with everything the app measured drawn on it:
   never examined at all, so a ball out there is not a detection failure,
   it is a search that never went near it.
 
+### "No struck ball identified"
+
+When the app cannot find a flight it can stand behind, it now says so instead
+of reporting a number. The swing is still saved — the numbers on it are useful
+evidence for WHY it failed — but they are labelled as a diagnostic, not a
+measurement, and the import banner will not quote them at you.
+
+Clearing it takes one tap: open the swing, **"Point at the ball"**, touch the
+ball on any frame. The flag clears when the flight is followed from your tap.
+
 ### When it tracks the wrong thing: point at the ball
 
 Some clips are genuinely ambiguous to a computer. A phone low in the grass can

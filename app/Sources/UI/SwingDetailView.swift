@@ -34,6 +34,9 @@ struct SwingDetailView: View {
 
     var body: some View {
         List {
+            if swing.captureFlags.contains(.ballUnconfirmed) {
+                Section { unconfirmedBallNotice }
+            }
             if swing.clipFilename != nil {
                 Section { replay } header: { Text("Replay") }
             }
@@ -66,6 +69,33 @@ struct SwingDetailView: View {
         }
         .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }
         .fullScreenCover(isPresented: $showReview) { TrackReviewView(swing: swing) }
+    }
+
+    /// Said at the top, in full, before any number is shown.
+    ///
+    /// The measured values are still on the screen below — they are the
+    /// evidence for what went wrong, and hiding them would make this harder to
+    /// debug, not safer. What changes is that they are no longer presented as
+    /// a swing.
+    private var unconfirmedBallNotice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("No struck ball identified", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline)
+                .foregroundStyle(Theme.warn)
+            Text("The numbers below describe whatever the detector settled on in this clip, not the swing. Treat them as a diagnostic, not a measurement.")
+                .font(.callout).foregroundStyle(Theme.steel)
+            if let notes = swing.notes, !notes.isEmpty {
+                Text(notes).font(.caption).foregroundStyle(Theme.steel)
+            }
+            Button {
+                showReview = true
+            } label: {
+                Label("Open the clip and point at the ball", systemImage: "hand.tap")
+                    .font(.callout.weight(.semibold))
+            }
+            .foregroundStyle(Theme.pass)
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - Replay

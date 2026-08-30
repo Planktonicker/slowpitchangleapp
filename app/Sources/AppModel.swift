@@ -359,6 +359,23 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Stamp `.ballUnconfirmed` when the chosen track cannot be stood behind
+    /// as a struck ball.
+    ///
+    /// A hand-picked ball is exempt: the user resolved the ambiguity the
+    /// pipeline could not, and second-guessing them would defeat the point of
+    /// asking.
+    private func confirmBall(_ analysis: ClipAnalysis, into dto: inout SwingDTO) {
+        guard !analysis.trace.usedBallSeed else { return }
+        if let reason = TrackPlausibility.rejection(track: analysis.track,
+                                                    launchAngleDeg: dto.launchAngleDeg,
+                                                    flags: dto.flags) {
+            dto.captureFlags.append(.ballUnconfirmed)
+            dto.notes = [dto.notes, "Ball not identified: " + reason]
+                .compactMap { $0 }.joined(separator: "\n")
+        }
+    }
+
     /// Write the ball track and the pose track beside the clip, and point the
     /// record at them.
     ///
@@ -434,6 +451,7 @@ final class AppModel: ObservableObject {
         var dto = SwingDTO(analysis: analysis, setting: setting,
                            clipFilename: name, autoTriggered: false)
         dto.captureFlags = [.importedClip]
+        confirmBall(analysis, into: &dto)
         // Carried on the record so re-analysis uses the same lens the first
         // pass assumed, and so the horizon tool has a focal length to work
         // with. Assumed, not measured — hence the flag above.
@@ -448,9 +466,19 @@ final class AppModel: ObservableObject {
             // an eight-fold error — obvious the moment the number is on screen,
             // invisible if it is not. Settings has an fps override for exactly
             // that case.
-            banner = Banner(kind: .info, text: String(
-                format: "Imported at %.0f fps — %.1f° at %.0f mph, %d frames tracked.",
-                dto.fps, dto.launchAngleDeg, dto.exitVeloMph, dto.trackedFrames))
+            if dto.captureFlags.contains(.ballUnconfirmed) {
+                // Deliberately NOT quoting the numbers. Reading them out here
+                // is what made a mis-tracked clip look like a measurement:
+                // they are numbers about whatever the detector settled on, and
+                // announcing them invites believing them.
+                banner = Banner(kind: .warning, text: String(
+                    format: "Imported at %.0f fps, but no struck ball could be identified — open the swing and tap \"Point at the ball\".",
+                    dto.fps))
+            } else {
+                banner = Banner(kind: .info, text: String(
+                    format: "Imported at %.0f fps — %.1f° at %.0f mph, %d frames tracked.",
+                    dto.fps, dto.launchAngleDeg, dto.exitVeloMph, dto.trackedFrames))
+            }
         } catch {
             banner = Banner(kind: .error,
                             text: "Measured it, but could not save: \(error.localizedDescription)")
@@ -523,6 +551,7 @@ final class AppModel: ObservableObject {
         if let analysis {
             dto = SwingDTO(analysis: analysis, setting: setting,
                            clipFilename: clipName, autoTriggered: autoTriggered)
+            confirmBall(analysis, into: &dto)
             writeTracks(for: analysis, clipName: clipName, setting: setting, into: &dto)
         } else {
             // A clip where tracking failed still counts — it is a G1 miss, and
@@ -634,8 +663,12 @@ final class AppModel: ObservableObject {
                     updated.ballSeedX = swing.ballSeedX
                     updated.ballSeedY = swing.ballSeedY
                     updated.visionOrientationRaw = swing.visionOrientationRaw
-                    updated.captureFlags = swing.captureFlags
+                    // Recomputed, not carried: a re-analysis that finally
+                    // found the ball must be able to CLEAR this, and one that
+                    // still has not must not inherit a clean bill from before.
+                    updated.captureFlags = swing.captureFlags.filter { $0 != .ballUnconfirmed }
                     updated.notes = swing.notes
+                    self.confirmBall(analysis, into: &updated)
                     // Rewrite the track, pose and trace files to match the
                     // analysis that just ran. Re-analysis used to carry the
                     // FILENAMES forward and leave the files themselves

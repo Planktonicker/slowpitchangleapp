@@ -34,6 +34,10 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
     /// it means the on-screen framing guide was not the one being matched, so
     /// the distance and the framing behind this reading deserve a second look.
     case cameraHeightOffProtocol = "CAMERA_HEIGHT_OFF_PROTOCOL"
+    /// The pipeline could not identify a struck ball in this clip, so the
+    /// numbers on it are not a measurement of a swing. Set instead of
+    /// reporting a reading, not alongside one.
+    case ballUnconfirmed = "BALL_UNCONFIRMED"
     /// Frames were dropped while this clip was being captured. Stamped at
     /// capture time on purpose: the live counter is transient, and without
     /// this the fact evaporates when the counter clears, leaving a swing in
@@ -59,6 +63,8 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
             return "Scale came from a typed distance rather than a measured object, so it inherits whatever error is in that number."
         case .hitterGateDisabled:
             return "The requirement for a person in frame was switched off for this session, so a loud noise alone could have started this clip."
+        case .ballUnconfirmed:
+            return "No struck ball could be identified in this clip, so the launch angle and exit velocity here are measurements of whatever the detector settled on — not of the swing. On cluttered footage the pipeline chooses between hundreds of candidate tracks, and when it chooses wrong the numbers look ordinary. Open the swing, tap \"Point at the ball\", and touch the ball on any frame where you can see it: the flight is then followed from there and this flag clears."
         case .cameraHeightOffProtocol:
             return "The lens was measured well away from the 1.1 m contact height the capture protocol asks for. A level camera sees the same geometry from any height, so this costs no accuracy by itself — the ball simply rides higher or lower in the picture. It is recorded because the on-screen framing guide is drawn for 1.1 m, so it was not a valid target for this shot, and because the usual reaction to a low camera is to aim it upward, which does cost accuracy."
         case .importedClip:
@@ -79,6 +85,7 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
         case .scaleFromManualDistance: return "typed distance"
         case .hitterGateDisabled: return "no hitter check"
         case .cameraHeightOffProtocol: return "camera height"
+        case .ballUnconfirmed: return "ball not identified"
         case .importedClip: return "imported"
         case .framesDropped: return "dropped frames"
         }
