@@ -28,6 +28,7 @@ struct TrackReviewView: View {
     @State private var player: AVPlayer?
     @State private var track: [BallObservation] = []
     @State private var pose: [PoseObservation] = []
+    @State private var trace = DetectionTrace()
     @State private var naturalSize: CGSize = .zero
     @State private var transform: CGAffineTransform = .identity
     @State private var currentTime: Double = 0
@@ -39,6 +40,7 @@ struct TrackReviewView: View {
     @State private var showBall = true
     @State private var showTrail = true
     @State private var showSkeleton = true
+    @State private var showRejects = true
 
     var body: some View {
         NavigationStack {
@@ -105,6 +107,38 @@ struct TrackReviewView: View {
         let joints = nearestPose
 
         return ZStack {
+            // What was actually looked at. Everything outside this outline was
+            // never examined at any threshold, so a ball sitting out there is
+            // not a detection failure — it is a search that did not go near
+            // it, which is a different fix entirely.
+            if showRejects, trace.hasSearchRegion,
+               let x0 = trace.searchedX0, let y0 = trace.searchedY0,
+               let x1 = trace.searchedX1, let y1 = trace.searchedY1 {
+                let a = map(Double(x0), Double(y0))
+                let b = map(Double(x1), Double(y1))
+                Path { p in
+                    p.addRect(CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
+                                     width: abs(b.x - a.x), height: abs(b.y - a.y)))
+                }
+                .stroke(Theme.steel.opacity(0.7),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [7, 6]))
+            }
+
+            // Candidates the detector found and the pipeline then discarded —
+            // by the corridor filter, or by track building preferring another
+            // chain. Drawn amber so they cannot be mistaken for the green
+            // measured ball. A ball with an amber ring on it was SEEN; the
+            // question is then why it was dropped, not why it was missed.
+            if showRejects {
+                ForEach(Array(rejectedNow.enumerated()), id: \.offset) { _, o in
+                    let d = max(6, o.diameterPx * Double(scale))
+                    Circle()
+                        .strokeBorder(Theme.warn.opacity(0.9), lineWidth: 1.5)
+                        .frame(width: d, height: d)
+                        .position(map(o.x, o.y))
+                }
+            }
+
             // The whole flight, faint. Being able to see the shape of the path
             // at a glance is most of the diagnosis: a parabola is a hit, a
             // straight line across the grass is not, and a knot of scribble in
@@ -211,6 +245,7 @@ struct TrackReviewView: View {
                 toggleChip("Ball", isOn: $showBall, colour: Theme.pass)
                 toggleChip("Path", isOn: $showTrail, colour: Theme.yellow)
                 toggleChip("Body", isOn: $showSkeleton, colour: Theme.yellow)
+                toggleChip("Rejected", isOn: $showRejects, colour: Theme.warn)
             }
         }
         .padding(14)
@@ -231,8 +266,14 @@ struct TrackReviewView: View {
                 if let o = nearestBall {
                     Text(String(format: "ball %.1f px", o.diameterPx))
                         .font(Theme.numeral(13)).foregroundStyle(Theme.pass)
+                } else if !rejectedNow.isEmpty {
+                    // The distinction the whole trace exists for. "No ball" and
+                    // "a ball was found here and thrown away" send you to
+                    // opposite ends of the pipeline.
+                    Text("\(rejectedNow.count) found here, none used")
+                        .font(Theme.label(11)).foregroundStyle(Theme.warn)
                 } else {
-                    Text("no ball this frame")
+                    Text("nothing detected this frame")
                         .font(Theme.label(11)).foregroundStyle(Theme.steel)
                 }
             }
@@ -312,6 +353,21 @@ struct TrackReviewView: View {
         nearest(in: pose, time: { $0.t })
     }
 
+    /// Candidates at roughly this instant that did not make the final track.
+    ///
+    /// Compared by frame rather than by identity: a candidate that became the
+    /// tracked ball is the same observation, and ringing it twice would say
+    /// "found and rejected" about the one point that was neither.
+    private var rejectedNow: [BallObservation] {
+        guard !trace.candidates.isEmpty else { return [] }
+        let fps = swing.fps > 1 ? swing.fps : SLA.targetFPS
+        let tolerance = 1.5 / fps
+        let used = Set(track.map(\.frame))
+        return trace.candidates.filter {
+            abs($0.t - currentTime) <= tolerance && !used.contains($0.frame)
+        }
+    }
+
     private func nearest<T>(in items: [T], time: (T) -> Double) -> T? {
         guard !items.isEmpty else { return nil }
         let fps = swing.fps > 1 ? swing.fps : SLA.targetFPS
@@ -345,6 +401,10 @@ struct TrackReviewView: View {
         if let name = swing.poseFilename,
            let data = try? Data(contentsOf: ClipStore.trackURL(named: name)) {
             pose = (try? JSONDecoder().decode([PoseObservation].self, from: data)) ?? []
+        }
+        if let name = swing.traceFilename,
+           let data = try? Data(contentsOf: ClipStore.trackURL(named: name)) {
+            trace = (try? JSONDecoder().decode(DetectionTrace.self, from: data)) ?? DetectionTrace()
         }
 
         guard let clip = swing.clipFilename else {

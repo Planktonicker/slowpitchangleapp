@@ -24,6 +24,9 @@ struct ClipAnalysis: Sendable {
     /// True when Vision found the flight and narrowed the search; false when
     /// the analysis fell back to full-frame detection.
     var usedVisionHint: Bool
+    /// What the detector saw on the way to that track, so a failure can be
+    /// looked at rather than guessed about. See `DetectionTrace`.
+    var trace = DetectionTrace()
 }
 
 enum ClipAnalysisError: LocalizedError {
@@ -169,9 +172,14 @@ enum ClipAnalyzer {
         }
 
         // --- pass 2: measure ---
-        let searchROI = hint?.roi(pad: options.corridorPx + 40, width: width, height: height)
+        // Follows the fitted curve across the frame rather than boxing in the
+        // handful of points Vision reported — see `TrajectoryHint.searchROI`.
+        let searchROI = hint?.searchROI(corridorPx: options.corridorPx,
+                                        width: width, height: height)
         var perFrame: [Int: [BallObservation]] = [:]
         var tape: [BatTracker.TapeObservation] = []
+        var trace = DetectionTrace(searchedX0: searchROI?.x0, searchedY0: searchROI?.y0,
+                                   searchedX1: searchROI?.x1, searchedY1: searchROI?.y1)
         // The bat window is only known once contact is known. When the caller
         // did not supply one, fall back to Vision's flight start.
         let assumedContact = contactTime ?? hint?.startTime
@@ -200,6 +208,15 @@ enum ClipAnalyzer {
                                                 t: t,
                                                 settings: options.detector,
                                                 roi: searchROI)
+                // Kept BEFORE the corridor filter, so the review can show a
+                // candidate the detector genuinely found and the pipeline then
+                // threw away. After the filter they would be indistinguishable
+                // from pixels that were never examined.
+                if trace.candidates.count < DetectionTrace.candidateLimit {
+                    trace.candidates.append(contentsOf: cands)
+                } else {
+                    trace.truncated = true
+                }
                 if let h = hint {
                     cands = cands.filter { h.admits(x: $0.x, y: $0.y, corridorPx: options.corridorPx) }
                 }
@@ -313,7 +330,8 @@ enum ClipAnalyzer {
                             frameWidth: width,
                             frameHeight: height,
                             contactTime: effectiveContact,
-                            usedVisionHint: hint != nil)
+                            usedVisionHint: hint != nil,
+                            trace: trace)
     }
 
     /// Run body pose over the clip, sub-sampled.

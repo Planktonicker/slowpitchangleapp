@@ -398,6 +398,16 @@ final class AppModel: ObservableObject {
                 dto.poseFilename = name
             }
         }
+
+        // The detector's raw opinion, written even when it is empty: "nothing
+        // was found anywhere" and "no trace was kept" are different answers to
+        // the question this file exists to settle, and an absent file cannot
+        // say the first one.
+        let traceName = base + ".trace.json"
+        if let data = try? JSONEncoder().encode(analysis.trace) {
+            try? data.write(to: ClipStore.trackURL(named: traceName), options: .atomic)
+            dto.traceFilename = traceName
+        }
     }
 
     private func finishImport(stored: URL, setting: SwingSetting,
@@ -553,6 +563,7 @@ final class AppModel: ObservableObject {
         ClipStore.delete(clipNamed: swing.clipFilename)
         ClipStore.delete(trackNamed: swing.trackCSVFilename)
         ClipStore.delete(trackNamed: swing.poseFilename)
+        ClipStore.delete(trackNamed: swing.traceFilename)
         try? store.delete(id: swing.id)
         reload()
     }
@@ -603,6 +614,7 @@ final class AppModel: ObservableObject {
                     updated.cameraTiltDeg = swing.cameraTiltDeg
                     updated.cameraFovDeg = swing.cameraFovDeg
                     updated.poseFilename = swing.poseFilename
+                    updated.traceFilename = swing.traceFilename
                     updated.visionOrientationRaw = swing.visionOrientationRaw
                     updated.captureFlags = swing.captureFlags
                     updated.notes = swing.notes

@@ -135,6 +135,10 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     /// when a body number looks wrong, the frames it came from are the only way
     /// to find out why.
     var poseFilename: String?
+    /// What the detector saw before the track was chosen — every candidate and
+    /// the region searched. The one file that can tell "never looked there"
+    /// apart from "looked and rejected it". See `DetectionTrace`.
+    var traceFilename: String?
     /// Which way was up in the recorded frames. Stored because re-analysis has
     /// to show Vision the same scene the capture did; guessing `.up` on a
     /// sideways clip finds no hitter at all.

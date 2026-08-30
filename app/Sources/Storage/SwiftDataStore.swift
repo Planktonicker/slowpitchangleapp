@@ -51,6 +51,7 @@ final class SwingEntity {
     var cameraTiltDeg: Double?
     var cameraFovDeg: Double?
     var poseFilename: String?
+    var traceFilename: String?
     var visionOrientationRaw: Int = 1
     /// `BodyMetrics` as JSON. A blob rather than five nullable columns: they
     /// are one measurement that is meaningful together, and the set will grow
@@ -96,6 +97,7 @@ final class SwingEntity {
         cameraTiltDeg = dto.cameraTiltDeg
         cameraFovDeg = dto.cameraFovDeg
         poseFilename = dto.poseFilename
+        traceFilename = dto.traceFilename
         visionOrientationRaw = dto.visionOrientationRaw
         bodyJSON = Self.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
@@ -135,6 +137,7 @@ final class SwingEntity {
         cameraTiltDeg = dto.cameraTiltDeg
         cameraFovDeg = dto.cameraFovDeg
         poseFilename = dto.poseFilename
+        traceFilename = dto.traceFilename
         visionOrientationRaw = dto.visionOrientationRaw
         bodyJSON = Self.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
@@ -176,6 +179,7 @@ final class SwingEntity {
         d.cameraTiltDeg = cameraTiltDeg
         d.cameraFovDeg = cameraFovDeg
         d.poseFilename = poseFilename
+        d.traceFilename = traceFilename
         d.visionOrientationRaw = visionOrientationRaw
         d.body = Self.decodeBody(bodyJSON)
         d.captureFlags = captureFlagsRaw.split(separator: "|")

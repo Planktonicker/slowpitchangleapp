@@ -201,6 +201,18 @@ plays full screen with everything the app measured drawn on it:
 - **yellow skeleton** — the hitter, at this frame. Limbs are only drawn between
   joints the model was confident about, so a missing arm is a real gap and
   explains a missing body measurement.
+- **amber rings** — balls the detector FOUND and the pipeline then discarded.
+  An amber ring on the ball means it was seen; the question is why it was
+  dropped, not why it was missed.
+- **grey dashed box** — the region actually searched. Anything outside it was
+  never examined at all, so a ball out there is not a detection failure,
+  it is a search that never went near it.
+
+Those three cases are what "it didn't detect the ball" splits into, and they
+need opposite fixes: nothing drawn at all means the colour or size gates
+rejected it (Settings → Ball colour / Ball size); an amber ring means the
+track builder or the flight-corridor filter dropped it; outside the box means
+the search was aimed wrong.
 
 Step frame by frame with the arrows. The readout says `no ball this frame`
 wherever the tracker lost it, which is what turns "it failed" into "it failed
