@@ -22,6 +22,20 @@ struct SettingsView: View {
     /// main thread, for a number nobody watches change.
     @State private var clipBytes: Int64 = 0
 
+    /// Both built outside the view body. String interpolation inside a ternary,
+    /// inside a `Form` this size, is exactly the shape that sends Swift's type
+    /// checker from seconds to minutes on the whole file.
+    private var deleteButtonTitle: String {
+        model.swings.isEmpty ? "Delete all swings"
+                             : "Delete all " + String(model.swings.count) + " swings"
+    }
+
+    private var deleteMessage: String {
+        "This removes " + String(model.swings.count)
+            + " measurements and the footage behind them, and cannot be undone."
+            + " Export first if the session has not been copied off the phone."
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -130,9 +144,7 @@ struct SettingsView: View {
                         // it opened a confirmation about destroying footage
                         // that did not exist — a dialog that could only ever
                         // be answered Cancel.
-                        Text(model.swings.isEmpty
-                             ? "Delete all swings"
-                             : "Delete all \(model.swings.count) swings")
+                        Text(deleteButtonTitle)
                     }
                     .disabled(model.swings.isEmpty)
                 }
@@ -186,7 +198,7 @@ struct SettingsView: View {
                     model.deleteAll()
                 }
             } message: {
-                Text("This removes \(model.swings.count) measurements and the footage behind them, and cannot be undone. Export first if the session has not been copied off the phone.")
+                Text(deleteMessage)
             }
         }
         .sheet(isPresented: $showTriggerCalibration) {

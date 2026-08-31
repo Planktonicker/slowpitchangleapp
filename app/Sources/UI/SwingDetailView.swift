@@ -19,6 +19,15 @@ struct SwingDetailView: View {
     @State var swing: SwingDTO
 
     @State private var player: AVPlayer?
+    /// Inline playback rate. `VideoPlayer`'s own controls do not offer one —
+    /// AVPlayerViewController has a speed menu, the SwiftUI wrapper shows a
+    /// reduced set without it — so at 240fps the flight was over before it
+    /// registered. Same default as the review screen.
+    @State private var inlineSpeed: Float = 0.25
+    /// Hoisted out of the body. An array literal of `Float` inside a large
+    /// SwiftUI body is one of the reliable ways to make the type checker take
+    /// minutes over a file that used to compile in seconds.
+    private static let speeds: [Float] = [0.1, 0.25, 0.5, 1.0]
     @State private var track: [BallObservation] = []
     @State private var videoSize: CGSize = .zero
     @State private var showOverlay = true
@@ -163,6 +172,29 @@ struct SwingDetailView: View {
                 }
             }
             .frame(maxHeight: 260)
+            HStack(spacing: 8) {
+                Text("SPEED").font(.caption2).foregroundStyle(.secondary)
+                ForEach(Self.speeds, id: \.self) { s in
+                    Button {
+                        inlineSpeed = s
+                        // Only while playing: setting `rate` on a paused
+                        // player starts it, and a speed button is not a play
+                        // button.
+                        if player?.timeControlStatus == .playing { player?.rate = s }
+                    } label: {
+                        Text(s == 1.0 ? "1×" : String(format: "%g×", Double(s)))
+                            .font(.caption2.monospacedDigit())
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(inlineSpeed == s ? Theme.yellow.opacity(0.25) : .clear,
+                                        in: Capsule())
+                            .overlay(Capsule().strokeBorder(
+                                inlineSpeed == s ? Theme.yellow : Theme.steel.opacity(0.5),
+                                lineWidth: 1))
+                            .foregroundStyle(inlineSpeed == s ? Theme.yellow : Theme.steel)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
             Toggle("Show tracked path", isOn: $showOverlay)
             // The inline strip shows the path; it cannot show WHEN each point
             // was found, or whether the hitter was ever seen. Both are what
