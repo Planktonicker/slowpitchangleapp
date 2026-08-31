@@ -122,9 +122,19 @@ struct SettingsView: View {
                                 ? "Settings were already at their defaults — nothing changed. Existing swings keep their old numbers; re-import a clip to measure it with these."
                                 : "Settings reset. Existing swings keep the numbers they were measured with — re-import a clip to measure it again.")
                     }
-                    Button("Delete all swings", role: .destructive) {
+                    Button(role: .destructive) {
                         showDeleteConfirm = true
+                    } label: {
+                        // The count, in the button. "Delete all swings" was
+                        // live with nothing to delete, so on a fresh install
+                        // it opened a confirmation about destroying footage
+                        // that did not exist — a dialog that could only ever
+                        // be answered Cancel.
+                        Text(model.swings.isEmpty
+                             ? "Delete all swings"
+                             : "Delete all \(model.swings.count) swings")
                     }
+                    .disabled(model.swings.isEmpty)
                 }
             }
             .navigationTitle("Settings")
@@ -149,20 +159,38 @@ struct SettingsView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showTriggerCalibration) {
-                TriggerCalibrationView(capture: model.capture).environmentObject(model)
-            }
             .scrollContentBackground(.hidden)
             .background(Theme.black)
-            .confirmationDialog("Delete every stored swing and clip?",
-                                isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+            // An alert, not a confirmationDialog, and hosted on the Form while
+            // the calibration sheet below is hosted on the NavigationStack.
+            //
+            // Two reasons, both learned the hard way on this screen and the
+            // three before it. A confirmationDialog is an action sheet: it
+            // slides up from the bottom edge, it dismisses on a tap anywhere
+            // outside it, and on a regular size class it becomes an unanchored
+            // popover. None of that is what you want in front of "destroy
+            // every clip on this phone" — an alert is centred, modal, and
+            // needs a deliberate answer. And stacking two presentation
+            // modifiers on ONE view is the pattern that has silently swallowed
+            // buttons here before ("the later ones win and the earlier ones do
+            // nothing"), so these two now sit on different hosts rather than
+            // competing for the same one.
+            .alert("Delete every stored swing and clip?",
+                   isPresented: $showDeleteConfirm) {
+                Button("Cancel", role: .cancel) {}
                 Button("Delete everything", role: .destructive) {
+                    // Re-checked at the moment of destruction, not only when
+                    // the button was drawn: the alert can outlive the state
+                    // that opened it.
+                    guard !model.swings.isEmpty else { return }
                     model.deleteAll()
                 }
-                Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This removes the measurements and the footage behind them. Export first if the session has not been copied off the phone.")
+                Text("This removes \(model.swings.count) measurements and the footage behind them, and cannot be undone. Export first if the session has not been copied off the phone.")
             }
+        }
+        .sheet(isPresented: $showTriggerCalibration) {
+            TriggerCalibrationView(capture: model.capture).environmentObject(model)
         }
     }
 
