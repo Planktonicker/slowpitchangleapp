@@ -46,6 +46,22 @@ struct TrackReviewView: View {
     @State private var isScrubbing = false
     @State private var timeObserver: Any?
     @State private var loadFailure: String?
+    /// How far the playhead may sit from a pose sample and still draw it.
+    ///
+    /// NOT the ball's tolerance, and that was the bug. Both used `1.5 / fps` —
+    /// 6.25 ms at 240fps — which is right for the ball, sampled every frame,
+    /// and wrong for the pose, sampled at 60 Hz with 16.7 ms between samples.
+    /// The skeleton therefore drew only when the playhead happened to land
+    /// within 6.25 ms of a sample, roughly a third of the time, and vanished in
+    /// between. It looked like Vision losing the hitter; it was the lookup
+    /// refusing to admit a sample it had.
+    ///
+    /// Derived from the series' actual spacing rather than a stored rate,
+    /// because `poseSampleHz` is an analyzer option and is not written onto the
+    /// swing. Wide enough that every instant is inside some sample's reach;
+    /// narrow enough that a REAL dropout — a missing sample, so a doubled gap —
+    /// still shows as nothing, which is what this screen exists to reveal.
+    @State private var poseTolerance: Double = 1.5 / SLA.targetFPS
 
     @State private var showBall = true
     @State private var showTrail = true
@@ -524,14 +540,11 @@ struct TrackReviewView: View {
                 horizonBar
             }
 
-            HStack(spacing: 14) {
-                toggleChip("Ball", isOn: $showBall, colour: Theme.pass)
-                toggleChip("Path", isOn: $showTrail, colour: Theme.yellow)
-                toggleChip("Body", isOn: $showSkeleton, colour: Theme.yellow)
-                toggleChip("Bat", isOn: $showBat, colour: .pink)
-                if showDiagnosticLayers {
+            if showDiagnosticLayers {
+                HStack(spacing: 14) {
                     toggleChip("Rejected", isOn: $showRejects, colour: Theme.warn)
                     toggleChip("Tracks", isOn: $showOtherTracks, colour: Theme.steel)
+                    Spacer(minLength: 0)
                 }
             }
 
@@ -764,8 +777,6 @@ struct TrackReviewView: View {
     /// flight as a flight.
     private var speedRow: some View {
         HStack(spacing: 8) {
-            Text("SPEED")
-                .font(Theme.label(10)).foregroundStyle(Theme.steel)
             Menu {
                 // A Menu of Buttons rather than a Picker: a Picker in menu
                 // style renders no label here (see the note in SettingsView),
@@ -794,7 +805,18 @@ struct TrackReviewView: View {
                 .overlay(Capsule().strokeBorder(Theme.yellow, lineWidth: 1.5))
                 .foregroundStyle(Theme.yellow)
             }
-            Spacer()
+            // The layer toggles ride the same row. They were a row of their
+            // own directly underneath, which spent a whole line of a control
+            // rail that also carries a scrubber, a transport, the corrections
+            // block and — when the diagnostic layers are on — a second row of
+            // chips. On a phone in landscape, which is how this footage is
+            // filmed and therefore how it is reviewed, that rail was most of
+            // the screen and the picture was the rest.
+            toggleChip("Ball", isOn: $showBall, colour: Theme.pass)
+            toggleChip("Path", isOn: $showTrail, colour: Theme.yellow)
+            toggleChip("Body", isOn: $showSkeleton, colour: Theme.yellow)
+            toggleChip("Bat", isOn: $showBat, colour: .pink)
+            Spacer(minLength: 0)
         }
     }
 
@@ -834,7 +856,7 @@ struct TrackReviewView: View {
     }
 
     private var nearestPose: PoseObservation? {
-        nearest(in: pose, time: { $0.t })
+        nearest(in: pose, time: { $0.t }, tolerance: poseTolerance)
     }
 
     /// Candidates at roughly this instant that did not make the final track.
@@ -852,10 +874,11 @@ struct TrackReviewView: View {
         }
     }
 
-    private func nearest<T>(in items: [T], time: (T) -> Double) -> T? {
+    private func nearest<T>(in items: [T], time: (T) -> Double,
+                            tolerance: Double? = nil) -> T? {
         guard !items.isEmpty else { return nil }
         let fps = swing.fps > 1 ? swing.fps : SLA.targetFPS
-        let tolerance = 1.5 / fps
+        let tolerance = tolerance ?? 1.5 / fps
         var best: T?
         var bestGap = Double.infinity
         for item in items {
@@ -915,10 +938,36 @@ struct TrackReviewView: View {
         }
         durationS = (try? await asset.load(.duration).seconds) ?? 0
 
+        // Spacing of the pose samples, for `poseTolerance`. Median rather than
+        // mean: one long gap where the hitter left frame must not widen the
+        // tolerance for the whole clip.
+        if pose.count >= 2 {
+            let gaps = zip(pose.dropFirst(), pose).map { $0.t - $1.t }.filter { $0 > 0 }
+            if !gaps.isEmpty {
+                let median = gaps.sorted()[gaps.count / 2]
+                poseTolerance = max(1.5 / (swing.fps > 1 ? swing.fps : SLA.targetFPS),
+                                    0.75 * median)
+            }
+        }
+
+        // The previous player, if this is a reload after a re-measure. Without
+        // this its periodic observer went on firing — writing `currentTime`
+        // from a player nothing was showing any more — and the clip appeared
+        // to open partway through, at whatever instant the old one had reached.
+        if let timeObserver { player?.removeTimeObserver(timeObserver) }
+        timeObserver = nil
+        player?.pause()
+        currentTime = 0
+
         let p = AVPlayer(url: url)
         // Frame stepping and scrubbing both want exact frames, not the
         // player's convenience.
         p.currentItem?.seekingWaitsForVideoCompositionRendering = true
+        // Explicitly at the start. A clip written by `ClipRecorder` carries the
+        // capture session's own timeline, and "wherever the player decided to
+        // begin" is not a defensible first frame on a screen whose whole job is
+        // showing which frame was measured.
+        _ = await p.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
         timeObserver = p.addPeriodicTimeObserver(
             forInterval: CMTime(value: 1, timescale: 60), queue: .main) { time in
                 guard !isScrubbing, time.isNumeric else { return }
