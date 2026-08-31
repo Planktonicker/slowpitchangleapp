@@ -59,6 +59,14 @@ struct AppSettings: Codable, Equatable {
     /// metrics are the point of it — but a switch, because it is a third decode
     /// pass and a phone already at 240fps is the phone most likely to be hot.
     var trackBody = true
+    /// Which generation of the DEFAULTS this blob was written against.
+    ///
+    /// Only for one-time migrations of a default that turned out to be wrong,
+    /// and it exists because of the `trackBat` lesson: a stored value outlives
+    /// the default it was copied from, so changing a default reaches nobody
+    /// who has ever opened Settings. Bumped when a default changes in a way
+    /// that must reach existing installs.
+    var defaultsGeneration = 2
     var triggerDb = SLA.triggerDb
     var preRollS = SLA.preRollS
     var postRollS = SLA.postRollS
@@ -181,7 +189,24 @@ extension AppSettings {
         bat = take(.bat, d.bat)
         hasCompletedFirstSetup = take(.hasCompletedFirstSetup, d.hasCompletedFirstSetup)
         trackBody = take(.trackBody, d.trackBody)
-        triggerDb = take(.triggerDb, d.triggerDb)
+        defaultsGeneration = take(.defaultsGeneration, 0)
+        // Trigger threshold: 15 -> 20, once.
+        //
+        // 15 was the G5 validation GATE being used as an operating default,
+        // and on both field clips it fired on the wrong sound — a 17 dB noise
+        // half a second before contact, after which the refractory window
+        // covered the real 37 dB crack. A stored 15 is indistinguishable from
+        // "never changed it", and it is the same thing here: 15 was the
+        // default, so nobody chose it over anything. Migrated once, and the
+        // generation marker means a 15 typed in deliberately after this update
+        // is kept.
+        let storedTrigger = take(.triggerDb, d.triggerDb)
+        if defaultsGeneration < 2, storedTrigger == 15.0 {
+            triggerDb = d.triggerDb
+        } else {
+            triggerDb = storedTrigger
+        }
+        defaultsGeneration = max(defaultsGeneration, 2)
         preRollS = take(.preRollS, d.preRollS)
         postRollS = take(.postRollS, d.postRollS)
         direction = take(.direction, d.direction)

@@ -288,8 +288,25 @@ enum SLA {
     /// mid-session without tearing down a running capture.
     static let maxPreRollS = 3.0
     /// Contact impulse must stand this far above the rolling noise floor.
-    /// Matches `PASS_DB` in `spike/check_audio_trigger.py` (G5).
-    static let triggerDb = 15.0
+    ///
+    /// NOT `PASS_DB` any more, and the split is the point. 15 dB is the G5
+    /// validation GATE — the number that decides whether a venue's contact is
+    /// loud enough for an auto-trigger to be possible at all — and
+    /// `check_audio_trigger.py` still measures against it. `sla_common.py` has
+    /// said all along that "15 is a gate, not a good working threshold", and
+    /// the app used it as one anyway because they were the same constant.
+    ///
+    /// Measured on IMG_6703: a 17.1 dB noise fires the trigger half a second
+    /// before contact, the two-second refractory then covers the real 37.0 dB
+    /// bat crack, and the clip is written with a contact time half a second
+    /// early. At 18 dB or above the trigger fires on the crack and on nothing
+    /// else, on both field clips. 20 leaves margin on the wrong side of that
+    /// boundary rather than sitting on it.
+    ///
+    /// Still a default, not an answer: the right threshold is per venue, and
+    /// Settings → Trigger → Calibrate measures one. A quiet garden needs less
+    /// than this, a cage needs more.
+    static let triggerDb = 20.0
     /// How much louder than the triggering impulse something has to be, inside
     /// the same clip, before the trigger is judged to have heard the wrong
     /// thing.

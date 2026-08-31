@@ -76,7 +76,7 @@ struct SettingsView: View {
                         Text("Start a session first — calibration listens through the live camera session, which only runs during a round.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                    Text("15 dB is the pass/fail gate the validation uses, not a good working threshold for any particular place — too high for a quiet garden, too low for a cage. Calibrating listens to the background, records a few real hits, and puts the number between them. It also says when no threshold can work here, which is worth knowing before a session rather than after.")
+                    Text("20 dB is a starting point, not an answer. It is set above the 15 dB validation gate because on the two field clips a 17 dB noise fired the trigger half a second before contact, and the refractory window then covered the real 37 dB crack — so the clip was saved with the wrong moment marked as contact. The right number is per venue: a quiet garden needs less, a cage needs more. Calibrating listens to the background, records a few real hits, and puts the number between them. It also says when no threshold can work here, which is worth knowing before a session rather than after.")
                         .font(.caption).foregroundStyle(.secondary)
                     stepper("Pre-roll", value: $model.settings.preRollS,
                             range: 0.25...SLA.maxPreRollS, step: 0.25, unit: "s")
