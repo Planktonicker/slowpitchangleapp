@@ -1,0 +1,18 @@
+{
+  "ground_distance_a_m": 6.0,
+  "ground_distance_b_m": 6.0,
+  "ground_distance_ab_m": 8.48528137423857,
+  "lens_height_a_m": 1.1,
+  "lens_height_b_m": 1.1,
+  "b_toward_plus_x": true,
+  "fov_deg": 60.0,
+  "reference_height_m": 0.9,
+  "reference_px_a": [
+    960,
+    540
+  ],
+  "reference_px_b": [
+    960,
+    540
+  ]
+}

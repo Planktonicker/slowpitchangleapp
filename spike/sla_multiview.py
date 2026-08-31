@@ -859,3 +859,90 @@ def solve_time_offset(p_a: np.ndarray, ts_a, us_a, vs_a,
         lo, hi = best_off - step, best_off + step
         step /= 8.0
     return best_off, best_cost
+
+
+# --- Using the rig to grade the single-camera scale ---------------------------
+
+@dataclass
+class DiameterCheck:
+    """[PARITY] How the measured ball diameter compares with the truth the
+    geometry implies."""
+    n: int
+    median_ratio: float          # measured / predicted; 1.0 is correct
+    by_size: list                # [(apparent_px_bucket, n, median_ratio)]
+    depth_span_m: tuple
+
+
+def diameter_truth_check(xyz, t_grid, views) -> DiameterCheck | None:
+    """[PARITY] Grade `_subpixel_minor_diameter` against triangulated depth.
+
+    docs/VALIDATION.md's G0 runs established that the app under-reads the ball
+    — 11% low at 37 px, 43% low at 26 px — and asked the right next question:
+    is the bias constant with distance (then it is the diameter measurement)
+    or does it change (then it is the optics)? Two drops answered "it
+    changes", which is what ruled out any single calibration constant.
+
+    A two-camera rig answers that question continuously, from one clip, with
+    no tape measure and no second setup. Triangulation gives the ball's 3D
+    position, hence its true distance from each lens, hence the diameter it
+    OUGHT to subtend: BALL_DIAMETER_M * fx / depth. Comparing that with what
+    the detector actually measured, instant by instant, is the whole error
+    curve as a function of apparent size — the measurement
+    `_subpixel_minor_diameter` needs in order to be repaired rather than
+    scaled.
+
+    This is worth stating plainly because it inverts the usual relationship:
+    the two-camera rig is not only a better measurement, it is an
+    INSTRUMENT for fixing the one-camera measurement. A tossed ball changes
+    depth through the clip, so one toss sweeps a range of apparent sizes.
+
+    THE CAVEAT THAT MAKES IT VALID: this check inherits the rig's scale. If
+    the tape measurements are 5% wrong, every depth is 5% wrong and so is
+    every predicted diameter. It is therefore only meaningful on a clip whose
+    `gravity_magnitude_3d` came back at 9.81 — gravity validates the scale,
+    the scale validates the depth, and only then does the depth grade the
+    diameter. Read the ratio table only after the gravity line passes.
+
+    Note also that a synthetic rehearsal cannot exercise the real bug: a
+    drawn ellipse on a smooth background is measured a percent or two HIGH,
+    where real footage reads 11-43% LOW. The compression halo and the optics
+    are the mechanism, and neither survives being simulated. This check earns
+    its keep on real clips only.
+
+    `views` is a list of (intr, extr, diameters_on_grid). Returns None when
+    nothing usable overlaps.
+    """
+    xyz = np.asarray(xyz, dtype=float)
+    ratios, sizes, depths = [], [], []
+    for intr, extr, diams in views:
+        d = np.asarray(diams, dtype=float)
+        for i in range(min(len(d), xyz.shape[0])):
+            if not (np.isfinite(d[i]) and d[i] > 0.0 and np.all(np.isfinite(xyz[i]))):
+                continue
+            depth = float((extr.r @ xyz[i] + extr.t)[2])
+            if depth <= 0.1:
+                continue
+            predicted = sla.BALL_DIAMETER_M * intr.fx / depth
+            if predicted <= 0.0:
+                continue
+            ratios.append(float(d[i]) / predicted)
+            sizes.append(float(d[i]))
+            depths.append(depth)
+    if len(ratios) < 8:
+        return None
+    ratios = np.array(ratios)
+    sizes = np.array(sizes)
+
+    # Bucket by apparent size, because that is the axis the error was found to
+    # depend on. Ten-pixel buckets: fine enough to show a trend, coarse enough
+    # that each bucket has samples in it.
+    by_size = []
+    lo = int(np.floor(sizes.min() / 10.0) * 10)
+    hi = int(np.ceil(sizes.max() / 10.0) * 10)
+    for edge in range(lo, hi, 10):
+        m = (sizes >= edge) & (sizes < edge + 10)
+        if int(m.sum()) >= 3:
+            by_size.append((edge, int(m.sum()), float(np.median(ratios[m]))))
+    return DiameterCheck(n=len(ratios), median_ratio=float(np.median(ratios)),
+                         by_size=by_size,
+                         depth_span_m=(float(min(depths)), float(max(depths))))

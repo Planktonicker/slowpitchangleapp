@@ -142,6 +142,14 @@ A stage-by-stage report that names the stage that failed, if one did:
   gravity  |a| = 9.976 m/s^2 vs 9.807 (+1.7%)
 ```
 
+The report also grades the ball-diameter measurement against the depth the
+geometry implies — the G0 bug, measured against a reference that does not
+depend on it. Read that table only if the gravity line passed, because it
+inherits the rig's scale. Test 2 is where it earns its keep: a tossed ball
+changes depth through the clip, so one toss sweeps a whole range of apparent
+sizes and produces the error-versus-size curve `_subpixel_minor_diameter`
+needs in order to be repaired rather than scaled.
+
 **Gravity is the whole test.** Within 5% and the geometry, the sync and the
 triangulation are all working on real footage — and the scale is then good
 enough to trust a speed. Outside 5% and it is almost always a tape

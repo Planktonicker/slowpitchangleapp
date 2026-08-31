@@ -262,10 +262,14 @@ def run(path_a: str, path_b: str, rig_spec: dict,
     tb = ts_b - offset_s
     lo, hi = max(ts_a.min(), tb.min()), min(ts_a.max(), tb.max())
     grid = np.arange(lo, hi, 1.0 / 240.0)
-    ua_g, va_g, wa_g, gap_a = mv.resample_view(ts_a, us_a, vs_a,
-                                               np.ones_like(ts_a), grid)
-    ub_g, vb_g, wb_g, gap_b = mv.resample_view(tb, us_b, vs_b,
-                                               np.ones_like(tb), grid)
+    # Diameters ride along in the weight slot purely to reuse the resampler;
+    # they are evidence, not confidence. See the diameter check below.
+    da = np.array([o.diameter_px for o in track_a])
+    db = np.array([o.diameter_px for o in track_b])
+    ua_g, va_g, da_g, gap_a = mv.resample_view(ts_a, us_a, vs_a, da, grid)
+    ub_g, vb_g, db_g, gap_b = mv.resample_view(tb, us_b, vs_b, db, grid)
+    wa_g = np.where(np.isfinite(ua_g), 1.0, np.nan)
+    wb_g = np.where(np.isfinite(ub_g), 1.0, np.nan)
     track3d = mv.triangulate_series(
         grid,
         [mv.ViewTrack2D(p_a, ua_g, va_g, wa_g),
@@ -279,7 +283,10 @@ def run(path_a: str, path_b: str, rig_spec: dict,
         f"{np.nanmedian(track3d.reproj_rms_px):.2f} px"
         + (f", flags {track3d.flags}" if track3d.flags else "")))
 
-    return report(stages, track3d, grid, audio_note)
+    diam = mv.diameter_truth_check(
+        track3d.xyz, grid,
+        [(intr, extr_a, da_g), (intr, extr_b, db_g)])
+    return report(stages, track3d, grid, audio_note, diam)
 
 
 def try_audio_cross_check(path_a: str, path_b: str, geo_offset_s: float,
@@ -320,7 +327,8 @@ def try_audio_cross_check(path_a: str, path_b: str, geo_offset_s: float,
     return f"{audio_off*1000:+.1f} ms"
 
 
-def report(stages: list[Stage], track3d, grid=None, audio_note=None) -> int:
+def report(stages: list[Stage], track3d, grid=None, audio_note=None,
+           diam=None) -> int:
     print("stages")
     for s in stages:
         print(s.line())
@@ -359,6 +367,28 @@ def report(stages: list[Stage], track3d, grid=None, audio_note=None) -> int:
         print(f"               fell {first[2] - last[2]:+.2f} m, moved "
               f"{math.hypot(last[0]-first[0], last[1]-first[1]):.2f} m "
               "horizontally")
+
+    if diam is not None:
+        # The rig grading the single-camera scale. VALIDATION.md's G0 found
+        # the app under-reads the ball by 11% at 37 px and 43% at 26 px and
+        # asked whether the bias tracks distance or apparent size; this
+        # answers that from one clip, because triangulation knows the true
+        # depth at every instant and therefore the diameter the ball ought
+        # to subtend.
+        print("\nball-diameter check (this rig grading the one-camera scale)")
+        print(f"  measured / true diameter: median {diam.median_ratio:.3f} "
+              f"over {diam.n} samples at {diam.depth_span_m[0]:.1f}-"
+              f"{diam.depth_span_m[1]:.1f} m")
+        if diam.by_size:
+            print("    apparent size    n    measured/true")
+            for edge, n, ratio in diam.by_size:
+                print(f"    {edge:3d}-{edge+10:<3d} px    {n:3d}    {ratio:.3f}"
+                      f"   ({(ratio-1)*100:+.1f}%)")
+        if abs(diam.median_ratio - 1.0) > 0.05:
+            print(f"  The detector reads {(diam.median_ratio-1)*100:+.1f}% off "
+                  "the truth the geometry implies.")
+            print("  That is the G0 bug, measured against a reference that "
+                  "does not depend on it.")
 
     print("\nverdict")
     hard_fail = [s for s in stages if not s.ok]
