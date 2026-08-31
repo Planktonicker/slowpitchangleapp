@@ -252,13 +252,33 @@ a database. Per-view track CSVs carry `# device_id=` / `# rig_id=` /
 Cheap gates first; a failed gate stops the spending. P0 ships with this
 document.
 
-- **P0 — Synthetic proof (done with this doc).** `spike/sla_multiview.py` +
+- **P0 — Synthetic proof (done).** `spike/sla_multiview.py` +
   `spike/synth_multiview.py`: a known 3D swing projected through two modelled
   cameras (rolling shutter, clock error, noise, occlusion), reconstructed by
   the reference pipeline, checked against truth and against hand-derived
   geometry; `--sweep` writes the error budget
   (`spike/out/multiview_budget.csv`) that justifies every number above.
   **Gate: self-test ALL PASS.**
+- **P0b — The offline lab (done).** `spike/multiview_lab.py` measures a real
+  two-phone capture today, with no app and no Xcode: two clips filmed
+  independently, a rig from five tape measurements, aim solved from a
+  stationary reference ball, the time offset solved by making the 3D
+  consistent (no network, and no audio needed — the slow-motion export path
+  drops it), then triangulation checked against gravity. This is the
+  merge-later path used as a measuring instrument rather than as a product,
+  and it exists because the 3D maths is what can be wrong in ways a
+  synthetic test cannot catch. `--selftest` rehearses the whole thing on
+  encoded clips with known answers first. Procedure in
+  `docs/PRO_FIELD_GUIDE.md`, results in `docs/VALIDATION_PRO.md`.
+  **Gate: GP1 — reconstructed gravity within 5% on three real drops.**
+
+  Worth stating plainly, because it changes what Pro is for: the
+  single-camera scale comes from the ball's apparent diameter, and
+  `VALIDATION.md`'s G0 runs found that measurement 11% low on a 37 px ball
+  and 43% low on a 26 px one. **Two cameras never touch the diameter** —
+  their scale is the distance between the tripods. Pro is therefore not only
+  the honest path to rotation metrics; it is a route to a trustworthy exit
+  velocity that the one-camera path does not currently have.
 - **P1 — Sync bench.** `SourcesPro/Link/` (session, clock sync), a bench
   screen showing live offset/skew/confidence, the two-phone clap test
   (network model vs corrected audio), CSV export; `spike/sync_bench.py` to
