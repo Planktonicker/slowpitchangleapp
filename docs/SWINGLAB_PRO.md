@@ -208,6 +208,44 @@ the athlete's own swing-to-swing variability — and both numbers are shown.
 With no published slow-pitch norms (still true), feedback stays
 within-athlete, never against an invented population band.
 
+### A bias the error budget does not contain: joint centres
+
+Everything above assumes the points we triangulate are the points
+biomechanics wants. They are not, and this is worth writing down before any
+rotation number is believed.
+
+Apple's Vision returns **surface landmarks** — "left hip" is a point on the
+silhouette. Biomechanics wants the **joint centre**, the rotation centre
+inside the body. Every serious markerless system treats these as different
+things: OpenCap fits a learned marker augmenter to convert one to the other
+(8 mm RMSE on its own test set), and Uplift Labs' exported skeleton names
+them apart explicitly — `leftHipJC`, `rightShoulderJC` carry a joint-centre
+suffix while `nose`, `leftHeel`, `leftFirstToe` do not.
+
+This lands directly on our headline metric. `hip_shoulder_separation_deg`
+takes the azimuth of the line between the two hip points, and if those points
+sit on the skin rather than at the joint centres, that line is not the
+pelvis's medio-lateral axis. Worse, the offset is not constant: as the pelvis
+rotates, a surface landmark slides relative to the bone, so the error is a
+function of the very quantity being measured.
+
+Two things limit the damage, and one does not:
+
+- Separation is a **difference** of two azimuths, so bias shared between the
+  pelvis and thorax partially cancels.
+- Feedback is **within-athlete change**, which cancels any constant offset
+  entirely — this is the strongest argument for the framing the project
+  already chose for other reasons.
+- Neither of those cancels a **rotation-dependent** error, which is a gain
+  error on the metric.
+
+Handled the way `VALIDATION.md` handled the ball-diameter finding: recorded
+as a bias to measure, not a number to invent a correction for. GP5's
+repeatability row is where it will show up, because a rotation-dependent gain
+error inflates between-swing spread. A learned joint-centre regressor is the
+known fix and is a research project, not a patch; it is not on the roadmap
+until the ladder says the bias is material.
+
 Two cameras also carry a structural weakness no tuning removes: the trail
 hip and shoulder are occluded by the torso through part of the swing —
 sometimes exactly at peak separation. Those samples are **absent, not
