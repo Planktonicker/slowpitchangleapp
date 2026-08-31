@@ -766,23 +766,35 @@ struct TrackReviewView: View {
         HStack(spacing: 8) {
             Text("SPEED")
                 .font(Theme.label(10)).foregroundStyle(Theme.steel)
-            ForEach(Self.speeds, id: \.self) { s in
-                Button {
-                    speed = s
-                    // Applied live, so changing speed mid-playback does not
-                    // mean stopping and starting again.
-                    if player?.timeControlStatus == .playing { player?.rate = s }
-                } label: {
-                    Text(Self.speedLabel(s))
-                        .font(Theme.label(11)).tracking(1.1)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(speed == s ? Theme.yellow.opacity(0.25) : .clear,
-                                    in: Capsule())
-                        .overlay(Capsule().strokeBorder(
-                            speed == s ? Theme.yellow : Theme.steel.opacity(0.5), lineWidth: 1.5))
-                        .foregroundStyle(speed == s ? Theme.yellow : Theme.steel)
+            Menu {
+                // A Menu of Buttons rather than a Picker: a Picker in menu
+                // style renders no label here (see the note in SettingsView),
+                // and the label is the whole point — the current rate has to be
+                // readable without opening anything.
+                ForEach(Self.speeds, id: \.self) { s in
+                    Button {
+                        speed = s
+                        if player?.timeControlStatus == .playing { player?.rate = s }
+                    } label: {
+                        if s == speed {
+                            Label(Self.speedLabel(s), systemImage: "checkmark")
+                        } else {
+                            Text(Self.speedLabel(s))
+                        }
+                    }
                 }
+            } label: {
+                HStack(spacing: 5) {
+                    Text(Self.speedLabel(speed))
+                        .font(Theme.label(12)).tracking(1.1)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .padding(.horizontal, 12).padding(.vertical, 6)
+                .overlay(Capsule().strokeBorder(Theme.yellow, lineWidth: 1.5))
+                .foregroundStyle(Theme.yellow)
             }
+            Spacer()
         }
     }
 

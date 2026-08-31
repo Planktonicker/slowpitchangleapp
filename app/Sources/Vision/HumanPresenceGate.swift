@@ -109,6 +109,8 @@ final class HumanPresenceGate {
     private let lock = NSLock()
     private var _lastSeenAt: CFTimeInterval?
     private var _detectedNow = false
+    /// The de-bounced answer the UI is given. See the note where it is set.
+    private var _heldPresent = false
     private var busy = false
 
     /// True when a person was seen within `presenceWindow`. Safe from any
@@ -194,9 +196,28 @@ final class HumanPresenceGate {
             }
 
             self.lock.lock()
-            let changed = detected != self._detectedNow
+            let now = CACurrentMediaTime()
             self._detectedNow = detected
-            if detected { self._lastSeenAt = CACurrentMediaTime() }
+            if detected { self._lastSeenAt = now }
+            // What the UI is told is the HELD answer, not this frame's.
+            //
+            // Raw per-inference detection was published straight through, and
+            // inference runs at 10 Hz, so a single frame Vision missed — a
+            // half-turn during the load, an arm across the torso, one bad
+            // exposure — flipped the chip off and back on a tenth of a second
+            // later. It read as the app repeatedly losing the hitter.
+            //
+            // It was also WRONG, which matters more than the flicker: the
+            // trigger does not gate on this frame, it gates on
+            // `recentlyPresent`, so through every one of those gaps the app
+            // would still have recorded a swing while the screen said nobody
+            // was there. Same window, same answer, one source of truth.
+            //
+            // On immediately, off only after the window: being told you are
+            // seen is urgent, being told you are not is worth being sure of.
+            let held = self._lastSeenAt.map { now - $0 < self.presenceWindow } ?? false
+            let changed = held != self._heldPresent
+            self._heldPresent = held
             self.lock.unlock()
 
             if let handoff = self.onPose {
@@ -204,8 +225,7 @@ final class HumanPresenceGate {
             }
 
             if changed {
-                let value = detected
-                DispatchQueue.main.async { self.onPresenceChange?(value) }
+                DispatchQueue.main.async { self.onPresenceChange?(held) }
             }
         }
     }

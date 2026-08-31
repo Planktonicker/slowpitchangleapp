@@ -28,6 +28,10 @@ struct SwingDetailView: View {
     /// SwiftUI body is one of the reliable ways to make the type checker take
     /// minutes over a file that used to compile in seconds.
     private static let speeds: [Float] = [0.1, 0.25, 0.5, 1.0]
+
+    private static func speedLabel(_ s: Float) -> String {
+        s == 1.0 ? "1×" : String(format: "%g×", Double(s))
+    }
     @State private var track: [BallObservation] = []
     @State private var videoSize: CGSize = .zero
     @State private var showOverlay = true
@@ -173,26 +177,30 @@ struct SwingDetailView: View {
             }
             .frame(maxHeight: 260)
             HStack(spacing: 8) {
-                Text("SPEED").font(.caption2).foregroundStyle(.secondary)
-                ForEach(Self.speeds, id: \.self) { s in
-                    Button {
-                        inlineSpeed = s
-                        // Only while playing: setting `rate` on a paused
-                        // player starts it, and a speed button is not a play
-                        // button.
-                        if player.timeControlStatus == .playing { player.rate = s }
-                    } label: {
-                        Text(s == 1.0 ? "1×" : String(format: "%g×", Double(s)))
-                            .font(.caption2.monospacedDigit())
-                            .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(inlineSpeed == s ? Theme.yellow.opacity(0.25) : .clear,
-                                        in: Capsule())
-                            .overlay(Capsule().strokeBorder(
-                                inlineSpeed == s ? Theme.yellow : Theme.steel.opacity(0.5),
-                                lineWidth: 1))
-                            .foregroundStyle(inlineSpeed == s ? Theme.yellow : Theme.steel)
+                Text("Playback speed")
+                Spacer()
+                Menu {
+                    ForEach(Self.speeds, id: \.self) { s in
+                        Button {
+                            inlineSpeed = s
+                            // Only while playing: setting `rate` on a paused
+                            // player starts it, and a speed control is not a
+                            // play button.
+                            if player.timeControlStatus == .playing { player.rate = s }
+                        } label: {
+                            if s == inlineSpeed {
+                                Label(Self.speedLabel(s), systemImage: "checkmark")
+                            } else {
+                                Text(Self.speedLabel(s))
+                            }
+                        }
                     }
-                    .buttonStyle(.plain)
+                } label: {
+                    HStack(spacing: 5) {
+                        Text(Self.speedLabel(inlineSpeed)).monospacedDigit()
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 9, weight: .bold))
+                    }
                 }
             }
             Toggle("Show tracked path", isOn: $showOverlay)
