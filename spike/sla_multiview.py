@@ -79,7 +79,14 @@ PLATE_WIDTH_M = 0.4318               # [PARITY] home plate, 17 in across
 COVERAGE_MIN_3D = 0.60               # [PARITY] below this a 3D track is flagged
 RESAMPLE_MAX_GAP_S = 0.05            # [PARITY] larger gaps are absent, not bridged
 SEGMENT_AZIMUTH_MIN_HORIZ = 0.2      # [PARITY] near-vertical segments have no azimuth
-GRAVITY3D_MIN_SPAN_S = 0.15          # [PARITY] curvature needs time; 36 frames @240
+# Curvature needs time. Imported rather than restated, and deliberately NOT
+# a looser number than the 2D path uses: triangulating changes where the
+# positions come from, not how long a parabola must be watched before its
+# quadratic term is conditioned. The synthetic drop rehearsal reads g 5% low
+# over a 0.18 s window and correctly over 0.30 s, which is the same thing
+# docs/VALIDATION.md's G0 runs found by fitting sliding windows on a real
+# fall — the early ones are ill-posed and must not be reported.
+GRAVITY3D_MIN_SPAN_S = sla.MIN_GRAVITY_TRACK_S   # [PARITY] 0.20 s
 LAUNCH3D_MIN_SAMPLES = 8             # [PARITY] mirrors MIN_TRACK_FRAMES's intent
 MIN_RTT_KEEP_FACTOR = 1.25           # [PARITY] ping filter: keep near-minimum RTT
 
@@ -610,3 +617,245 @@ def gravity_magnitude_3d(t, xyz) -> float | None:
                 * math.pi * (sla.BALL_DIAMETER_M / 2.0) ** 2 / sla.BALL_MASS_KG)
     g_vec = accel + k_over_m * float(np.linalg.norm(v_mid)) * v_mid
     return float(np.linalg.norm(g_vec))
+
+
+# --- Offline rig description (tape measure instead of a solver) -------------
+#
+# P2 will solve the rig from a wand pass. Until that exists, a rig can be
+# MEASURED, and measuring it first is the right order anyway: it removes the
+# calibration solver from the experiment so a bad reconstruction has one
+# fewer place to hide. Three ground distances and two lens heights fully
+# determine two cameras up to a mirror flip, and all five are things a tape
+# measure gives without argument.
+
+@dataclass
+class MeasuredRig:
+    """[SPIKE] Two cameras pinned by tape measure, in the world frame
+    (origin = the marked spot on the ground, +Z up)."""
+    pos_a: np.ndarray
+    pos_b: np.ndarray
+    separation_deg: float
+
+
+def rig_from_ground_triangle(d_a_m: float, d_b_m: float, d_ab_m: float,
+                             h_a_m: float, h_b_m: float,
+                             b_toward_plus_x: bool = True) -> MeasuredRig | None:
+    """[SPIKE] Two camera positions from five tape measurements.
+
+    d_a, d_b   ground distance from each tripod's base to the marked spot
+    d_ab       ground distance between the two tripod bases
+    h_a, h_b   lens height of each camera
+
+    All three distances are HORIZONTAL — tape on the ground, base to base —
+    because a slant distance to a lens is the one measurement a person cannot
+    take accurately alone, and mixing a slant with two horizontals silently
+    tilts the whole rig.
+
+    The angle at the origin comes from the law of cosines, which is also the
+    separation angle the placement advice is about, so a rig that measures 40
+    degrees tells you to move a tripod before it tells you anything else.
+    Returns None when the three distances cannot form a triangle — that is a
+    mis-measurement, and it must not be rounded into a plausible rig.
+    """
+    if min(d_a_m, d_b_m, d_ab_m) <= 0.0:
+        return None
+    cos_sep = (d_a_m * d_a_m + d_b_m * d_b_m - d_ab_m * d_ab_m) / (2.0 * d_a_m * d_b_m)
+    if not (-1.0 <= cos_sep <= 1.0):
+        return None
+    sep = math.acos(cos_sep)
+    az_b = sep if b_toward_plus_x else -sep
+    # Camera A sits on the -Y side at azimuth 0; positive azimuth walks toward
+    # +X. Same convention as the synthetic rig, so the two agree by
+    # construction rather than by comment.
+    pos_a = np.array([0.0, -d_a_m, h_a_m])
+    pos_b = np.array([d_b_m * math.sin(az_b), -d_b_m * math.cos(az_b), h_b_m])
+    return MeasuredRig(pos_a=pos_a, pos_b=pos_b, separation_deg=math.degrees(sep))
+
+
+def solve_aim_from_reference(intr: CameraIntrinsics, cam_pos, world_pt,
+                             u: float, v: float,
+                             iterations: int = 40) -> CameraExtrinsics | None:
+    """[SPIKE] Recover where a camera was AIMED from one known landmark.
+
+    Position comes from the tape measure; aim does not, and assuming a camera
+    points exactly at the mark is worth degrees of error. But a stationary
+    reference ball at a known world point, seen at a known pixel, supplies
+    two constraints — which is exactly the two freedoms a level camera has
+    left (pan and tilt) once roll is fixed by the tripod being level.
+
+    That is the constraint count that matters here, and it closes: two
+    knowns, two unknowns. Roll is NOT solved and must not be — a third
+    unknown against two constraints is the batter-outline mistake in
+    CLAUDE.md, and this returns a rig that is honest about needing a level
+    tripod instead of a rig that invents one.
+
+    Solved by damped Newton on a numerical 2x2 Jacobian; the map from aim
+    angles to pixels is smooth and nearly linear over the arcminutes this
+    has to move, so it converges in a handful of steps or not at all.
+    """
+    cam_pos = np.asarray(cam_pos, dtype=float)
+    world_pt = np.asarray(world_pt, dtype=float)
+    d = world_pt - cam_pos
+    if np.linalg.norm(d) < 1e-9:
+        return None
+
+    def extr_for(pan: float, tilt: float) -> CameraExtrinsics | None:
+        aim = cam_pos + np.array([math.cos(tilt) * math.cos(pan),
+                                  math.cos(tilt) * math.sin(pan),
+                                  math.sin(tilt)])
+        return look_at_extrinsics(cam_pos, aim)
+
+    def residual(pan: float, tilt: float):
+        extr = extr_for(pan, tilt)
+        if extr is None:
+            return None
+        uv = project_point(projection_matrix(intr, extr), world_pt)
+        if uv is None:
+            return None
+        return np.array([uv[0] - u, uv[1] - v])
+
+    pan = math.atan2(d[1], d[0])
+    tilt = math.atan2(d[2], math.hypot(d[0], d[1]))
+    step = 1e-4
+    for _ in range(iterations):
+        r0 = residual(pan, tilt)
+        if r0 is None:
+            return None
+        if float(np.linalg.norm(r0)) < 1e-6:
+            break
+        rp = residual(pan + step, tilt)
+        rt = residual(pan, tilt + step)
+        if rp is None or rt is None:
+            return None
+        jac = np.column_stack([(rp - r0) / step, (rt - r0) / step])
+        try:
+            delta = np.linalg.solve(jac, -r0)
+        except np.linalg.LinAlgError:
+            return None
+        # Damped: a full Newton step can leap past the solution when the
+        # landmark sits near the frame edge, where the Jacobian is worst.
+        pan += 0.7 * float(delta[0])
+        tilt += 0.7 * float(delta[1])
+    final = residual(pan, tilt)
+    if final is None or float(np.linalg.norm(final)) > 0.5:
+        return None
+    return extr_for(pan, tilt)
+
+
+# --- Offline time alignment --------------------------------------------------
+
+def gcc_phat_offset(sig_a, sig_b, sample_rate: float,
+                    max_offset_s: float = 5.0) -> tuple[float, float] | None:
+    """[PARITY] Time offset between two recordings of the same sound.
+
+    Generalized cross-correlation with phase transform: the cross-power
+    spectrum is normalized to unit magnitude before the inverse transform, so
+    the result depends on phase alignment alone. That is what makes it work
+    on two phones with different microphones, different gain and different
+    distances from the crack — plain correlation is dominated by whichever
+    recording is louder, PHAT is not.
+
+    Returns (offset_s, confidence) where offset_s is how much LATER the same
+    event appears in b than in a, and confidence is the peak height over the
+    correlation's own median. It does NOT correct for sound travel time: two
+    phones at different distances hear the crack about 2.9 ms apart per metre
+    of path difference, and only the caller knows the geometry.
+    """
+    a = np.asarray(sig_a, dtype=float)
+    b = np.asarray(sig_b, dtype=float)
+    if a.size < 16 or b.size < 16 or sample_rate <= 0.0:
+        return None
+    n = 1
+    while n < a.size + b.size:
+        n *= 2
+    fa = np.fft.rfft(a - a.mean(), n)
+    fb = np.fft.rfft(b - b.mean(), n)
+    cross = fa * np.conj(fb)
+    mag = np.abs(cross)
+    mag[mag < 1e-12] = 1e-12
+    corr = np.fft.irfft(cross / mag, n)
+    corr = np.concatenate([corr[-(n // 2):], corr[:n // 2 + 1]])
+    zero = n // 2
+    max_lag = int(min(max_offset_s * sample_rate, zero - 1))
+    window = corr[zero - max_lag:zero + max_lag + 1]
+    if window.size == 0:
+        return None
+    peak = int(np.argmax(window))
+    lag = peak - max_lag
+    baseline = float(np.median(np.abs(window))) or 1e-12
+    conf = float(window[peak]) / baseline
+    # Parabolic interpolation for sub-sample resolution: at 48 kHz one sample
+    # is 21 us, but the peak's true position sits between samples and the
+    # curvature says where.
+    if 0 < peak < window.size - 1:
+        y0, y1, y2 = window[peak - 1], window[peak], window[peak + 1]
+        denom = y0 - 2.0 * y1 + y2
+        if abs(denom) > 1e-12:
+            lag += float(0.5 * (y0 - y2) / denom)
+    return -lag / sample_rate, conf
+
+
+def solve_time_offset(p_a: np.ndarray, ts_a, us_a, vs_a,
+                      p_b: np.ndarray, ts_b, us_b, vs_b,
+                      search_s: float = 2.0, coarse_step_s: float = 0.002,
+                      refine_passes: int = 3) -> tuple[float, float] | None:
+    """[PARITY] Align two views by making the 3D consistent, no audio needed.
+
+    Two cameras watching one moving point disagree about where it is in
+    space unless their clocks agree; the offset that minimizes reprojection
+    error is the offset that was actually there. This is the sync of last
+    resort and the sync of first resort: it needs no network, no clap, and
+    survives the slow-motion export path stripping the audio track — which
+    audio_lab.py has warned about since before there was anything to sync.
+
+    Coarse scan then successive refinement, because the error surface has a
+    sharp global minimum but shallow local structure from pixel noise.
+    Returns (offset_s, reproj_rms_px) where offset_s is how much later b's
+    clock reads than a's, so t_a = t_b - offset_s.
+    """
+    ts_a = np.asarray(ts_a, dtype=float)
+    ts_b = np.asarray(ts_b, dtype=float)
+    if ts_a.size < 4 or ts_b.size < 4:
+        return None
+
+    def cost(offset: float) -> float:
+        # Put b on a's clock, then ask both views about the instants they
+        # BOTH cover — an offset that merely shrinks the overlap must not
+        # look better than one that fits it.
+        tb = ts_b - offset
+        lo, hi = max(ts_a.min(), tb.min()), min(ts_a.max(), tb.max())
+        if hi - lo < 0.05:
+            return float("inf")
+        grid = np.arange(lo, hi, 1.0 / 240.0)
+        if grid.size < 6:
+            return float("inf")
+        ua = pchip_resample(ts_a, us_a, grid)
+        va = pchip_resample(ts_a, vs_a, grid)
+        ub = pchip_resample(tb, us_b, grid)
+        vb = pchip_resample(tb, vs_b, grid)
+        errs = []
+        for i in range(grid.size):
+            if not (np.isfinite(ua[i]) and np.isfinite(va[i])
+                    and np.isfinite(ub[i]) and np.isfinite(vb[i])):
+                continue
+            got = triangulate_point([(p_a, float(ua[i]), float(va[i]), 1.0),
+                                     (p_b, float(ub[i]), float(vb[i]), 1.0)])
+            if got is not None:
+                errs.append(got[1])
+        if len(errs) < 5:
+            return float("inf")
+        return float(np.median(errs))
+
+    best_off, best_cost, step = 0.0, float("inf"), coarse_step_s
+    lo, hi = -search_s, search_s
+    for _ in range(refine_passes + 1):
+        offs = np.arange(lo, hi + step, step)
+        for off in offs:
+            c = cost(float(off))
+            if c < best_cost:
+                best_cost, best_off = c, float(off)
+        if not np.isfinite(best_cost):
+            return None
+        lo, hi = best_off - step, best_off + step
+        step /= 8.0
+    return best_off, best_cost
