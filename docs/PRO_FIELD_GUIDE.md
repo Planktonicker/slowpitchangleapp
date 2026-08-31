@@ -53,8 +53,11 @@ cannot — and the drop test proves it before you believe any of it.
    locked on the mark.
 
 3. **Phone B — about 90° around from A.** Same 6 m, same height, same
-   settings. Put it on the side the **ball would fly away to**, never the
-   side it would come from. Aim it at the same mark.
+   settings, aimed at the same mark.
+
+   **For tests 1 and 2 nothing is hit**, so put B wherever a clean 90° is
+   convenient. Read the safety section before test 3 — the placement has to
+   change once a bat is involved.
 
 4. **Measure five things**, tape flat **on the ground**, tripod base to
    tripod base — never a diagonal up to a lens:
@@ -143,6 +146,45 @@ A stage-by-stage report that names the stage that failed, if one did:
 triangulation are all working on real footage — and the scale is then good
 enough to trust a speed. Outside 5% and it is almost always a tape
 measurement, a wrong field of view for that phone, or a tripod that moved.
+
+---
+
+## Where phone B goes once you start hitting
+
+**Never downrange.** Think of the hitter at the centre of a clock with the
+ball flying out toward 12. Camera A is side-on at 3 (or 9). Ninety degrees
+from A is either **12 — straight down the flight path**, or **6 — straight
+back**, which is where foul tips and the backswing go. Both are places a
+phone gets hit.
+
+Put B at about **5 o'clock instead** (or 7, if A is at 9): behind the
+hitter's back and off to the side. That is **60° of separation** from A —
+the bottom of the useful band, but genuinely usable, and it clears both the
+batted ball and the straight-back foul zone.
+
+```
+                 12  ball flies out
+                     ✗ never here
+        9                          3   camera A (side-on, as you film now)
+                     ✗ not straight back
+                  6      5  ← camera B  (~60° from A, behind and to the side)
+```
+
+Two reasons this is the right compromise rather than a grudging one:
+
+- **B's real job is the body, not the ball.** From behind, the hips and
+  shoulders lie across the frame instead of edge-on, which is exactly the
+  view that makes rotation measurable. A already has the ball covered from
+  the side, which is the best angle for flight.
+- **60° still works.** The error budget puts depth accuracy at 90° roughly
+  twice as good as at 30°; 60° sits close to the good end, and losing a
+  little of that is worth not repairing a phone.
+
+If you would rather keep a full 90° for test 3, put a screen in front of B.
+Do not rely on being able to duck.
+
+**Re-measure the five distances after moving B.** It takes two minutes and
+the whole scale rides on them.
 
 ---
 

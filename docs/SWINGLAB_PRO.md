@@ -169,9 +169,14 @@ do not own, and on a wide outdoor baseline a flat board is rarely visible
 well from both cameras at once.
 
 Camera placement inherits `CAPTURE_PROTOCOL.md` for phone A (side-on,
-perpendicular, 4.5–6 m) and adds phone B at **60–110° of separation, 90°
-ideal** — and *not downrange*: the second phone goes on the side the ball
-flies away from, never the side it flies toward.
+perpendicular, 4.5–6 m) and adds phone B at **60–110° of separation**. 90°
+is ideal on paper and usually unavailable in practice: 90° from a side-on
+camera is either straight downrange or straight back, and both are where a
+phone gets hit. With a bat in play B goes **behind the hitter and off to the
+side, ~60°**, which clears the batted ball and the foul-back zone and still
+puts the hips and shoulders across B's frame instead of edge-on. That is the
+right trade rather than a grudging one — B's job is the body, and A already
+has the best angle on the ball.
 
 ## Accuracy targets (the honest-claims contract)
 
