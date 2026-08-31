@@ -20,7 +20,7 @@ struct ProRootView: View {
         case .solo:
             RootView().environmentObject(model)
         case .linked:
-            ProLinkedPlaceholderView { mode = nil }
+            ProLinkedView { mode = nil }
         case nil:
             chooser
         }
@@ -86,29 +86,47 @@ struct ProRootView: View {
     }
 }
 
-/// Honest about what exists: the linked mode is a ladder of proofs, not a
-/// switch to flip, and this screen names the rungs so nobody mistakes a
-/// scaffold for a feature. Replaced by the real link-setup flow in P4.
-struct ProLinkedPlaceholderView: View {
+/// Honest about what exists. P1 is real and testable — the sync bench below
+/// runs on two phones today. The rest are named so nobody mistakes a
+/// scaffold for a feature.
+struct ProLinkedView: View {
     let done: () -> Void
+    @State private var showBench = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Linked capture is not built yet")
+            Text("Linked capture")
                 .font(.title2.bold())
-            Text("It arrives in proven stages, each with a gate it must pass first:")
+
+            Button {
+                showBench = true
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "waveform.badge.magnifyingglass").font(.title2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Sync bench").font(.headline)
+                        Text("P1 — pair two phones, measure the clock offset, check it against a clap.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                            .multilineTextAlignment(.leading)
+                    }
+                    Spacer()
+                }
+                .padding(14)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.white.opacity(0.10)))
+            }
+
+            Text("Still to come, each gated on the one before:")
                 .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 10) {
-                stage("P1", "Clock sync between two phones — bench-proven to about a millisecond.")
                 stage("P2", "Calibration: the phones learn where they stand, using the ball itself.")
-                stage("P3", "3D reconstruction, validated against known geometry and gravity.")
+                stage("P3", "3D reconstruction on the phone, validated against gravity.")
                 stage("P4", "The linked session: pair, arm, swing, results on the master phone.")
                 stage("P5", "Rotation metrics — labelled experimental until field-validated.")
             }
             .font(.subheadline)
 
-            Text("The design, budgets and gates live in docs/SWINGLAB_PRO.md.")
+            Text("Today the 3D maths runs offline on a Mac: spike/multiview_lab.py, with docs/PRO_FIELD_GUIDE.md for what to film.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -118,6 +136,7 @@ struct ProLinkedPlaceholderView: View {
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
         }
+        .sheet(isPresented: $showBench) { SyncBenchView() }
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.black)

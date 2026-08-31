@@ -192,6 +192,22 @@ targets:
         UIRequiredDeviceCapabilities:
           - arm64
 
+  SwingLabProTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: TestsPro
+        excludes:
+          - "Fixtures/**"
+      - path: TestsPro/Fixtures
+        buildPhase: resources
+    dependencies:
+      - target: SwingLabPro
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.swinglab.SwingLabProTests
+        GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   SwingLab:
     build:
@@ -214,8 +230,14 @@ schemes:
     build:
       targets:
         SwingLabPro: all
+        SwingLabProTests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - SwingLabProTests
     profile:
       config: Release
     archive:
