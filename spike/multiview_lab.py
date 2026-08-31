@@ -358,6 +358,22 @@ def report(stages: list[Stage], track3d, grid=None, audio_note=None,
         print("  gravity      not computable — the ball needs "
               f"{mv.GRAVITY3D_MIN_SPAN_S:.2f} s of tracked flight")
 
+    # The rotational half of the rig check. |g| is magnitude-preserving under
+    # a rotation of the whole rig, so the gravity line above cannot see a rig
+    # rolled bodily out of the world frame. This can. Reported, never gated —
+    # its noise floor depends hard on the tracked window, so a fixed
+    # threshold would fail correct rigs on short falls.
+    tilt = mv.gravity_tilt_deg(grid, xyz)
+    if tilt is not None:
+        span = float(np.nanmax(grid[finite]) - np.nanmin(grid[finite])) if finite.any() else 0.0
+        floor = 2.4 if span < 0.40 else (1.3 if span < 0.55 else 0.6)
+        print(f"  gravity tilt {tilt:.2f} deg off true down, over {span:.2f} s "
+              f"of flight (noise floor about {floor:.1f} deg for this window)")
+        if tilt > 3.0 * floor:
+            print("               That is well above the floor: the whole rig "
+                  "may be rotated —\n               both tripods rolled the "
+                  "same way, or a shared bearing error. |g| cannot see this.")
+
     if finite.sum() >= 2:
         first = xyz[np.flatnonzero(finite)[0]]
         last = xyz[np.flatnonzero(finite)[-1]]

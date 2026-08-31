@@ -152,6 +152,41 @@ reading rather than reporting a swing.
 
 - Date: 2026-08-30  Disagreement: 14% (37 px ball) / 43% (26 px ball) -> Pass? **NO**
 
+### A predicted THIRD mechanism, and one re-tried candidate re-rejected
+
+Analysis prompted by a literature sweep, 2026-08-31. Neither item is a field
+result; both are recorded so the next drop test looks for the right things.
+
+**Motion smear biases the minor-axis diameter, and the maths is exact.**
+After a box smear of length L along the direction of travel, the matte
+profile across the minor axis is a(y) = 2·sqrt(r²−y²)/L, whose half-maximum
+sits at y = r·sqrt(3)/2 — a **−13.4% diameter, independent of ball size**,
+once the smear is long. Because a given shutter and speed fix the smear in
+PIXELS, the fractional error scales with smear ÷ diameter, which is a
+size-dependent bias of exactly the kind G0 observed.
+
+But arithmetic says it does **not** explain the drop tests. A ball 0.4 s into
+a fall is doing ~4 m/s, which at tee_05's 2.55 mm/px and a full 4.17 ms
+shutter is a 6.5 px smear on a 37 px ball — smear/diameter 0.18, worth about
+−1%, not −11%. So the drop-test bias remains unexplained.
+
+Where it does bite is the case that actually matters. A struck ball at
+40 m/s smears **65 px** on a 37 px ball (smear/diameter 1.8), and a 30 m/s
+bat head 49 px. **The drop test therefore understates the diameter error a
+struck ball will suffer**, and the two are different mechanisms. Testable
+now: `multiview_lab.py`'s `diameter_truth_check` grades the measured
+diameter against triangulated depth, so a two-camera toss and swing measure
+this directly, bucketed by smear.
+
+**Re-rejected: "the edge search stops at an interior dip."** A simulation
+reproduced tee_06's −43% almost exactly by placing a dark band at 0.45r and
+letting the outward walk stop at the first sub-0.5 crossing. It is a
+compelling story and it is already **disproven on the actual footage** above:
+sampling the alpha profile across the ball on tee_06 gives a clean monotonic
+fall with a single crossing, and searching outside-in returns the same
+radius. A simulation that reproduces a number is not evidence against a
+measurement of the real clip. Left rejected.
+
 ### G0b — The two-distance check (no truth needed at all)
 
 Film the same tee, same ball, same swing intent from **4.5 m and from 6 m**.

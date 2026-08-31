@@ -178,6 +178,29 @@ puts the hips and shoulders across B's frame instead of edge-on. That is the
 right trade rather than a grudging one — B's job is the body, and A already
 has the best angle on the ball.
 
+### What the reference product actually achieves
+
+Uplift Capture is the closest shipping analogue and worth stating concretely:
+two iOS devices roughly 90° apart at about 2.3 m, paired over
+**MultipeerConnectivity** (the same transport chosen here), time-synced
+on-device and then uploaded — all measurement happens in their cloud, so it
+does not work at a field without signal. It reports hip–shoulder separation
+under the name X-Factor, plus peak segment angular velocities and
+kinematic-sequence ordering.
+
+The number that matters is not theirs. A December 2023 Driveline Baseball
+evaluation concluded Uplift Capture is **not equivalent to marker-based or
+established markerless ground truth, but is reliable enough to "monitor gross
+coordination strategies."** That is independent third-party evidence, on this
+exact configuration, arriving at precisely the position this document already
+takes: two phones support trends and coaching direction, not lab-grade
+numbers. It is the strongest external support available for shipping rotation
+metrics as experimental, within-athlete, and gated.
+
+Note also their 2.3 m working distance against our 4.5–6 m. They film the
+body only; we must also keep a struck ball in frame. That tension is real and
+unresolved — closer is better for keypoints, further is better for flight.
+
 ## Accuracy targets (the honest-claims contract)
 
 From published validations (OpenCap, Pose2Sim, Theia3D vs marker-based;
@@ -186,14 +209,33 @@ be confirmed by `spike/synth_multiview.py --sweep` and the validation ladder:
 
 | Quantity | 2 phones | 3 phones | Ships as |
 |---|---|---|---|
-| Joint centres (3D) | 30–60 mm | 25–45 mm | replay + internal |
-| Sagittal joint angles | 4–8° RMSE | 3–6° | cross-check vs 2D |
+| Joint centres (3D) | 50–80 mm | 40–65 mm | replay + internal |
+| Sagittal joint angles | 7–13° RMSE | 5–10° | cross-check vs 2D |
 | Pelvis / thorax azimuth (each) | 6–10° RMSE | 4–7° | experimental |
 | **Hip–shoulder separation** | **7–12° RMSE** | 5–8° | **experimental, gated** |
 | Bat head speed | ±3–5 mph | ±2–4 | experimental |
 | Exit velocity (3D) | ±2–3 mph | ±1.5–2.5 | cross-check vs 2D |
 | Launch angle (3D) | ±2–3° | ±1.5–2° | cross-check vs 2D |
 | Joint IR/ER, spin, torque | — | — | **never** |
+
+The first two rows were revised **downward** (i.e. worse) in the light of
+2025–26 peer-reviewed work on the nearest comparable systems, before any of
+them were shown to a user. An independent validation of OpenCap — two
+smartphones, the closest published analogue to this rig — reports sagittal
+RMSE of 7.0–13.4° with a systematic 5–15° flexion overestimate across eight
+dynamic tasks, where this table previously claimed 4–8°. And professional
+multi-camera markerless systems measured against marker-based reference on
+high-speed baseball pitching reach only 52–57 mm MPJPE (Theia3D 52.0 ± 12.3,
+Hawk-Eye 56.6 ± 9.4), where this table previously claimed 30–60 mm for two
+phones. Both are peer-reviewed rather than vendor claims, and the pitching
+study independently confirms the *shape* of error predicted below — stride
+length agreed best, rotational variables worst.
+
+Lowering a target before there is any field data can look like pre-emptively
+moving the goalposts. It is the opposite: these are numbers borrowed from
+published validations of comparable rigs, carried with their citation, to be
+replaced the moment GP5 measures our own. Better to correct the claim now
+than to have the validation ladder correct it after it has been quoted.
 
 Context for the headline row: hip–shoulder separation in ball sports spans
 roughly 30–60°, so 7–12° of error is useful for coaching direction and
@@ -207,6 +249,32 @@ graduates from experimental only when its measurement error is smaller than
 the athlete's own swing-to-swing variability — and both numbers are shown.
 With no published slow-pitch norms (still true), feedback stays
 within-athlete, never against an invented population band.
+
+### Two things measured NOT to be worth doing
+
+Recorded in the spirit of `VALIDATION.md`'s "two candidate causes were tested
+and disproven, which is worth recording so they are not re-tried".
+
+**Iterative/geometric triangulation buys nothing here.** Hartley–Sturm
+iterative reweighting — dividing each view's DLT rows by its current
+projective depth so the algebraic error converges on the geometric one — was
+implemented and run against `triangulate_point` at 6 m with 3 px of keypoint
+noise, 4000 trials per configuration: 19.3 mm both ways at 60° separation,
+17.2 mm both ways at 90°, 18.2 mm both ways at 110°. Identical to three
+significant figures. Two-view geometry at this baseline and depth is too
+well conditioned for the algebraic/geometric distinction to matter. The claim
+that our ceiling is the 2D estimator and not the triangulation is therefore
+measured, not merely asserted — and a plausible-looking week of work on the
+solver is worth zero.
+
+**Per-axis DLT weights are premature.** Splitting each ray's single weight
+into `w_u`/`w_v` so the two homogeneous rows weigh independently is a small,
+correct change, and 2D keypoint error really is anisotropic. But there is no
+per-axis uncertainty to put in the slot: Vision emits one scalar per joint,
+and `multiview_lab.py` currently passes 1.0 for every usable sample, so even
+the isotropic weight is inert today. Feed the existing scalar with Vision's
+per-joint confidence first and see whether weighting changes anything on real
+footage; splitting the axes before that adds a parity surface with no input.
 
 ### A bias the error budget does not contain: joint centres
 

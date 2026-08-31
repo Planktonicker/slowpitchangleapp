@@ -580,8 +580,21 @@ def launch_metrics_3d(t, xyz, contact_t: float,
                            n_samples=int(m.sum()), fit_rms_m=math.sqrt(rss))
 
 
-def gravity_magnitude_3d(t, xyz) -> float | None:
-    """[PARITY] |g| read from a triangulated free-flight track, drag-aware.
+def gravity_vector_3d(t, xyz):
+    """[PARITY] The gravity VECTOR read from a triangulated free-flight track.
+
+    Direction matters as much as magnitude, and for a different reason. A
+    rotation of the whole rig — both tripods rolled the same way, a mis-set
+    lens height, a bearing error shared by both cameras — moves every
+    reconstructed point but PRESERVES LENGTHS. So |g| is structurally blind
+    to it, and a gate built on magnitude alone passes a rig that is rotated
+    bodily out of the world frame. The angle between this vector and true
+    down is the residual that catches it."""
+    return _gravity_vec(t, xyz)
+
+
+def _gravity_vec(t, xyz):
+    """[PARITY] Shared body: drag-aware acceleration fit.
 
     The 3D drop test: a tracked ball in flight must accelerate at 9.81 m/s^2
     no matter where the cameras stood — with NO scale assumption, because
@@ -615,8 +628,37 @@ def gravity_magnitude_3d(t, xyz) -> float | None:
         v_mid[axis] = 2.0 * float(coeffs[0]) * tau_mid + float(coeffs[1])
     k_over_m = (0.5 * sla.AIR_DENSITY * sla.DRAG_CD
                 * math.pi * (sla.BALL_DIAMETER_M / 2.0) ** 2 / sla.BALL_MASS_KG)
-    g_vec = accel + k_over_m * float(np.linalg.norm(v_mid)) * v_mid
-    return float(np.linalg.norm(g_vec))
+    return accel + k_over_m * float(np.linalg.norm(v_mid)) * v_mid
+
+
+def gravity_magnitude_3d(t, xyz) -> float | None:
+    """[PARITY] |g| from a triangulated free-flight track. The scale witness."""
+    g = _gravity_vec(t, xyz)
+    return None if g is None else float(np.linalg.norm(g))
+
+
+def gravity_tilt_deg(t, xyz) -> float | None:
+    """[PARITY] Angle between reconstructed gravity and true down, degrees.
+
+    The rotational half of the rig check, and it needs a caveat rather than a
+    threshold. Tilt is a transverse acceleration divided by g, and the noise
+    on a quadratic acceleration fit falls roughly as the fit window to the
+    -2.5 power, so the floor is a strong function of how long the ball was
+    tracked. A perfect, unrolled rig with ordinary detection noise reads
+    around 2.4 degrees over a 0.30 s fall and well under 1 degree over 0.55 s.
+
+    So this is REPORTED, never gated: a fixed threshold would fail correct
+    rigs on short falls, which is the common case and exactly the field
+    afternoon a gate is supposed to protect. Compare it against the floor for
+    the window you actually got."""
+    g = _gravity_vec(t, xyz)
+    if g is None:
+        return None
+    n = float(np.linalg.norm(g))
+    if n <= 1e-9:
+        return None
+    cos = float(np.dot(g / n, np.array([0.0, 0.0, -1.0])))
+    return math.degrees(math.acos(min(max(cos, -1.0), 1.0)))
 
 
 # --- Offline rig description (tape measure instead of a solver) -------------
