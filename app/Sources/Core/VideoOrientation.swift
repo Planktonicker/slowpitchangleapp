@@ -4,6 +4,10 @@
 
 import CoreGraphics
 import Foundation
+// `CGImagePropertyOrientation` lives in ImageIO, not CoreGraphics — every other
+// file in the project that names it imports this, and this one gained the type
+// without the import.
+import ImageIO
 
 /// Turning measured buffer pixels into the picture a person sees.
 ///
