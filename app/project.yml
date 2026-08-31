@@ -42,6 +42,22 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.swinglab.SwingLab
         PRODUCT_NAME: SwingLab
         CODE_SIGN_STYLE: Automatic
+        # Your Apple developer team, read from the environment at generate time.
+        #
+        # Set in Xcode's Signing & Capabilities editor it would work exactly
+        # once: the .xcodeproj is GENERATED and gitignored, so the next
+        # `xcodegen generate` — which the README asks for whenever files change
+        # — throws the setting away and the build fails again with "Signing for
+        # SwingLab requires a development team". Putting it here makes it
+        # survive regeneration.
+        #
+        # One-time setup, in ~/.zshrc:
+        #     export DEVELOPMENT_TEAM=ABCDE12345
+        # The ID is in Xcode -> Settings -> Accounts -> your Apple ID ->
+        # the team's "Team ID" column, or at developer.apple.com/account.
+        # Left unset it substitutes empty, which is exactly today's behaviour,
+        # so the simulator build is unaffected either way.
+        DEVELOPMENT_TEAM: ${DEVELOPMENT_TEAM}
         # Named explicitly rather than left to Xcode's default. Once a catalogue
         # exists, actool insists on finding the icon set this names — that is
         # the "None of the input catalogs contained a matching ... app icon set"

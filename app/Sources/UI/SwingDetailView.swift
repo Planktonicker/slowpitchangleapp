@@ -180,7 +180,7 @@ struct SwingDetailView: View {
                         // Only while playing: setting `rate` on a paused
                         // player starts it, and a speed button is not a play
                         // button.
-                        if player?.timeControlStatus == .playing { player?.rate = s }
+                        if player.timeControlStatus == .playing { player.rate = s }
                     } label: {
                         Text(s == 1.0 ? "1×" : String(format: "%g×", Double(s)))
                             .font(.caption2.monospacedDigit())
