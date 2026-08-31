@@ -62,7 +62,7 @@ except ImportError:  # pragma: no cover - exercised only on a bare install
 # one of these drifts, this tool stops simulating the app that shipped.
 PRE_ROLL_S = 1.50        # SLAConstants.swift: preRollS
 POST_ROLL_S = 2.00       # SLAConstants.swift: postRollS
-TRIGGER_DB = 15.0        # SLAConstants.swift: triggerDb
+TRIGGER_DB = 20.0        # SLAConstants.swift: triggerDb (NOT check_audio_trigger's PASS_DB, which stays 15 — that is the G5 gate)
 REFRACTORY_S = 2.0       # ContactTrigger.swift: _refractoryS
 RMS_WINDOW_S = 0.005     # ContactTrigger.swift: rmsWindowS
 FLOOR_WINDOW_S = 0.5     # ContactTrigger.swift: floorWindowS

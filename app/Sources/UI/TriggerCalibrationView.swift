@@ -66,7 +66,7 @@ struct TriggerCalibrationView: View {
 
     private var intro: some View {
         VStack(spacing: 12) {
-            Text("The default 15 dB is a pass/fail gate, not a good threshold for any particular place. A quiet garden needs less; a cage needs more. Two steps and it will pick one from what this venue actually sounds like.")
+            Text("The default 20 dB is a starting point, not a threshold for any particular place. A quiet garden needs less; a cage needs more. Two steps and it will pick one from what this venue actually sounds like.")
                 .font(.callout).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Button("Start — stay quiet") { session.startBackground() }

@@ -8,7 +8,7 @@ import QuartzCore
 
 /// Measures a venue and picks a contact threshold for it.
 ///
-/// The default threshold is 15 dB over the rolling noise floor, which is the
+/// The default threshold is 20 dB over the rolling noise floor, which is the
 /// validation gate `check_audio_trigger.py` applies (G5) — a single number
 /// chosen to decide whether auto-triggering is viable at all. It is a bad
 /// working threshold in both directions: too high for a quiet garden, where a
