@@ -43,7 +43,18 @@ enum VisionOrientationSetting: String, Codable, CaseIterable, Sendable {
 struct AppSettings: Codable, Equatable {
     var detector = DetectorSettings()
     var bat = BatTracker.Settings()
-    var trackBat = true
+    // No `trackBat`. The switch was removed in 5679885 because it bought
+    // nothing and silently cost the hitter the whole bat panel on every clip
+    // they forgot to flip it — but the stored property outlived its only UI
+    // writer, and the resilient decoder went on restoring a persisted `false`
+    // from before the update on every launch, gating the bat pass off forever
+    // with no control anywhere to turn it back on. The analyzer decides for
+    // itself whether a bat was tracked; that is the whole point of that commit.
+    /// Whether the setup overlay has ever been opened. It auto-opens once, on
+    /// a first run, and never again — it used to auto-open whenever no
+    /// distance was set, which is now the normal state rather than an unfinished
+    /// one.
+    var hasCompletedFirstSetup = false
     /// Run the body-pose pass over each clip. On by default — the sagittal
     /// metrics are the point of it — but a switch, because it is a third decode
     /// pass and a phone already at 240fps is the phone most likely to be hot.
@@ -121,7 +132,6 @@ struct AppSettings: Codable, Equatable {
         var o = ClipAnalyzer.Options()
         o.detector = detector
         o.bat = bat
-        o.trackBat = trackBat
         o.trackBody = trackBody
         // An explicit choice in Settings still wins; "auto" now means "work it
         // out from the hitter's side" rather than "let the fastest track vote".
@@ -169,7 +179,7 @@ extension AppSettings {
         }
         detector = take(.detector, d.detector)
         bat = take(.bat, d.bat)
-        trackBat = take(.trackBat, d.trackBat)
+        hasCompletedFirstSetup = take(.hasCompletedFirstSetup, d.hasCompletedFirstSetup)
         trackBody = take(.trackBody, d.trackBody)
         triggerDb = take(.triggerDb, d.triggerDb)
         preRollS = take(.preRollS, d.preRollS)

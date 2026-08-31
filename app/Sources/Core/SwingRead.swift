@@ -50,8 +50,7 @@ enum SwingRead {
                         launchAngleDeg: Double) -> Contact? {
         guard smash != nil || undercutMm != nil else { return nil }
 
-        let inWindow = launchAngleDeg >= SLA.slowpitchLaunchLo
-            && launchAngleDeg <= SLA.slowpitchLaunchHi
+        let inWindow = SLA.inSlowpitchLaunchWindow(launchAngleDeg)
 
         var headline: String
         var why: String
@@ -196,9 +195,13 @@ enum SwingRead {
     /// The caption burned into an exported clip. Short on purpose — it has to
     /// stay legible on a phone screen at a glance.
     static func exportCaption(launchAngleDeg: Double, exitVeloMph: Double,
-                              smash: Double?) -> String {
+                              smash: Double?, unit: SpeedUnit = .mph) -> String {
+        // The burned-in caption honours the unit setting: it is the one copy
+        // of the number that leaves the phone, and a km/h user sharing a clip
+        // captioned in mph is the same swing reading two different numbers on
+        // two screens.
         var parts = [String(format: "%+.0f°", launchAngleDeg),
-                     String(format: "%.0f mph", exitVeloMph)]
+                     "\(unit.format(mph: exitVeloMph)) \(unit.suffix)"]
         if let smash { parts.append(String(format: "smash %.2f", smash)) }
         return parts.joined(separator: "   ")
     }

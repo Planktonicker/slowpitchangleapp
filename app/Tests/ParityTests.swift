@@ -116,6 +116,9 @@ final class ParityTests: XCTestCase {
         var name: String
         var direction: String
         var tracks: [[Obs]]
+        /// Supplied only for the case that needs it, so the others keep
+        /// pinning what happens when the caller does not know contact.
+        var contact_time: Double?
         /// `nil` when the reference returns no track at all.
         var expected_index: Int?
     }
@@ -410,6 +413,17 @@ final class ParityTests: XCTestCase {
     /// lawn of stationary clutter blobs, dozens of which sit inside the
     /// association gate of its path.
     ///
+    /// ...and on a REAL clip's own frames, `real_clip_reversal_must_split`.
+    /// On tee_02 the ball arrived down-left at 10 px a frame and its very last
+    /// step before contact measured 4.98 — the step before contact is the
+    /// slowest one a ball takes — so a heading read from that single pair fell
+    /// two hundredths of a pixel under the floor, the guard switched itself
+    /// off for exactly the frame it exists to catch, and one 59-frame track
+    /// came out that was half incoming ball and half struck ball: straightness
+    /// 0.33, reported as a swing at -37.9 deg and 29.6 mph. Split, the
+    /// outbound half reads +18.4 deg and 80 mph. Pinned from the real numbers
+    /// because no invented case would have reproduced a margin that small.
+    ///
     /// ...and on the layout that made a mess of two real clips: a pitch
     /// arriving and a hit leaving, meeting at contact. There must be TWO
     /// tracks there. The ball is in nearly the same PLACE on both sides of the
@@ -430,6 +444,8 @@ final class ParityTests: XCTestCase {
                        Self.fixtures.constants["BUILD_MAX_TURN_DEG"]!, accuracy: 1e-12)
         XCTAssertEqual(SLA.buildTurnMinStepPx,
                        Self.fixtures.constants["BUILD_TURN_MIN_STEP_PX"]!, accuracy: 1e-12)
+        XCTAssertEqual(Double(SLA.buildHeadingWindow),
+                       Self.fixtures.constants["BUILD_HEADING_WINDOW"]!, accuracy: 1e-12)
 
         let cases = Self.fixtures.build_tracks
         XCTAssertFalse(cases.isEmpty)
@@ -473,13 +489,46 @@ final class ParityTests: XCTestCase {
                                          diameterPx: $0.diameter_px, areaPx: $0.area_px) }
             }
             let direction = TrackBuilder.Direction(rawValue: c.direction) ?? .auto
-            let picked = TrackBuilder.selectOutboundTrack(tracks, direction: direction)
+            let picked = TrackBuilder.selectOutboundTrack(tracks, direction: direction,
+                                                          contactTime: c.contact_time)
             if let expected = c.expected_index {
                 XCTAssertEqual(picked, tracks[expected], "selection \(c.name)")
             } else {
                 XCTAssertNil(picked, "selection \(c.name) should pick nothing")
             }
         }
+    }
+
+    /// The contact-time filter, pinned on the case speed alone gets wrong.
+    ///
+    /// `mishit_slower_than_pitch` is a weak contact where the ball dribbles
+    /// out slower than the pitch came in, so the fastest track in the clip is
+    /// the pitch and every other filter passes it: it is a ball, it moves, it
+    /// is straight. Only the contact instant separates them, and a port that
+    /// dropped the parameter would keep returning the pitch — with a launch
+    /// angle, an exit velocity and a confidence row that all look normal.
+    func testSelectionUsesContactTime() {
+        XCTAssertEqual(SLA.selectContactTolS,
+                       Self.fixtures.constants["SELECT_CONTACT_TOL_S"]!, accuracy: 1e-12)
+
+        guard let c = Self.fixtures.select_track
+            .first(where: { $0.name == "mishit_slower_than_pitch" }) else {
+            return XCTFail("fixture missing")
+        }
+        let tracks = c.tracks.map { tr in
+            tr.map { BallObservation(frame: $0.frame, t: $0.t, x: $0.x, y: $0.y,
+                                     diameterPx: $0.diameter_px, areaPx: $0.area_px) }
+        }
+        XCTAssertNotNil(c.contact_time, "this case exists to exercise contact time")
+
+        // Without it, the pitch wins on speed — the bug, stated as a test so
+        // the fixture cannot quietly stop exercising anything.
+        let blind = TrackBuilder.selectOutboundTrack(tracks, direction: .auto)
+        XCTAssertEqual(blind, tracks[0], "without contact time the pitch is the fastest track")
+
+        let informed = TrackBuilder.selectOutboundTrack(tracks, direction: .auto,
+                                                        contactTime: c.contact_time)
+        XCTAssertEqual(informed, tracks[c.expected_index!], "contact time picks the hit")
     }
 
     /// The gate that separates a ball flight from clutter that merely persists.
@@ -556,6 +605,9 @@ final class ParityTests: XCTestCase {
                     Self.fixtures.constants["SPEED_OF_SOUND_MPS"]!, "speed of sound")
         assertClose(SLA.contactAudioMaxDistanceM,
                     Self.fixtures.constants["CONTACT_AUDIO_MAX_DISTANCE_M"]!, "max distance")
+        assertClose(SLA.contactMaxBackExtrapolationS,
+                    Self.fixtures.constants["CONTACT_MAX_BACK_EXTRAPOLATION_S"]!,
+                    "max back-extrapolation")
 
         let cases = Self.fixtures.contact_from_audio
         XCTAssertFalse(cases.isEmpty)

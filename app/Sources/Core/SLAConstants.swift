@@ -120,6 +120,24 @@ enum SLA {
     /// Past this the distance is a bad reading, not a camera placement.
     static let contactAudioMaxDistanceM = 60.0
 
+    /// How far before the track's first sighting a supplied contact time may
+    /// sit before it stops being believable. Mirrors
+    /// `CONTACT_MAX_BACK_EXTRAPOLATION_S`.
+    ///
+    /// Extrapolating backwards is legitimate for occlusion — the ball leaves
+    /// the bat behind the hitter and the first frames of flight are hidden —
+    /// and that is a handful of frames. 60 ms is fourteen at 240fps, wider
+    /// than a hitter is in a 1280-wide frame at 25 px a frame.
+    ///
+    /// Beyond it the number is not an occlusion correction, it is a false
+    /// trigger. Measured on IMG_6703: a 17 dB noise half a second before
+    /// contact fires at the default threshold, the refractory window then
+    /// covers the real 37 dB crack, and the clip is written with a contact
+    /// time 0.5 s early. The same 30-frame track then reported +4.25° and
+    /// 105.26 mph instead of −5.83° and 70.96 mph, carrying the same flags as
+    /// the correct answer.
+    static let contactMaxBackExtrapolationS = 0.06
+
     /// When contact actually happened, given when the trigger fired.
     ///
     /// The trigger fires when the crack of the bat REACHES THE PHONE, one
@@ -144,12 +162,25 @@ enum SLA {
         return max(0, audioT - d / speedOfSoundMps)
     }
 
+    /// How far before the known contact instant a hit's first sighting may
+    /// still land. The two clocks differ — the trigger fires a sound-travel
+    /// time after contact, and the detector's first sighting can be a frame
+    /// either side — but the gap this has to resolve is the several hundred
+    /// milliseconds a pitch spends in frame beforehand, so the tolerance is
+    /// wide compared to the error and narrow compared to the thing it excludes.
+    static let selectContactTolS = 0.05
+
     /// Association may not reverse a moving track — see `TrackBuilder`. The
     /// guard that keeps the incoming pitch out of the outgoing hit.
     static let buildMaxTurnDeg = 60.0
     /// Per FRAME, not per second: centroid noise is a fixed number of
     /// pixels between frames however fast the camera runs.
     static let buildTurnMinStepPx = 5.0
+    /// Observations the heading is fitted over — not the last pair. See
+    /// `TrackBuilder`: the last step before contact is the slowest one a ball
+    /// takes, and reading the heading from it switched the guard off at
+    /// exactly the frame it exists to catch.
+    static let buildHeadingWindow = 5
 
     /// Motion gating — see `MotionMask`. The largest single source of false
     /// candidates on real footage is stationary scenery that shares the ball's
@@ -259,6 +290,15 @@ enum SLA {
     /// Contact impulse must stand this far above the rolling noise floor.
     /// Matches `PASS_DB` in `spike/check_audio_trigger.py` (G5).
     static let triggerDb = 15.0
+    /// How much louder than the triggering impulse something has to be, inside
+    /// the same clip, before the trigger is judged to have heard the wrong
+    /// thing.
+    ///
+    /// 6 dB is a factor of two in amplitude — far outside window-to-window
+    /// noise, and far inside the gap actually measured: on IMG_6703 the
+    /// trigger fired on 17.1 dB and the bat crack in the same clip reached
+    /// 37.0, a gap of 19.9.
+    static let retriggerMarginDb = 6.0
 
     // MARK: - Bat / contact quality (Phase 3+)
 
@@ -389,6 +429,7 @@ enum SwingFlag: String, Codable, CaseIterable, Sendable {
     case scaleDisagree = "SCALE_DISAGREE"
     case depthMotion = "DEPTH_MOTION"
     case highResidual = "HIGH_RESIDUAL"
+    case contactTimeRejected = "CONTACT_TIME_REJECTED"
 
     /// Plain-language explanation shown next to a low-confidence reading.
     var explanation: String {
@@ -403,6 +444,8 @@ enum SwingFlag: String, Codable, CaseIterable, Sendable {
             return "The ball changed size through the track, so it flew toward or away from the camera. Stand more square to the line of play."
         case .highResidual:
             return "The tracked path was jittery. Likely a busy background or a partly hidden ball."
+        case .contactTimeRejected:
+            return "The trigger fired well before the ball was seen leaving the bat, so it heard something other than this hit. Contact has been taken as the first frame of the flight instead, which costs a few frames of accuracy — but it also means the bat panel is missing and the trigger is picking up something at this venue. Settings → Trigger → Calibrate."
         }
     }
 }

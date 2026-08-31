@@ -114,11 +114,7 @@ struct ValidationScoreboard {
             .map { $0 * 100 }
         board.g2Count = disagreements.count
         if !disagreements.isEmpty {
-            let sorted = disagreements.sorted()
-            let n = sorted.count
-            board.g2MedianPct = n % 2 == 1
-                ? sorted[n / 2]
-                : (sorted[n / 2 - 1] + sorted[n / 2]) / 2
+            board.g2MedianPct = Geometry.median(disagreements[...])
         }
 
         // G3 — fly balls with hand-measured hang time and carry.
@@ -151,22 +147,23 @@ struct ValidationScoreboard {
         let ident = swings.filter { $0.setting == .teeid && $0.trackedFrames > 0 }
         board.g4Count = ident.count
         if ident.count >= 3 {
-            board.g4EvSd = sampleStdDev(ident.map(\.exitVeloMph))
-            board.g4LaSd = sampleStdDev(ident.map(\.launchAngleDeg))
+            board.g4EvSd = Geometry.sampleStdDev(ident.map(\.exitVeloMph))
+            board.g4LaSd = Geometry.sampleStdDev(ident.map(\.launchAngleDeg))
         }
 
         // G5 — how often the audio trigger fired on its own.
-        board.g5Total = swings.count
-        board.g5AutoTriggered = swings.filter(\.autoTriggered).count
+        //
+        // Over the app's OWN captures only. An imported clip is stamped
+        // `autoTriggered: false` because there was no microphone in the loop at
+        // all, so counting it here scored the venue's trigger down for swings
+        // it was never present at: import five clips for detector tuning after
+        // ten clean live swings and a 100% trigger rate reads as 67%, failing a
+        // gate about hardware that did nothing wrong.
+        let ownCaptures = swings.filter { !$0.captureFlags.contains(.importedClip) }
+        board.g5Total = ownCaptures.count
+        board.g5AutoTriggered = ownCaptures.filter(\.autoTriggered).count
 
         return board
     }
 
-    /// Sample standard deviation (ddof = 1), matching `np.std(..., ddof=1)`.
-    private static func sampleStdDev(_ xs: [Double]) -> Double? {
-        guard xs.count >= 2 else { return nil }
-        let mean = xs.reduce(0, +) / Double(xs.count)
-        let ss = xs.reduce(0) { $0 + ($1 - mean) * ($1 - mean) }
-        return (ss / Double(xs.count - 1)).squareRoot()
-    }
 }

@@ -54,6 +54,10 @@ final class CaptureController: NSObject, ObservableObject {
     }
     /// Audio impulses that fired with nobody in frame and were ignored.
     @Published private(set) var suppressedTriggerCount = 0
+    /// The clip just recorded contained an impulse much louder than the one
+    /// that triggered it — so the trigger heard something that was not the
+    /// hit. Read and cleared by `AppModel` when the clip is filed.
+    @Published var lastClipHeardLouderImpulse = false
     /// Non-nil while the system holds the camera (phone call, another app).
     @Published private(set) var interruptionMessage: String?
     /// What the ball-measurement gates saw on the last tap. Shown in setup so a
@@ -69,15 +73,20 @@ final class CaptureController: NSObject, ObservableObject {
 
     /// Set while the setup overlay is on screen. Only then does the controller
     /// keep a BGRA snapshot for tap-to-measure; the armed hot path stays clean.
-    var wantsLiveMeasurement = false {
-        didSet {
-            if !wantsLiveMeasurement {
-                snapshotLock.lock()
-                latestBGRASnapshot = nil
-                snapshotLock.unlock()
-            }
+    ///
+    /// Behind `snapshotLock`: written on the main thread, read per frame on
+    /// the video queue, and both sides already take this lock for the
+    /// snapshot itself.
+    var wantsLiveMeasurement: Bool {
+        get { snapshotLock.lock(); defer { snapshotLock.unlock() }; return _wantsLiveMeasurement }
+        set {
+            snapshotLock.lock()
+            _wantsLiveMeasurement = newValue
+            if !newValue { latestBGRASnapshot = nil }
+            snapshotLock.unlock()
         }
     }
+    private var _wantsLiveMeasurement = false
 
     /// Overrides `visionOrientation` when the user pins it in Settings. The
     /// 0/90/180/270 mapping is the classic thing to get backwards, and a wrong
@@ -136,7 +145,11 @@ final class CaptureController: NSObject, ObservableObject {
     private let pipelineQueue = DispatchQueue(label: "swinglab.pipeline")
 
     private var device: AVCaptureDevice?
+    /// Guarded by `encoderLock` — written on sessionQueue during
+    /// stop/configure, read on videoQueue at 240fps. See `VideoEncoder` for
+    /// why the pointer handoff is the part that must be synchronized.
     private var encoder: VideoEncoder?
+    private let encoderLock = NSLock()
     private let videoOutput = AVCaptureVideoDataOutput()
     private let audioOutput = AVCaptureAudioDataOutput()
     private let videoRing = SampleRing(maxDuration: SLA.preRollS, keyframeAligned: true)
@@ -206,8 +219,10 @@ final class CaptureController: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        trigger.onContact = { [weak self] pts in
-            self?.pipelineQueue.async { self?.startClip(contactPTS: pts, gated: true) }
+        trigger.onContact = { [weak self] pts, db in
+            self?.pipelineQueue.async {
+                self?.startClip(contactPTS: pts, gated: true, triggerDb: db)
+            }
         }
         presenceGate.onPresenceChange = { [weak self] present in
             self?.hitterPresent = present
@@ -232,8 +247,11 @@ final class CaptureController: NSObject, ObservableObject {
             guard let self else { return }
             self.uiLock.lock()
             let db = self.pendingDb
+            // Release the peak hold: without this the meter would latch the
+            // loudest thing ever heard instead of the loudest in each tick.
+            self.pendingDb = -.infinity
             let drops = self.pendingDrops
-            let dbChanged = abs(db - self.publishedDb) >= 0.5
+            let dbChanged = db.isFinite && abs(db - self.publishedDb) >= 0.5
             let dropsChanged = drops != self.publishedDrops
             if dbChanged { self.publishedDb = db }
             if dropsChanged { self.publishedDrops = drops }
@@ -447,6 +465,12 @@ final class CaptureController: NSObject, ObservableObject {
 
     func configureAndStart() {
         setStatus(.configuring)
+        // Establish the armed invariant BEFORE the session runs. `syncArmed`
+        // used to run only from `isArmed.didSet`, which by definition has not
+        // fired on a fresh start — so the trigger sat at whatever its default
+        // was. The default has been fixed too, but the invariant should not
+        // depend on a default agreeing with a UI flag.
+        pipelineQueue.async { [weak self] in self?.syncArmed() }
         sessionQueue.async { [weak self] in
             guard let self else { return }
             // Already live (e.g. .task re-fired without a matching stop):
@@ -483,14 +507,22 @@ final class CaptureController: NSObject, ObservableObject {
         sessionQueue.async { [weak self] in
             guard let self else { return }
             if self.session.isRunning { self.session.stopRunning() }
-            self.encoder?.invalidate()
+            self.encoderLock.lock()
+            let enc = self.encoder
             self.encoder = nil
+            self.encoderLock.unlock()
+            enc?.invalidate()
             self.setStatus(.idle)
         }
         pipelineQueue.async { [weak self] in
             self?.videoRing.removeAll()
             self?.audioRing.removeAll()
             self?.recorder.cancel()
+            // cancel() kills the recording without a completion, so nothing
+            // downstream will ever clear the indicator — do it here, or a
+            // round ended during the post-roll leaves REC shown forever and
+            // the idle timer disabled off the back of it.
+            DispatchQueue.main.async { self?.isRecordingClip = false }
         }
     }
 
@@ -520,8 +552,11 @@ final class CaptureController: NSObject, ObservableObject {
         }
         for input in session.inputs { session.removeInput(input) }
         for output in session.outputs { session.removeOutput(output) }
-        encoder?.invalidate()
+        encoderLock.lock()
+        let oldEncoder = encoder
         encoder = nil
+        encoderLock.unlock()
+        oldEncoder?.invalidate()
 
         // `.inputPriority` keeps our chosen 240fps format; a preset would
         // override it.
@@ -568,7 +603,9 @@ final class CaptureController: NSObject, ObservableObject {
         enc.onEncoded = { [weak self] sb in
             self?.pipelineQueue.async { self?.handleEncoded(sb) }
         }
+        encoderLock.lock()
         encoder = enc
+        encoderLock.unlock()
 
         // Read once here rather than off the @Published `fps` in the video
         // delegate, which was a genuine data race across two queues.
@@ -732,6 +769,7 @@ final class CaptureController: NSObject, ObservableObject {
     }
 
     private func syncArmed() {
+        pipelineIsArmed = isArmed
         trigger.isArmed = isArmed && !recorder.isRecording
         if isArmed { trigger.reset() }
         let armed = isArmed
@@ -750,9 +788,24 @@ final class CaptureController: NSObject, ObservableObject {
         }
     }
 
-    private func startClip(contactPTS: CMTime, gated: Bool) {
+    /// Mirror of `isArmed` owned by `pipelineQueue`, so the recording path
+    /// can consult it without a cross-thread read of a @Published var.
+    private var pipelineIsArmed = false
+
+    /// How loud the impulse that started the current clip was, over the
+    /// rolling floor. `-infinity` for a manual clip, which had no impulse.
+    private var clipTriggerDb: Double = -.infinity
+
+    private func startClip(contactPTS: CMTime, gated: Bool,
+                           triggerDb: Double = -.infinity) {
         guard !recorder.isRecording else { return }
         guard !videoRing.isEmpty else { return }
+        // Belt and braces with the trigger's own armed flag. The flag alone
+        // proved insufficient once: it defaulted to armed and nothing synced
+        // it until the first ARM press, so the app recorded swings while the
+        // screen said it would not. An audio trigger reaching this point on an
+        // unarmed controller is a bug upstream — refuse it here regardless.
+        if gated && !pipelineIsArmed { return }
         // The no-human false trigger from field testing: a sharp noise with
         // nobody in frame. Recording it would waste a clip AND corrupt G1
         // with a clip that never contained a swing, so it is suppressed —
@@ -762,16 +815,47 @@ final class CaptureController: NSObject, ObservableObject {
             return
         }
         trigger.isArmed = false
+        clipTriggerDb = triggerDb
+        // Zeroed here so the peak measured over this clip is the peak DURING
+        // it, not one inherited from the wait before it.
+        _ = trigger.consumePeakSinceArm()
+        // Which way the buffer must turn for display, as a matrix on the
+        // file. `visionOrientationForFrames` already answers "which way is
+        // up" for the pose gate; this writes the same answer where players
+        // and the analyzer can read it.
+        let turns = VideoOrientation.quarterTurns(from: visionOrientationForFrames)
         recorder.begin(videoRing: videoRing.samples,
                        audioRing: audioRing.samples,
                        contactPTS: contactPTS,
-                       postRoll: postRollS)
+                       postRoll: postRollS,
+                       manual: !gated,
+                       displayTransform: CGAffineTransform(
+                           rotationAngle: CGFloat(turns) * .pi / 2))
         DispatchQueue.main.async { self.isRecordingClip = true }
     }
 
     private func finishClip() {
         clipCounter += 1
         let url = ClipStore.newClipURL(index: clipCounter)
+        // Was anything in this clip much louder than the thing that started
+        // it? If so the trigger did not hear the hit, and the contact time on
+        // this clip is the time of something else.
+        //
+        // The trigger is disarmed for the whole of a clip, so it cannot fire
+        // on the real crack and cannot re-centre itself — and re-centring
+        // would be the wrong fix anyway, because the loudest sound in a swing
+        // clip is not always the bat: a ball into a chain-link fence 1.2 s
+        // later can beat it, and moving contact FORWARD onto that is worse
+        // than leaving it early. So this records rather than corrects. The
+        // analyzer already recovers the reading (CONTACT_TIME_REJECTED); what
+        // this adds is the reason, at capture time, while the venue is still
+        // in front of the person who can fix it.
+        let clipPeakDb = trigger.consumePeakSinceArm()
+        let heardLouder = clipTriggerDb.isFinite && clipPeakDb.isFinite
+            && clipPeakDb >= clipTriggerDb + SLA.retriggerMarginDb
+        if heardLouder {
+            DispatchQueue.main.async { self.lastClipHeardLouderImpulse = true }
+        }
         recorder.finish(url: url) { [weak self] result in
             guard let self else { return }
             DispatchQueue.main.async {
@@ -855,12 +939,18 @@ extension CaptureController: AVCaptureVideoDataOutputSampleBufferDelegate,
             }
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             let duration = CMSampleBufferGetDuration(sampleBuffer)
-            encoder?.encode(pixelBuffer: pb, pts: pts, duration: duration)
+            encoderLock.lock()
+            let liveEncoder = encoder
+            encoderLock.unlock()
+            liveEncoder?.encode(pixelBuffer: pb, pts: pts, duration: duration)
         } else {
             trigger.process(sampleBuffer: sampleBuffer)
-            let db = trigger.lastDb
+            // Peak since the last read, not the final window of this buffer:
+            // the published level exists so calibration and the meter can see
+            // impulses, and an impulse rarely lands in the final window.
+            let db = trigger.consumePeakDb()
             uiLock.lock()
-            pendingDb = db
+            pendingDb = max(pendingDb, db)
             uiLock.unlock()
             pipelineQueue.async { [weak self] in
                 guard let self else { return }

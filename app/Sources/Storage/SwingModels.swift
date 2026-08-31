@@ -165,6 +165,11 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     /// an off-level tripod honest instead of merely absent.
     var captureFlags: [CaptureFlag] = []
 
+    /// The stage-by-stage analysis report, written for EVERY swing rather
+    /// than only for imports. It is the file that says which stage failed, and
+    /// a swing captured live is exactly the one you cannot re-run to find out.
+    var diagnosticsFilename: String?
+
     /// The round this swing belongs to, if it was taken inside one. `nil` for
     /// imported clips and for anything captured before sessions existed —
     /// those still appear in the full history, they just have no round to be

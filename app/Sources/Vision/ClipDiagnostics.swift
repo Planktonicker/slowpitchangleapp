@@ -88,6 +88,9 @@ final class ClipDiagnostics {
     /// was not moving like a barrel. Distinguishes "no tape on the bat" from
     /// "something pink stood in for one", which look identical in the result.
     var batRejectedReason: String?
+    /// Quarter turns the container asks for. Reported because a clip filmed
+    /// the other way up used to invert every angle silently.
+    var videoQuarterTurns = 0
     var poseFramesSampled = 0
     var poseFramesWithPerson = 0
     var jointSeenCount: [PoseJoint: Int] = [:]
@@ -125,6 +128,9 @@ final class ClipDiagnostics {
         if let irregular = frameIntervalIrregularFraction, irregular > 0.05 {
             out.append(String(format: "         %.0f%% of frame intervals are irregular — variable frame rate, timing is unreliable",
                               irregular * 100))
+        }
+        if videoQuarterTurns != 0 {
+            out.append("         buffer is rotated \(videoQuarterTurns * 90)° for display — angles measured after rotating")
         }
         if let elapsed = elapsedS {
             out.append(String(format: "took     %.1fs (%.0f ms per decoded frame)",
@@ -222,11 +228,22 @@ final class ClipDiagnostics {
                 "%.0f%% of the frame intervals differ from the typical one. Every timing measurement here — exit velocity above all — assumes frames arrive evenly, so this footage will read wrong by however uneven it is. Re-record rather than re-encode: a variable-rate file cannot be repaired after the fact.",
                 irregular * 100))
         }
-        // The opposite of "nothing matched", and until now it had no note at
-        // all: the report would print "21.114%" and leave the reader to know
-        // that a ball is about 0.05% of a frame. Three orders of magnitude is
-        // not a tuning nudge, it is the detector looking at scenery.
-        if let fraction = inWindowFraction, fraction > 0.02 {
+        // The opposite of "nothing matched": the report would print "21.114%"
+        // and leave the reader to know that a ball is about 0.05% of a frame.
+        // Split in two, because since the motion gate went in a wide window is
+        // no longer automatically a fault — what matters is whether it actually
+        // produced candidates.
+        //
+        // First, the width absorbed. Worth stating rather than staying silent:
+        // it is the motion gate doing the work the colour window cannot, and
+        // somebody reading a stack of these reports should be able to see that
+        // margin shrinking before it costs them a clip.
+        if let fraction = inWindowFraction, fraction > 0.02, candidatesPerFrame <= 5 {
+            out.append(String(format:
+                "%.1f%% of every frame matches the ball's colour window — wide, but only %.1f candidates a frame survived, because almost none of it was moving. The motion gate is carrying this clip; if the camera is ever hand-held or the background thrashes in wind, that margin goes and the colour window will not hold on its own. Raising the LOWER SATURATION (Settings → Ball colour) is the fix that does not depend on it.",
+                fraction * 100, candidatesPerFrame))
+        }
+        if let fraction = inWindowFraction, fraction > 0.02, candidatesPerFrame > 5 {
             out.append(String(format:
                 "%.1f%% of every frame matches the ball's colour window. A ball at this distance is a few hundredths of one percent, so the window is admitting the background wholesale — sunlit grass is the usual culprit, since it shares optic yellow's hue. Raise the LOWER SATURATION first (Settings → Ball colour): vegetation is dull where the ball is fluorescent, and that one number separates them without touching the hue at all.",
                 fraction * 100))
@@ -252,6 +269,16 @@ final class ClipDiagnostics {
         return mean / Double(width * height)
     }
 
+    /// Candidates per decoded frame. The colour window's width only matters
+    /// insofar as it produces candidates, and since the motion gate went in it
+    /// often does not: on a real clip 8% of every frame matched the window and
+    /// the detector still emitted 0.3 candidates a frame, because almost none
+    /// of that 8% was moving. Judging the window on its own width now names a
+    /// fault that is not there.
+    private var candidatesPerFrame: Double {
+        framesDecoded > 0 ? Double(totalCandidates) / Double(framesDecoded) : 0
+    }
+
     /// Name the stage that failed. The numbers above already contain this, but
     /// stating it means the report is useful to somebody who has not memorised
     /// the pipeline — which includes whoever reads it in six months.
@@ -274,10 +301,13 @@ final class ClipDiagnostics {
         // this wide everything downstream is a consequence rather than a
         // separate fault, and naming the consequence sends people tuning the
         // wrong number.
-        if let fraction = inWindowFraction, fraction > 0.05 {
+        // ...and only when it actually swamped the detector. A wide window that
+        // the motion gate absorbed is not this clip's problem, and saying it is
+        // sends somebody tuning saturation for a fault they do not have.
+        if let fraction = inWindowFraction, fraction > 0.05, candidatesPerFrame > 5 {
             return String(format:
-                "the colour window is far too wide — %.0f%% of every frame matches it, where a ball is a few hundredths of one percent. Everything after this stage is measuring background. Raise the lower saturation in Settings → Ball colour.",
-                fraction * 100)
+                "the colour window is far too wide — %.0f%% of every frame matches it, and %.0f candidates a frame are getting through. Everything after this stage is measuring background. Raise the lower saturation in Settings → Ball colour.",
+                fraction * 100, candidatesPerFrame)
         }
         if bestTrackFrames < 3 {
             return "candidates were found but never linked into a flight — they are probably not the same object frame to frame (background clutter of a similar colour)."
@@ -306,6 +336,14 @@ final class ClipDiagnostics {
                     "the longest \"flight\" lasts %.1f s. A hit ball crosses the frame in a fraction of a second, so this is a stationary object of about the right colour being tracked, not a swing — look at the colour line above: if a large share of every frame matches, the detector is following the background.",
                     trackSeconds)
             }
+        }
+
+        // Before the launch-angle plausibility line below, because it explains
+        // an implausible angle rather than being explained by one — and
+        // because this is a VENUE problem with a named fix, where most of the
+        // lines here are detection problems.
+        if flags.contains("CONTACT_TIME_REJECTED") {
+            return "the trigger fired well before the ball was seen leaving the bat, so the microphone heard something that was not this hit — and the two-second refractory window then covered the real crack. Contact has been taken from the first frame of the flight instead, so the reading stands, but the bat panel is gone and the next swing at this venue will do the same thing. Settings → Trigger → Calibrate measures what a hit here actually sounds like."
         }
 
         if flags.contains("HIGH_RESIDUAL") {

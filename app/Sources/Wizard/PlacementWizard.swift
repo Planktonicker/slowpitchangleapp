@@ -131,8 +131,14 @@ final class PlacementWizard: ObservableObject {
 
     /// Recompute scale from the plate markers. Call whenever a handle moves.
     func applyPlateMeasurement() {
+        // Per-axis: the marker positions are normalised per-axis by the view
+        // (x over width, y over height), so converting BOTH with the width
+        // overweighted any vertical component by the aspect ratio — 1.78x on
+        // 16:9 — and the plate-based scale, distance, and every flag derived
+        // from them came out wrong whenever the plate edge was not perfectly
+        // horizontal in frame.
         let dx = (plateEnd.x - plateStart.x) * imageWidthPx
-        let dy = (plateEnd.y - plateStart.y) * imageWidthPx
+        let dy = (plateEnd.y - plateStart.y) * imageHeightPx
         let separation = (dx * dx + dy * dy).squareRoot()
         guard separation > 4 else { return }
         measuredPxPerM = separation / Self.plateWidthM
@@ -142,12 +148,14 @@ final class PlacementWizard: ObservableObject {
     /// Fallback: trust a tape-measured distance and predict the scale from
     /// the lens geometry instead of measuring it.
     func applyManualDistance() {
-        guard fieldOfViewDeg > 0, manualDistanceM > 0 else { return }
-        let d = manualDistanceM
-        let halfFov = fieldOfViewDeg / 2 * .pi / 180
-        let widthAtDistanceM = 2 * d * tan(halfFov)
-        guard widthAtDistanceM > 0 else { return }
-        measuredPxPerM = imageWidthPx / widthAtDistanceM
+        // px/m at distance d is focal/d — through the parity-pinned focal
+        // model rather than an inline copy of the FOV relation, so the wizard
+        // and TiltRectifier can never disagree about the same lens (and this
+        // inherits focalPx's fov<180 guard the copy lacked).
+        guard manualDistanceM > 0 else { return }
+        let focal = TiltRectifier.focalPx(widthPx: imageWidthPx, fovDeg: fieldOfViewDeg)
+        guard focal > 0 else { return }
+        measuredPxPerM = focal / manualDistanceM
         scaleSource = .manual
         showPlateMarkers = false
     }
@@ -167,10 +175,10 @@ final class PlacementWizard: ObservableObject {
     /// value.
     var derivedDistanceM: Double? {
         if scaleSource == .manual { return manualDistanceM }
-        guard let pxPerM = measuredPxPerM, pxPerM > 0, fieldOfViewDeg > 0 else { return nil }
-        let halfFov = fieldOfViewDeg / 2 * .pi / 180
-        let widthAtDistanceM = imageWidthPx / pxPerM
-        return widthAtDistanceM / (2 * tan(halfFov))
+        guard let pxPerM = measuredPxPerM, pxPerM > 0 else { return nil }
+        let focal = TiltRectifier.focalPx(widthPx: imageWidthPx, fovDeg: fieldOfViewDeg)
+        guard focal > 0 else { return nil }
+        return focal / pxPerM
     }
 
     /// How high the lens is above the ground, solved from the hitter's feet.
@@ -224,18 +232,33 @@ final class PlacementWizard: ObservableObject {
         return m < 1.5 || m > 18
     }
 
-    /// The only hard precondition left: without a scale there is no way to turn
-    /// pixels into miles per hour, so there is nothing to record.
+    /// Nothing blocks arming any more.
     ///
-    /// Level used to gate this too. It no longer does. Roll is *corrected*
-    /// downstream in `SwingAnalyzer` — blocking on a quantity we already take
-    /// back out was self-defeating — and tilt, while genuinely uncorrectable,
-    /// degrades smoothly rather than falling off a cliff at 3°. Both are now
-    /// advisories that also flag the reading, so an off-level tripod produces
-    /// a measurement labelled for what it is instead of no measurement at all.
-    var isArmingAllowed: Bool {
-        scaleSource != .none && !isDistanceAbsurd
-    }
+    /// This gate has been shrinking as it turned out that each thing it
+    /// demanded was either corrected downstream or not used at all, and it has
+    /// now reached zero. The last item was the camera distance, and the reason
+    /// is worth writing down because it is not obvious: **the measurement does
+    /// not use it**. Exit velocity is pixels per second times metres per pixel,
+    /// and the metres per pixel come from the ball's own apparent diameter in
+    /// the flight frames — `analyze_track` computes it from the track and
+    /// hands it to the gravity solve as `scale_hint`. Nothing in `ClipAnalyzer`
+    /// reads the placement distance at all.
+    ///
+    /// So the app was refusing to record a swing it could measure perfectly,
+    /// pending a number it would then ignore. What the distance is genuinely
+    /// worth is the sound-travel correction on contact time (three frames at
+    /// 240fps) and a lens-height estimate. Both are improvements, neither is a
+    /// precondition, and the record says which swings were taken without them.
+    ///
+    /// Level went the same way earlier: roll is corrected downstream in
+    /// `SwingAnalyzer` — blocking on a quantity we already take back out was
+    /// self-defeating — and tilt is rectified, degrading smoothly rather than
+    /// falling off a cliff at 3 degrees.
+    var isArmingAllowed: Bool { true }
+
+    /// True when the swing about to be recorded will be missing something the
+    /// app could otherwise have had. Not a blocker — a caption.
+    var isMissingDistance: Bool { scaleSource == .none || isDistanceAbsurd }
 
     // MARK: - Tilt
 
@@ -253,18 +276,28 @@ final class PlacementWizard: ObservableObject {
     }
 
     /// Severity of an advisory, so the UI can colour it.
-    enum AdviceLevel { case blocking, warning }
+    ///
+    /// There is no `.blocking` any more, and the removal is the point: nothing
+    /// blocks arming, so a severity meaning "this stops you" could only ever
+    /// be painted next to a button that was not in fact stopped. It survived
+    /// the gate it belonged to, and the two advisories still carrying it were
+    /// the ones about camera distance — drawn in warning red, at the top of
+    /// the list, above genuine warnings, under a fully enabled ARM.
+    ///
+    /// `.info` is for what was skipped rather than what is wrong. Sorting
+    /// warnings ahead of it is what makes `topAdvisory` — the single line the
+    /// primary button gets — the worst thing true rather than the first.
+    enum AdviceLevel { case warning, info }
 
     /// Everything worth telling the user about the current placement, worst
-    /// first. Replaces `blockingReason`: most of these no longer block.
+    /// first. Replaces `blockingReason`: none of these block any more.
     var advisories: [(level: AdviceLevel, text: String)] {
         var out: [(AdviceLevel, String)] = []
 
-        if scaleSource == .none {
-            out.append((.blocking, "Tap the ball in the picture to set the distance."))
-        }
+        // Absurd is a warning, not merely missing: the number is non-nil, so
+        // it is still handed to the sound-travel correction as if it were real.
         if isDistanceAbsurd, let m = derivedDistanceM {
-            out.append((.blocking, String(format: "Camera reads %.1f m away — that can't be right. Re-measure.", m)))
+            out.append((.warning, String(format: "Camera reads %.1f m away — that can't be right. Tap the ball again in Set up.", m)))
         }
 
         if !level.isAvailable || !level.hasReading {
@@ -290,6 +323,15 @@ final class PlacementWizard: ObservableObject {
         if scaleSource != .none, !isDistanceAbsurd, !isDistanceAcceptable,
            let m = derivedDistanceM {
             out.append((.warning, String(format: "Camera reads %.1f m away. 4.5–6 m is ideal.", m)))
+        }
+
+        // Said out loud, because arming no longer requires it and the app
+        // otherwise gives no sign anything was skipped. `.info` on purpose:
+        // the swing will still be measured — the scale comes from the ball's
+        // own diameter — and dressing a missing nicety as a warning is how
+        // people learn to skip past the warnings that matter.
+        if scaleSource == .none {
+            out.append((.info, "No camera distance yet — tap the ball in Set up. Not required: it buys a 3-frame contact correction and a lens-height check."))
         }
 
         // Height last, because it is the one the user can least often fix —
@@ -323,7 +365,17 @@ final class PlacementWizard: ObservableObject {
             }
             if !level.isRollOK { out.append(.notLevel) }
         }
-        if !isDistanceAcceptable { out.append(.distanceOutsideProtocol) }
+        // "Never measured" and "measured, and it was too far" are different
+        // facts, and only one of them is a claim about where the camera was.
+        // `isDistanceAcceptable` is false in both cases — it returns false for
+        // a nil distance — so stamping DISTANCE_OUTSIDE_PROTOCOL off it alone
+        // told every hitter who skipped the ball tap that their camera had been
+        // outside a window nobody ever put a tape measure to.
+        if derivedDistanceM == nil {
+            out.append(.distanceNotMeasured)
+        } else if !isDistanceAcceptable {
+            out.append(.distanceOutsideProtocol)
+        }
         if scaleSource == .manual { out.append(.scaleFromManualDistance) }
         if isLensHeightOK == false { out.append(.cameraHeightOffProtocol) }
         return out
@@ -350,7 +402,13 @@ final class PlacementWizard: ObservableObject {
 
     var placement: Placement {
         Placement(distanceM: derivedDistanceM,
-                  heightM: nil,
+                  // The lens height the ball tap, the IMU and the hitter's feet
+                  // between them close out. This was hardcoded nil, so the one
+                  // number the outline guide was replaced with reached no swing
+                  // record ever written — while the same wizard state was
+                  // simultaneously stamping CAMERA_HEIGHT_OFF_PROTOCOL computed
+                  // from the estimate the record refused to carry.
+                  heightM: lensHeightEstimateM,
                   // Both angles are handed to the analyzer to be corrected,
                   // not merely reported.
                   rollDeg: level.rollDeg,

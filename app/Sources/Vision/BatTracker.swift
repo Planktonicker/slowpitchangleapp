@@ -76,31 +76,13 @@ enum BatTracker {
         let w = r.x1 - r.x0, h = r.y1 - r.y0
         guard w > 2, h > 2 else { return nil }
 
-        var mask = [UInt8](repeating: 0, count: w * h)
-        for yy in 0..<h {
-            let iy = r.y0 + yy
-            for xx in 0..<w {
-                let p = image.pixel(x: r.x0 + xx, y: iy)
-                if HSVConvert.inRange(b: p.b, g: p.g, r: p.r,
-                                      lo: settings.hsvLo, hi: settings.hsvHi) {
-                    mask[yy * w + xx] = 255
-                }
-            }
-        }
-        Morphology.open(&mask, width: w, height: h)
-        Morphology.close(&mask, width: w, height: h)
-
-        // After the morphology, like the ball's gate, so an already-cut blob is
-        // never opened and closed into a different shape.
-        if let motion, motion.count == image.width * image.height {
-            for yy in 0..<h {
-                let motionRow = (r.y0 + yy) * image.width + r.x0
-                let maskRow = yy * w
-                for xx in 0..<w where !motion[motionRow + xx] {
-                    mask[maskRow + xx] = 0
-                }
-            }
-        }
+        // The shared mask stage — same threshold, same morphology, same
+        // gate-after-morphology ordering as the ball, from one function
+        // instead of a hand-rolled copy that could drift.
+        let mask = BallDetector.maskAfterMorphology(image: image, roi: r,
+                                                    lo: settings.hsvLo,
+                                                    hi: settings.hsvHi,
+                                                    motion: motion)
 
         let blobs = ConnectedComponents.label(mask: mask, width: w, height: h)
         var best: ConnectedComponents.Blob?

@@ -19,10 +19,11 @@ import SwiftUI
 struct StartView: View {
     @EnvironmentObject private var model: AppModel
     @State private var mode: SessionMode = .live
-    @State private var showSwings = false
-    @State private var showSettings = false
-    @State private var showTrends = false
-    @State private var showValidation = false
+    enum StartSheet: String, Identifiable {
+        case swings, settings, trends, rounds
+        var id: String { rawValue }
+    }
+    @State private var sheet: StartSheet?
 
     var body: some View {
         NavigationStack {
@@ -49,7 +50,7 @@ struct StartView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showSettings = true } label: {
+                    Button { sheet = .settings } label: {
                         Image(systemName: "gearshape").foregroundStyle(Theme.steel)
                     }
                 }
@@ -57,10 +58,22 @@ struct StartView: View {
             // No NavigationStack wrappers: each of these already carries one,
             // and nesting them gives two title bars and a back button that
             // goes nowhere.
-            .sheet(isPresented: $showSwings) { HistoryView() }
-            .sheet(isPresented: $showSettings) { SettingsView() }
-            .sheet(isPresented: $showTrends) { TrendsView() }
-            .sheet(isPresented: $showValidation) { ValidationView() }
+            // ONE sheet modifier. Stacking four on a view is not something
+            // SwiftUI reliably honours — the later ones win and the earlier
+            // ones silently do nothing, which presents as a button that does
+            // not respond and nothing in the code to explain it.
+            //
+            // `isModal` on the first three: presented as sheets there is no tab
+            // bar to leave by, and these screens had no Done button of their
+            // own — a swipe-down was the only way out and nothing said so.
+            .sheet(item: $sheet) { which in
+                switch which {
+                case .swings:     HistoryView(isModal: true)
+                case .settings:   SettingsView(isModal: true)
+                case .trends:     TrendsView(isModal: true)
+                case .rounds:     RoundsView()
+                }
+            }
         }
         .tint(Theme.yellow)
     }
@@ -115,7 +128,7 @@ struct StartView: View {
         VStack(spacing: 10) {
             Button("Start session") { model.startSession(mode: mode) }
                 .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 20))
-            Text("Next: frame the hitter and tap the ball once. The camera does not start until then.")
+            Text("Next: frame the hitter and tap the ball once. The camera does not start until then. To carry on with a round you already started, use Past rounds.")
                 .font(.caption)
                 .foregroundStyle(Theme.steel)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -123,7 +136,7 @@ struct StartView: View {
     }
 
     private var library: some View {
-        Button { showSwings = true } label: {
+        Button { sheet = .swings } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(model.swings.isEmpty
@@ -145,14 +158,15 @@ struct StartView: View {
         .buttonStyle(.plain)
     }
 
-    /// Trends and Validation, which are things you read BETWEEN rounds. They
-    /// used to be tabs, which put them one tap from a hitter mid-session and
-    /// four taps of clutter around the two screens that matter there.
+    /// Your own numbers over time — the one thing on this screen that is about
+    /// hitting rather than about the app. Validation is not here: it is a
+    /// go/no-go scoreboard for the measurement gates, which belongs with the
+    /// rest of the specialist screens under Settings.
     private var betweenSessions: some View {
         HStack(spacing: 12) {
-            Button("Trends") { showTrends = true }
+            Button("Past rounds") { sheet = .rounds }
                 .buttonStyle(OutlineButtonStyle())
-            Button("Validation") { showValidation = true }
+            Button("Trends") { sheet = .trends }
                 .buttonStyle(OutlineButtonStyle())
         }
     }

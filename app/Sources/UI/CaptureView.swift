@@ -69,7 +69,11 @@ struct CaptureScreen: View {
         if capture.isArmed { return .armed }
         if model.analysisProgress != nil { return .analysing }
         if capture.status != .running { return .starting }
-        if wizard.scaleSource == .none { return .needsSetup }
+        // Setup is no longer a precondition — see `isArmingAllowed`. The
+        // measurement takes its scale from the ball's own diameter in flight,
+        // so a camera that is running can record a swing it can measure. The
+        // primary button says ARM from the moment there is a picture, and
+        // setting the distance is the small button beside it.
         return .ready
     }
 
@@ -215,7 +219,7 @@ struct CaptureScreen: View {
                     .padding(.bottom, 6)
                 }
 
-                if hudState != .starting && hudState != .needsSetup {
+                if hudState != .starting {
                     SeamMeter(db: capture.triggerLevelDb,
                               thresholdDb: model.settings.triggerDb)
                         .padding(.horizontal, 16)
@@ -284,20 +288,19 @@ struct CaptureScreen: View {
         return "\(n) swing\(n == 1 ? "" : "s") this round"
     }
 
-    /// Ending the round is deliberately not a big slab and deliberately not
-    /// hidden. It sits under the primary action, at text weight: nobody needs
-    /// to find it in a hurry, and nothing goes wrong if it is missed — but a
-    /// round that cannot be finished is a round that never gets collated, and
-    /// the collation is the point.
+    /// Ending the round has to be findable, and grey text under a yellow slab
+    /// was not: it read as a caption rather than a control, and on a landscape
+    /// phone it sat at the very bottom of a busy screen. An outlined button is
+    /// still clearly secondary to ARM and is unmistakably a button.
+    ///
+    /// It is not the only way out — "This round" carries the same action, which
+    /// is the one place that cannot be covered by the setup overlay.
     private var endSessionButton: some View {
-        Button {
-            model.endSession()
-        } label: {
-            Text("End session")
+        Button { model.endSession() } label: {
+            Label("End round", systemImage: "flag.checkered")
                 .font(Theme.label(12)).tracking(1)
         }
-        .foregroundStyle(Theme.steel)
-        .padding(.top, 2)
+        .buttonStyle(OutlineButtonStyle(verticalPadding: 7, cornerRadius: 10))
     }
 
     private var actionCluster: some View {
@@ -332,9 +335,6 @@ struct CaptureScreen: View {
         case .interrupted:
             Button { model.startCapture() } label: { Text("Retry") }
                 .buttonStyle(SlabButtonStyle(size: 17, verticalPadding: 0, minHeight: Self.controlHeight))
-        case .needsSetup:
-            Button { openSetup() } label: { Text("1 · Set up camera") }
-                .buttonStyle(SlabButtonStyle(size: 15, verticalPadding: 0, minHeight: Self.controlHeight))
         case .ready:
             Button { model.arm() } label: { Text("2 · Arm") }
                 .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 0, minHeight: Self.controlHeight))
@@ -357,7 +357,7 @@ struct CaptureScreen: View {
 
     private var contextAction: (symbol: String, caption: String, disabled: Bool, action: () -> Void)? {
         switch hudState {
-        case .starting, .needsSetup, .interrupted:
+        case .starting, .interrupted:
             return nil   // exactly one control when there is exactly one thing to do
         case .ready:
             // No FRAME button here. Setup has a permanent home in the ribbon,
@@ -377,7 +377,6 @@ struct CaptureScreen: View {
     private var bugLabel: String {
         switch hudState {
         case .ready: return "Metres"
-        case .needsSetup: return ""
         case .analysing: return "Percent"
         default: return "Status"
         }
@@ -385,10 +384,6 @@ struct CaptureScreen: View {
 
     private var bugValue: String {
         switch hudState {
-        case .needsSetup:
-            // Short and imperative. The full advisory is long and turned the
-            // bug into a paragraph, which is not what a glanceable readout is.
-            return "Tap the ball"
         case .ready:
             if let m = wizard.derivedDistanceM { return String(format: "%.1f", m) }
             return "SET"
@@ -429,7 +424,13 @@ struct CaptureScreen: View {
             out.append(("\(capture.suppressedTriggerCount) ignored",
                         "bolt.slash.fill", Theme.warn))
         }
-        if model.settings.requireHitter, capture.isArmed, !capture.hitterPresent {
+        // Two different states, and conflating them is what let an empty room
+        // get recorded: "armed, looking, nobody there yet" is normal, and
+        // "not looking at all" is a thing the owner needs to see, because they
+        // set a switch that says otherwise.
+        if model.hitterCheckIsOff, capture.isArmed {
+            out.append(("Hitter check OFF", "person.slash.fill", Theme.fail))
+        } else if model.settings.requireHitter, capture.isArmed, !capture.hitterPresent {
             out.append(("No hitter", "person.slash.fill", Theme.warn))
         }
         if capture.status == .running, capture.fps < SLA.targetFPS - 1 {
@@ -624,13 +625,17 @@ struct CaptureScreen: View {
         // Self-limiting: once a ball has been measured `scaleSource` is no
         // longer `.none`, so this stops firing and coming back to the tab does
         // not reopen it.
-        if wizard.scaleSource == .none, !didAutoOpenSetup {
+        // First run only. Opening setup on every round because no distance was
+        // set would now be opening it every round forever, since a distance is
+        // no longer something the app needs.
+        if !model.settings.hasCompletedFirstSetup, !didAutoOpenSetup {
             didAutoOpenSetup = true
             openSetup()
         }
     }
 
     private func openSetup() {
+        model.settings.hasCompletedFirstSetup = true
         showSetup = true
         capture.wantsSkeleton = true
         syncLiveMeasurement()
@@ -723,7 +728,7 @@ struct StatusSheet: View {
                     ForEach(wizard.advisories.indices, id: \.self) { i in
                         Text(wizard.advisories[i].text)
                             .font(.caption)
-                            .foregroundStyle(wizard.advisories[i].level == .blocking
+                            .foregroundStyle(wizard.advisories[i].level == .warning
                                              ? Theme.warn : .secondary)
                     }
                 }

@@ -80,7 +80,7 @@ def main():
     ap.add_argument("--json", help="also write metrics as JSON to this path")
     ap.add_argument("--flyball", action="store_true", help="enable physics cross-check")
     ap.add_argument("--hang", type=float, help="stopwatch hang time [s] (flyball mode)")
-    ap.add_argument("--carry-m", type=float, help="paced-off carry distance [ft] (flyball mode)")
+    ap.add_argument("--carry-m", type=float, help="paced-off carry distance in METRES (flyball mode)")
     args = ap.parse_args()
 
     track, meta = sla.read_track_csv(args.csv)
@@ -112,8 +112,13 @@ def main():
         # comparisons go through the drag model, never vacuum formulas.
         print("  -- fly-ball physics cross-check (G3) --")
         carry_m, hang_s, apex_m = sla.simulate_flight(metrics.exit_velo_mps, metrics.launch_angle_deg)
-        print(f"  drag model from video LA/EV: carry {carry_m*FT_PER_M:.0f} ft, "
-              f"hang {hang_s:.2f} s, apex {apex_m*FT_PER_M:.0f} ft")
+        # Metres, matching every other number this tool prints and the units
+        # --carry-m is compared in. The old line multiplied by FT_PER_M — a
+        # constant that never existed anywhere in the repo, so the whole G3
+        # cross-check died with a NameError the first time flyball mode ran
+        # (f-strings resolve names at run time, not definition time).
+        print(f"  drag model from video LA/EV: carry {carry_m:.1f} m, "
+              f"hang {hang_s:.2f} s, apex {apex_m:.1f} m")
         if args.hang:
             diff = (hang_s - args.hang) / args.hang * 100
             print(f"  hang: model {hang_s:.2f} s vs stopwatch {args.hang:.2f} s ({diff:+.1f}%)"

@@ -66,6 +66,17 @@ struct TrackReviewView: View {
     @State private var horizonFraction: Double?
     @State private var showHorizonTool = false
     @State private var pickingBall = false
+    /// Playback rate. Not a preference so much as the point of the screen:
+    /// this is 240fps footage of an event that lasts a tenth of a second, and
+    /// at 1x the whole flight is over in about the time it takes to look up.
+    @State private var speed: Float = 0.25
+    /// Set when THIS screen asked for a re-measure, so the record landing back
+    /// in the store closes the screen rather than merely redrawing it.
+    ///
+    /// Scoped to a re-analysis this screen started, not to any change in the
+    /// store: a swing captured on another screen while this one is open must
+    /// not close it.
+    @State private var closeOnReanalysis = false
 
     var body: some View {
         NavigationStack {
@@ -88,6 +99,20 @@ struct TrackReviewView: View {
             guard let fresh = swings.first(where: { $0.id == swing.id }),
                   fresh != swing else { return }
             swing = fresh
+            // Back to the swing, where the new numbers are.
+            //
+            // This screen used to stay open on the grounds that the point of
+            // the tap is to see whether it found the ball. It is — but the
+            // swing screen answers that better than the overlay does: it shows
+            // the launch angle and exit velocity that came out, and the flags
+            // on them, and it is where someone re-measuring wanted to end up
+            // anyway. Staying put made the review screen a place you had to
+            // press Done to leave every time you corrected something.
+            if closeOnReanalysis {
+                closeOnReanalysis = false
+                dismiss()
+                return
+            }
             Task { await load() }
         }
         .onDisappear {
@@ -315,12 +340,14 @@ struct TrackReviewView: View {
         updated.ballSeedX = x
         updated.ballSeedY = y
         model.update(updated)
+        closeOnReanalysis = true
         model.reanalyze(updated)
         pickingBall = false
-        // Deliberately NOT dismissing: the whole point of the tap is to see
-        // whether it found the ball, and re-analysis runs asynchronously. The
-        // onChange above swaps in the new record and re-reads the rewritten
-        // track files, so the answer appears on this screen.
+        // Closing happens in the `onChange` above, when the re-measured record
+        // actually lands — not here. A re-analysis that fails (no ball at the
+        // seed) never replaces the record, and the right thing then is to stay
+        // put with the banner explaining why, so the next tap can be aimed
+        // better.
     }
 
     // MARK: - Horizon
@@ -438,11 +465,11 @@ struct TrackReviewView: View {
         updated.cameraTiltDeg = tilt
         updated.cameraFovDeg = swing.cameraFovDeg ?? model.settings.importFovDeg
         model.update(updated)
+        closeOnReanalysis = true
         model.reanalyze(updated)
         showHorizonTool = false
         horizonFraction = nil
-        // Same reasoning as the ball tap: stay open so the corrected
-        // measurement lands where it can be checked.
+        // Same as the ball tap: the close happens when the record lands.
     }
 
     // MARK: - Controls
@@ -464,8 +491,23 @@ struct TrackReviewView: View {
             HStack(spacing: 20) {
                 stepButton("backward.frame.fill", frames: -1)
                 Button {
-                    if player?.timeControlStatus == .playing { player?.pause() }
-                    else { player?.play() }
+                    guard let player else { return }
+                    if player.timeControlStatus == .playing {
+                        player.pause()
+                    } else {
+                        // At the end, play() without a seek is a silent no-op
+                        // — routine on a screen whose clips run under two
+                        // seconds, and it read as a dead button. Rewind first.
+                        let now = player.currentTime().seconds
+                        // `rate`, not `play()`: play() always resumes at 1x and
+                        // would silently throw the chosen speed away.
+                        if durationS > 0, now >= durationS - 0.02 {
+                            player.seek(to: .zero, toleranceBefore: .zero,
+                                        toleranceAfter: .zero) { _ in player.rate = speed }
+                        } else {
+                            player.rate = speed
+                        }
+                    }
                 } label: {
                     Image(systemName: player?.timeControlStatus == .playing
                           ? "pause.fill" : "play.fill")
@@ -475,6 +517,8 @@ struct TrackReviewView: View {
                 stepButton("forward.frame.fill", frames: 1)
             }
             .foregroundStyle(Theme.yellow)
+
+            speedRow
 
             if showHorizonTool {
                 horizonBar
@@ -503,62 +547,86 @@ struct TrackReviewView: View {
                 }
             }
 
-            if !pickingBall, !showHorizonTool, !model.isAnalyzing {
-                Button {
-                    pickingBall = true
-                    // Candidates ON: these amber rings are the only things a
-                    // tap can land on, so aiming at one instead of at the
-                    // ball's own pixels is the difference between the seed
-                    // working and finding nothing.
-                    showRejects = true
-                    showDiagnosticLayers = true
-                    player?.pause()
-                } label: {
-                    Label(swing.ballSeedT == nil
-                          ? "Wrong thing tracked? Point at the ball"
-                          : "Ball picked by hand — point again",
-                          systemImage: "hand.tap")
-                        .font(.callout)
-                }
-                .foregroundStyle(Theme.pass)
-            }
-
-            if pickingBall {
-                VStack(spacing: 6) {
-                    Text("Scrub to a frame where you can see the ball, then tap it — aim for the amber ring on it. If the ball has no ring on any frame it was never detected, which is a colour or size problem rather than a tracking one.")
-                        .font(.caption).foregroundStyle(Theme.steel)
-                        .multilineTextAlignment(.center)
-                    Button("Cancel") { pickingBall = false }
-                        .buttonStyle(OutlineButtonStyle())
-                }
-            }
-
-            if !showHorizonTool, !pickingBall {
-                Button {
-                    showHorizonTool = true
-                    // Seeded from whatever tilt the swing already carries, so
-                    // opening the tool on a corrected clip shows where the
-                    // current answer puts the horizon rather than resetting it.
-                    if let vHalf = displayedVerticalHalfDeg {
-                        horizonFraction = CameraPose.horizonFraction(
-                            tiltDeg: swing.cameraTiltDeg ?? 0,
-                            visibleVerticalHalfAngleDeg: vHalf) ?? 0.5
-                    } else {
-                        horizonFraction = 0.5
-                    }
-                } label: {
-                    Label(swing.cameraTiltDeg == nil
-                          ? "Camera wasn't level? Set the horizon"
-                          : String(format: "Tilt %.1f° — set the horizon again",
-                                   swing.cameraTiltDeg ?? 0),
-                          systemImage: "level")
-                        .font(.callout)
-                }
-                .foregroundStyle(Theme.pass)
-            }
+            correctionTools
         }
         .padding(14)
         .background(Theme.surface)
+    }
+
+    // MARK: - Corrections
+
+    /// The two things that change the measurement, kept apart from the six
+    /// that only change what is drawn.
+    ///
+    /// They used to be two full-width sentences stacked under the layer chips
+    /// — "Wrong thing tracked? Point at the ball", "Camera wasn't level? Set
+    /// the horizon" — in the same tint, the same rail, the same visual weight
+    /// as "Ball", "Path", "Body", "Bat". Nothing said that six of those are
+    /// view options you can flip all day and two of them re-run the pipeline
+    /// and overwrite the reading. A divider and a heading say it; two short
+    /// buttons on one row stop them reading as prose.
+    @ViewBuilder private var correctionTools: some View {
+        if pickingBall {
+            VStack(spacing: 8) {
+                Text("Scrub to a frame where you can see the ball, then tap it — aim for the amber ring on it. If the ball has no ring on any frame it was never detected, which is a colour or size problem rather than a tracking one.")
+                    .font(.caption).foregroundStyle(Theme.steel)
+                    .multilineTextAlignment(.center)
+                Button("Cancel") { pickingBall = false }
+                    .buttonStyle(OutlineButtonStyle())
+            }
+        } else if !showHorizonTool {
+            VStack(spacing: 8) {
+                Divider().overlay(Theme.steel.opacity(0.4))
+                Text("CORRECT THE MEASUREMENT")
+                    .font(Theme.label(10)).foregroundStyle(Theme.steel)
+                HStack(spacing: 10) {
+                    Button {
+                        pickingBall = true
+                        // Candidates ON: these amber rings are the only things
+                        // a tap can land on, so aiming at one instead of at the
+                        // ball's own pixels is the difference between the seed
+                        // working and finding nothing.
+                        showRejects = true
+                        showDiagnosticLayers = true
+                        player?.pause()
+                    } label: {
+                        Label(swing.ballSeedT == nil ? "Point at ball" : "Ball picked",
+                              systemImage: "hand.tap")
+                            .font(.callout)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(OutlineButtonStyle())
+                    .disabled(model.isAnalyzing)
+
+                    Button {
+                        showHorizonTool = true
+                        // Seeded from whatever tilt the swing already carries,
+                        // so opening the tool on a corrected clip shows where
+                        // the current answer puts the horizon rather than
+                        // resetting it.
+                        if let vHalf = displayedVerticalHalfDeg {
+                            horizonFraction = CameraPose.horizonFraction(
+                                tiltDeg: swing.cameraTiltDeg ?? 0,
+                                visibleVerticalHalfAngleDeg: vHalf) ?? 0.5
+                        } else {
+                            horizonFraction = 0.5
+                        }
+                    } label: {
+                        Label(swing.cameraTiltDeg == nil
+                              ? "Set horizon"
+                              : String(format: "Tilt %.1f°", swing.cameraTiltDeg ?? 0),
+                              systemImage: "level")
+                            .font(.callout)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(OutlineButtonStyle())
+                    .disabled(model.isAnalyzing)
+                }
+                // The sentence the two buttons used to carry each, said once.
+                Text("Both re-run the measurement and replace this reading.")
+                    .font(.caption2).foregroundStyle(Theme.steel)
+            }
+        }
     }
 
     /// What is true at this instant, in words, beside the picture showing it.
@@ -683,6 +751,48 @@ struct TrackReviewView: View {
             Image(systemName: symbol).font(.system(size: 19, weight: .semibold))
                 .frame(width: 44, height: 40)
         }
+    }
+
+    /// Playback speed, defaulting to quarter rate.
+    ///
+    /// Defaulting BELOW 1x on purpose. Every other player defaults to real
+    /// time because real time is what its content was shot at; this one is
+    /// showing 240fps footage of a contact that lasts a few milliseconds, and
+    /// at 1x the ball crosses the frame in under a fifth of a second — which
+    /// is why the frame-step buttons beside this existed and were the only way
+    /// to see anything. They still do the fine work; this is for watching the
+    /// flight as a flight.
+    private var speedRow: some View {
+        HStack(spacing: 8) {
+            Text("SPEED")
+                .font(Theme.label(10)).foregroundStyle(Theme.steel)
+            ForEach(Self.speeds, id: \.self) { s in
+                Button {
+                    speed = s
+                    // Applied live, so changing speed mid-playback does not
+                    // mean stopping and starting again.
+                    if player?.timeControlStatus == .playing { player?.rate = s }
+                } label: {
+                    Text(Self.speedLabel(s))
+                        .font(Theme.label(11)).tracking(1.1)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(speed == s ? Theme.yellow.opacity(0.25) : .clear,
+                                    in: Capsule())
+                        .overlay(Capsule().strokeBorder(
+                            speed == s ? Theme.yellow : Theme.steel.opacity(0.5), lineWidth: 1.5))
+                        .foregroundStyle(speed == s ? Theme.yellow : Theme.steel)
+                }
+            }
+        }
+    }
+
+    /// No faster than 1x. Above real time nothing on this screen is legible,
+    /// and a control offering a setting that cannot be read is a control that
+    /// only ever gets pressed once.
+    private static let speeds: [Float] = [0.1, 0.25, 0.5, 1.0]
+
+    private static func speedLabel(_ s: Float) -> String {
+        s == 1.0 ? "1×" : String(format: "%g×", Double(s))
     }
 
     private func toggleChip(_ title: String, isOn: Binding<Bool>, colour: Color) -> some View {

@@ -27,10 +27,28 @@ struct SwingDetailView: View {
     /// encoded-buffer space over a picture the player has already turned — see
     /// `VideoOverlayGeometry`.
     @State private var videoTransform: CGAffineTransform = .identity
-    @State private var hangText = ""
-    @State private var carryText = ""
-    @State private var shareURLs: [URL] = []
-    @State private var showShare = false
+    // Optional Doubles bound with .number formatting, NOT strings parsed with
+    // Double(String): the decimal pad produces a comma in most non-US locales,
+    // Double("1,5") is nil, and Save silently wiped previously saved ground
+    // truth with no error either way.
+    @State private var hangEntry: Double?
+    @State private var carryEntry: Double?
+    /// What is on top, if anything. One optional instead of three booleans —
+    /// see the note on the `.sheet` modifier.
+    enum DetailSheet: Identifiable {
+        case share([URL])
+        case note(SwingRead.Note)
+        case report(String)
+
+        var id: String {
+            switch self {
+            case .share(let urls): return "share:" + urls.map(\.lastPathComponent).joined(separator: ",")
+            case .note(let n):     return "note:" + n.id
+            case .report:          return "report"
+            }
+        }
+    }
+    @State private var sheet: DetailSheet?
     @State private var showDetail = false
     @State private var exporting: Double?
     @State private var exportError: String?
@@ -61,7 +79,12 @@ struct SwingDetailView: View {
                 }
                 .tint(Theme.steel)
             }
-            Section { actions }
+            if model.isInSession { Section("Round") { roundMembership } }
+            Section {
+                actions
+            } footer: {
+                Text("\"Export everything\" is the clip, ball track, pose track, the detector's full candidate trace and the stage-by-stage report — the whole evidence set for one swing. The track CSV is the format analyze_swing.py reads, so a suspicious reading can be re-run on the Mac against the reference implementation.")
+            }
         }
         .navigationTitle(swing.clipFilename ?? "Swing")
         .navigationBarTitleDisplayMode(.inline)
@@ -76,7 +99,25 @@ struct SwingDetailView: View {
             swing = fresh
             Task { await load() }
         }
-        .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }
+        // ONE sheet modifier, switching on what to show.
+        //
+        // There were three stacked on this view — share, body note, report —
+        // and SwiftUI does not reliably honour that: the later ones win and the
+        // earlier ones silently do nothing. Share was first, so adding the
+        // body-note card broke "Export everything for this swing" without
+        // touching a line of it. The button ran, the files were found, and no
+        // sheet ever appeared.
+        .sheet(item: $sheet) { which in
+            switch which {
+            case .share(let urls):
+                ShareSheet(items: urls)
+            case .note(let note):
+                BodyNoteCard(note: note) { sheet = nil }
+            case .report(let text):
+                DiagnosticsView(report: text,
+                                clipURL: swing.clipFilename.map { ClipStore.clipURL(named: $0) })
+            }
+        }
         .fullScreenCover(isPresented: $showReview) { TrackReviewView(swing: swing) }
     }
 
@@ -295,23 +336,38 @@ struct SwingDetailView: View {
             // this camera cannot see. A hitter cannot act on "stride 41 cm";
             // they can act on what a stride the hips did not follow means.
             ForEach(SwingRead.body(body)) { note in
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
-                        Text(note.title)
-                            .font(.system(size: 15, weight: .bold, design: .rounded))
-                            .foregroundStyle(.white)
-                        if note.isConvention {
-                            Text("COACHING")
-                                .font(Theme.label(8)).tracking(0.8)
-                                .padding(.horizontal, 5).padding(.vertical, 2)
-                                .background(Theme.surface, in: Capsule())
-                                .foregroundStyle(Theme.steel)
+                Button { sheet = .note(note) } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack(spacing: 6) {
+                            Text(note.title)
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(.white)
+                            if note.isConvention {
+                                Text("COACHING")
+                                    .font(Theme.label(8)).tracking(0.8)
+                                    .padding(.horizontal, 5).padding(.vertical, 2)
+                                    .background(Theme.surface, in: Capsule())
+                                    .foregroundStyle(Theme.steel)
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "info.circle")
+                                .font(.caption).foregroundStyle(Theme.steel)
                         }
+                        // Two lines here, all of it in the card. The list was
+                        // cutting explanations mid-sentence — "A long stride
+                        // the hips do not fol…" — which is worse than not
+                        // showing them, because a truncated reason reads as a
+                        // complete one that stopped making sense.
+                        Text(note.text)
+                            .font(.callout).foregroundStyle(Theme.steel)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
                     }
-                    Text(note.text).font(.callout).foregroundStyle(Theme.steel)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 2)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 2)
+                .buttonStyle(.plain)
             }
             Text("Anything marked COACHING is convention or physics, not something this app measured you against — there are no published slow-pitch norms to score a swing on. What these are genuinely good for is watching your own numbers move.")
                 .font(.caption2).foregroundStyle(Theme.steel.opacity(0.85))
@@ -418,7 +474,7 @@ struct SwingDetailView: View {
             HStack {
                 Text("Hang time")
                 Spacer()
-                TextField("s", text: $hangText)
+                TextField("s", value: $hangEntry, format: .number.precision(.fractionLength(0...2)))
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 80)
@@ -426,7 +482,7 @@ struct SwingDetailView: View {
             HStack {
                 Text("Carry, paced off")
                 Spacer()
-                TextField("m", text: $carryText)
+                TextField("m", value: $carryEntry, format: .number.precision(.fractionLength(0...1)))
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 80)
@@ -488,48 +544,88 @@ struct SwingDetailView: View {
         }
     }
 
-    private var actions: some View {
-        VStack(spacing: 10) {
+    /// Whether this swing counts toward the round in progress.
+    ///
+    /// A round is a grouping the hitter makes, not a fact about the footage —
+    /// so it has to be editable. Without this the only way to fix a swing that
+    /// landed in the wrong round, or in none, was to delete it and re-import.
+    @ViewBuilder private var roundMembership: some View {
+        if swing.sessionID == model.session?.id {
+            HStack {
+                Label("In this round", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(Theme.pass)
+                Spacer()
+                // `.borderless`, or the whole row becomes this button's tap
+                // target and merely looking at the row removes the swing.
+                Button("Remove") { model.removeFromSession(swing) }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Theme.steel)
+            }
+            .font(.callout)
+        } else {
             Button {
-                model.reanalyze(swing)
+                model.addToCurrentSession(swing)
             } label: {
-                Label("Re-analyze with current settings", systemImage: "arrow.clockwise")
+                Label("Add to this round", systemImage: "plus.circle")
             }
-            Button {
-                model.reanalyze(swing, forceFallback: true)
-            } label: {
-                Label("Re-analyze without Vision", systemImage: "eye.slash")
-            }
-            // The artefact that leaves the phone. A raw 240fps clip plays in a
-            // third of a second and shows nothing; this is the version a coach
-            // can actually watch.
-            if swing.clipFilename != nil {
-                if let progress = exporting {
-                    HStack {
-                        ProgressView(value: progress).tint(Theme.yellow)
-                        Text("\(Int(progress * 100))%")
-                            .font(.caption).monospacedDigit().foregroundStyle(Theme.steel)
-                    }
-                } else {
-                    Button { exportSlowMo() } label: {
-                        Label("Export slow-motion with overlay", systemImage: "film")
-                    }
-                }
-                if let exportError {
-                    Text(exportError).font(.caption).foregroundStyle(Theme.fail)
-                }
-            }
-            Button {
-                var urls: [URL] = []
-                if let clip = swing.clipFilename { urls.append(ClipStore.clipURL(named: clip)) }
-                if let csv = swing.trackCSVFilename { urls.append(ClipStore.trackURL(named: csv)) }
-                shareURLs = urls
-                showShare = !urls.isEmpty
-            } label: {
-                Label("Share clip and track CSV", systemImage: "square.and.arrow.up")
-            }
-            Text("The track CSV is in the format analyze_swing.py reads, so a suspicious reading can be re-run on the Mac against the reference implementation.")
+            Text(swing.sessionID == nil
+                 ? "This swing belongs to no round. Adding it counts it in the summary when the round ends."
+                 : "This swing belongs to an earlier round. Adding it moves it into this one.")
                 .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// Each action is its OWN row.
+    ///
+    /// They used to sit in one VStack inside one Section, which in a List is a
+    /// single row containing four buttons — and a row has one tap target, so
+    /// pressing any of them ran whichever one SwiftUI decided the row meant.
+    /// Every button on this screen did the same thing, which is the most
+    /// confusing kind of broken: it looks like four choices and behaves like
+    /// one. A Section whose children are the buttons themselves gives each its
+    /// own row and its own tap.
+    @ViewBuilder private var actions: some View {
+        Button { model.reanalyze(swing) } label: {
+            Label("Re-analyze with current settings", systemImage: "arrow.clockwise")
+        }
+        Button { model.reanalyze(swing, forceFallback: true) } label: {
+            Label("Re-analyze without Vision", systemImage: "eye.slash")
+        }
+        // The artefact that leaves the phone. A raw 240fps clip plays in a
+        // third of a second and shows nothing; this is the version a coach can
+        // actually watch.
+        if swing.clipFilename != nil {
+            if let progress = exporting {
+                HStack {
+                    ProgressView(value: progress).tint(Theme.yellow)
+                    Text("\(Int(progress * 100))%")
+                        .font(.caption).monospacedDigit().foregroundStyle(Theme.steel)
+                }
+            } else {
+                Button { exportSlowMo() } label: {
+                    Label("Export slow-motion with overlay", systemImage: "film")
+                }
+            }
+        }
+        // The report for THIS swing, not for the last import. It used to be
+        // reachable only from the history screen's menu and only ever showed
+        // the most recent imported clip — so during a live session the one
+        // screen that names the failing stage described a different swing.
+        if swing.diagnosticsFilename != nil {
+            Button { openReport() } label: {
+                Label("Analysis report", systemImage: "doc.text.magnifyingglass")
+            }
+        }
+        // Everything about this one swing, in one share. The pieces were always
+        // on the phone and each needed a different screen to get at; asking
+        // somebody to assemble five files from four screens is how a bug report
+        // ends up being a screenshot instead, and a screenshot is the one form
+        // of evidence that cannot be re-run.
+        Button { shareAuditBundle() } label: {
+            Label("Export everything for this swing", systemImage: "shippingbox")
+        }
+        if let exportError {
+            Text(exportError).font(.caption).foregroundStyle(Theme.fail)
         }
     }
 
@@ -545,8 +641,8 @@ struct SwingDetailView: View {
     // MARK: - Loading
 
     private func load() async {
-        hangText = swing.hangS.map { String(format: "%.2f", $0) } ?? ""
-        carryText = swing.carryM.map { String(format: "%.1f", $0) } ?? ""
+        hangEntry = swing.hangS
+        carryEntry = swing.carryM
 
         if let name = swing.trackCSVFilename,
            let text = try? String(contentsOf: ClipStore.trackURL(named: name), encoding: .utf8) {
@@ -566,6 +662,50 @@ struct SwingDetailView: View {
             }
         }
         player = AVPlayer(url: url)
+    }
+
+    private func openReport() {
+        guard let name = swing.diagnosticsFilename,
+              let text = try? String(contentsOf: ClipStore.trackURL(named: name),
+                                     encoding: .utf8) else {
+            exportError = "The report for this swing is no longer on disk."
+            return
+        }
+        sheet = .report(text)
+    }
+
+    /// Every file this swing produced, in one share sheet.
+    ///
+    /// Missing pieces are skipped rather than reported: a swing with no pose
+    /// track is a swing the body pass was off for, which the record already
+    /// says, and a share sheet is the wrong place to learn it.
+    private func shareAuditBundle() {
+        var urls: [URL] = []
+        if let clip = swing.clipFilename {
+            let u = ClipStore.clipURL(named: clip)
+            if FileManager.default.fileExists(atPath: u.path) { urls.append(u) }
+        }
+        for name in [swing.trackCSVFilename, swing.poseFilename,
+                     swing.traceFilename, swing.diagnosticsFilename] {
+            guard let name else { continue }
+            let u = ClipStore.trackURL(named: name)
+            if FileManager.default.fileExists(atPath: u.path) { urls.append(u) }
+        }
+        guard !urls.isEmpty else {
+            // Name what is missing rather than shrugging. "Nothing to export"
+            // is the same sentence whether the clip was never kept, the
+            // analysis wrote no track, or storage was cleared — and those want
+            // three different responses.
+            var why: [String] = []
+            if swing.clipFilename == nil { why.append("no clip was kept (Settings → Storage)") }
+            if swing.trackCSVFilename == nil { why.append("no ball track — nothing was measured") }
+            exportError = why.isEmpty
+                ? "The files for this swing are recorded but missing from disk — storage was probably cleared."
+                : "Nothing to export: " + why.joined(separator: "; ") + "."
+            return
+        }
+        exportError = nil
+        sheet = .share(urls)
     }
 
     /// Render the overlay into a shareable file.
@@ -593,21 +733,27 @@ struct SwingDetailView: View {
         var options = OverlayVideoExporter.Options()
         options.caption = SwingRead.exportCaption(launchAngleDeg: swing.launchAngleDeg,
                                                   exitVeloMph: swing.exitVeloMph,
-                                                  smash: swing.smashFactor)
+                                                  smash: swing.smashFactor,
+                                                  unit: model.settings.speedUnit)
         let batPath = swing.batPathPx
         let observations = track
         let contact = swing.contactTime
 
         Task {
             do {
-                let out = try await OverlayVideoExporter.export(
-                    clip: url, track: observations, pose: pose, batPath: batPath,
-                    contactTime: contact, options: options,
-                    progress: { p in Task { @MainActor in exporting = p } })
+                // Through the decoder-contention retry: exporting mid-round
+                // decodes the clip while the 240fps session may hold the
+                // hardware decoder, and dying with "cannot read" when a
+                // one-shot camera pause fixes it would be a poor trade.
+                let out = try await model.runFreeingDecoderIfNeeded {
+                    try await OverlayVideoExporter.export(
+                        clip: url, track: observations, pose: pose, batPath: batPath,
+                        contactTime: contact, options: options,
+                        progress: { p in Task { @MainActor in exporting = p } })
+                }
                 await MainActor.run {
                     exporting = nil
-                    shareURLs = [out]
-                    showShare = true
+                    sheet = .share([out])
                 }
             } catch {
                 await MainActor.run {
@@ -620,8 +766,8 @@ struct SwingDetailView: View {
 
     private func saveGroundTruth() {
         var updated = swing
-        updated.hangS = Double(hangText.trimmingCharacters(in: .whitespaces))
-        updated.carryM = Double(carryText.trimmingCharacters(in: .whitespaces))
+        updated.hangS = hangEntry
+        updated.carryM = carryEntry
         swing = updated
         model.update(updated)
     }

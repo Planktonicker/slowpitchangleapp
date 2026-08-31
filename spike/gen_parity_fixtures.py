@@ -144,10 +144,31 @@ def analyze_cases():
                   make_track(45.0, 55.0, 260.0, 90), None, 0.0))
 
     # Contact time earlier than the first tracked point: the fit must
-    # extrapolate back to t0 (batter occlusion case).
+    # extrapolate back to t0 (batter occlusion case). Four frames back, well
+    # inside CONTACT_MAX_BACK_EXTRAPOLATION_S, so no flag.
     cases.append(("occluded_start_extrapolates",
                   make_track(70.0, 20.0, 250.0, 70, start_frame=12),
                   8 / FPS, 0.0))
+
+    # ...and the case either side of that bound, because the bound is the whole
+    # of the guard and a port that dropped it would pass every case above.
+    # 14 frames at 240fps is 58.3 ms, just under; 15 is 62.5 ms, just over.
+    cases.append(("extrapolation_at_the_limit",
+                  make_track(70.0, 20.0, 250.0, 70, start_frame=20),
+                  6 / FPS, 0.0))
+    cases.append(("extrapolation_just_over_the_limit",
+                  make_track(70.0, 20.0, 250.0, 70, start_frame=20),
+                  5 / FPS, 0.0))
+
+    # FLAG_CONTACT_TIME_REJECTED: the false-trigger case, measured on
+    # IMG_6703. A noise half a second before contact fires the trigger, the
+    # refractory window covers the real crack, and the clip is written with a
+    # contact time 0.5 s early. The flag must appear AND t0 must fall back to
+    # the first sighting — a port that flags without falling back still
+    # reports the inflated number, so the fixture pins the value too.
+    cases.append(("contact_time_rejected",
+                  make_track(70.0, 20.0, 250.0, 70, start_frame=120),
+                  0.0, 0.0))
 
     # Camera roll correction applied to the velocity vector.
     cases.append(("camera_roll_3deg",
@@ -484,9 +505,12 @@ def main():
         "STITCH_ACCEL_K": sla.STITCH_ACCEL_K,
         "STITCH_VELOCITY_NOISE_PX_S": sla.STITCH_VELOCITY_NOISE_PX_S,
         "STITCH_MAX_ANGLE_DEG": sla.STITCH_MAX_ANGLE_DEG,
+        "SELECT_CONTACT_TOL_S": sla.SELECT_CONTACT_TOL_S,
         "BUILD_MAX_TURN_DEG": sla.BUILD_MAX_TURN_DEG,
+        "BUILD_HEADING_WINDOW": float(sla.BUILD_HEADING_WINDOW),
         "SPEED_OF_SOUND_MPS": sla.SPEED_OF_SOUND_MPS,
         "CONTACT_AUDIO_MAX_DISTANCE_M": sla.CONTACT_AUDIO_MAX_DISTANCE_M,
+        "CONTACT_MAX_BACK_EXTRAPOLATION_S": sla.CONTACT_MAX_BACK_EXTRAPOLATION_S,
         "BUILD_TURN_MIN_STEP_PX": sla.BUILD_TURN_MIN_STEP_PX,
         "STITCH_VELOCITY_WINDOW": float(sla.STITCH_VELOCITY_WINDOW),
         "SEED_OUTLIER_SIGMA": float(sla.SEED_OUTLIER_SIGMA),
@@ -666,10 +690,22 @@ def main():
     moved[3][3] = 200                      # one pixel jumps by 100
     faint = [row[:] for row in still]
     faint[3][3] = 110                      # ...and one by 10, under the threshold
+    # The two cases either side of the line. Everything above sits far from it
+    # — deltas of 100 and 10 against a threshold of 18 — so the fixtures pinned
+    # the dilation and the general idea of a threshold while leaving both the
+    # VALUE and the STRICTNESS free: change the port's `> threshold` to `>=`,
+    # or hardcode any threshold from 11 to 99, and every case still passed.
+    # The reference is strict, so 18 must not move and 19 must.
+    at_threshold = [row[:] for row in still]
+    at_threshold[3][3] = 100 + int(sla.MOTION_DIFF_THRESHOLD)
+    over_threshold = [row[:] for row in still]
+    over_threshold[3][3] = 100 + int(sla.MOTION_DIFF_THRESHOLD) + 1
     _mm("first_frame_has_no_previous", None, still)
     _mm("nothing_moved", still, still)
     _mm("one_pixel_moved", still, moved)
     _mm("change_below_threshold", still, faint)
+    _mm("change_exactly_at_threshold", still, at_threshold)
+    _mm("change_one_over_threshold", still, over_threshold)
 
     # Seeded tracking: the ball's flight followed out from a tap. Deterministic
     # layouts — a flight in ragged bursts among stationary clutter, plus the
@@ -851,6 +887,66 @@ def main():
         "expected_selected_last_x": None if cpick is None else cpick[-1].x,
     })
 
+    # The reversal from a real clip, frame for frame.
+    #
+    # tee_02.mov: the ball arrives down-left at about 10 px a frame, and on the
+    # very last step before contact it moves 4.98 — because the last step
+    # before contact is when the ball is slowest. Read from that one pair the
+    # heading fell 0.02 px under BUILD_TURN_MIN_STEP_PX, the turn guard
+    # switched itself off for exactly that frame, and association walked
+    # through the reversal. The result was one 59-frame "track", half incoming
+    # ball and half struck ball, straightness 0.33, reported as a swing at
+    # -37.9 degrees and 29.6 mph. Split, the outbound half reads +18.4 and 80.
+    #
+    # Pinned from the real numbers rather than a synthetic reconstruction,
+    # because the margin that failed was two hundredths of a pixel and no
+    # invented case would have reproduced it.
+    def real_reversal_case():
+        raw = [
+        (52, 0.26625, 673.91, 205.26, 20.16, 366.0),
+        (53, 0.270417, 665.94, 212.29, 16.56, 358.0),
+        (54, 0.282917, 644.78, 233.59, 20.53, 357.0),
+        (55, 0.287083, 636.36, 240.85, 19.92, 320.0),
+        (56, 0.29125, 629.15, 248.25, 14.32, 312.0),
+        (57, 0.295417, 621.7, 255.39, 20.26, 306.0),
+        (58, 0.299583, 614.39, 261.82, 21.34, 335.0),
+        (59, 0.30375, 606.75, 269.18, 18.4, 328.0),
+        (60, 0.307917, 599.8, 276.44, 17.35, 334.0),
+        (61, 0.312083, 598.77, 281.31, 17.05, 322.0),
+        (62, 0.31625, 624.25, 272.8, 19.99, 403.0),
+        (63, 0.320417, 649.49, 265.16, 17.07, 392.0),
+        (64, 0.324583, 674.77, 258.54, 12.71, 422.0),
+        (65, 0.32875, 697.51, 249.45, 12.46, 294.0),
+        (66, 0.332917, 721.23, 242.88, 17.53, 381.0),
+        (67, 0.345417, 796.68, 217.37, 17.82, 470.0),
+        (68, 0.349583, 821.36, 208.22, 19.52, 445.0),
+        (69, 0.35375, 845.13, 200.82, 16.59, 371.0),
+        (70, 0.357917, 870.04, 193.68, 24.62, 403.0),
+        (71, 0.362083, 896.27, 186.07, 24.77, 409.0),
+        (72, 0.36625, 921.46, 177.94, 17.33, 383.0)
+        ]
+        per_frame = {}
+        for fr, t, x, y, d, a in raw:
+            per_frame[fr] = [sla.BallObservation(frame=fr, t=t, x=x, y=y,
+                                                 diameter_px=d, area_px=a)]
+        return per_frame
+
+    rr = real_reversal_case()
+    rbuilt = sla.build_tracks(rr, fps=240.0)
+    rpick = sla.select_outbound_track(rbuilt, fps=240.0, direction="right")
+    out["build_tracks"].append({
+        "name": "real_clip_reversal_must_split",
+        "fps": 240.0,
+        "per_frame": {str(f): [{"frame": o.frame, "t": o.t, "x": o.x, "y": o.y,
+                                "diameter_px": o.diameter_px, "area_px": o.area_px}
+                               for o in obs] for f, obs in rr.items()},
+        "expected_track_count": len(rbuilt),
+        "expected_longest": max((len(t) for t in rbuilt), default=0),
+        "expected_selected_len": 0 if rpick is None else len(rpick),
+        "expected_selected_first_x": None if rpick is None else rpick[0].x,
+        "expected_selected_last_x": None if rpick is None else rpick[-1].x,
+    })
+
     bc = build_case()
     built = sla.build_tracks(bc, fps=199.0)
     picked = sla.select_outbound_track(built, fps=199.0, direction="right")
@@ -892,6 +988,13 @@ def main():
                 diameter_px=10.0, area_px=80.0))
         return pts
 
+    def _seg(x0, y0, x1, y1, n, t0, fps=240.0):
+        """A line that starts at a stated TIME, so contact can sit between two."""
+        return [sla.BallObservation(
+            frame=int(t0 * fps) + i, t=t0 + i / fps,
+            x=x0 + (x1 - x0) * i / (n - 1), y=y0 + (y1 - y0) * i / (n - 1),
+            diameter_px=19.0, area_px=283.0) for i in range(n)]
+
     select_cases = [
         # A slow inbound pitch over many frames against a fast short hit.
         ("pitch_vs_hit", "auto",
@@ -908,11 +1011,27 @@ def main():
         # rather than the pipeline reporting no ball at all.
         ("only_clutter", "auto", [_jitter(240, 650, 400)]),
     ]
-    for name, direction, tracks in select_cases:
-        picked = sla.select_outbound_track(tracks, fps=240.0, direction=direction)
+    # The case speed alone gets wrong: a MIS-HIT. Weak contact, the ball
+    # dribbles out slower than the pitch came in, and the fastest track in the
+    # clip is the pitch. Nothing but the contact instant separates these — the
+    # hit did not exist before the bat met the ball.
+    _mishit_pitch = _seg(1240, 60, 620, 430, 26, 0.190)
+    _mishit_hit = _seg(650, 425, 900, 380, 22, 0.302)
+    select_cases += [
+        ("mishit_slower_than_pitch", "auto", [_mishit_pitch, _mishit_hit]),
+    ]
+
+    for entry in select_cases:
+        name, direction, tracks = entry
+        # Contact is only supplied for the case that needs it, so the others
+        # keep pinning the behaviour when the caller does not know it.
+        contact = 0.30 if name == "mishit_slower_than_pitch" else None
+        picked = sla.select_outbound_track(tracks, fps=240.0, direction=direction,
+                                           contact_time=contact)
         out["select_track"].append({
             "name": name,
             "direction": direction,
+            "contact_time": contact,
             "tracks": [[{"frame": o.frame, "t": o.t, "x": o.x, "y": o.y,
                          "diameter_px": o.diameter_px, "area_px": o.area_px}
                         for o in tr] for tr in tracks],

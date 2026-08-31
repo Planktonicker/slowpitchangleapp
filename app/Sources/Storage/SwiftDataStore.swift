@@ -67,6 +67,7 @@ final class SwingEntity {
     /// variable-length list that nothing queries, so one column beats a
     /// relationship and a migration.
     var batPathJSON: String?
+    var diagnosticsFilename: String?
 
     /// The round this swing was taken in. Optional so every already-stored
     /// swing keeps loading — SwiftData gives a new optional column nil rather
@@ -118,6 +119,7 @@ final class SwingEntity {
         bodyJSON = Self.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
         batPathJSON = Self.encodePath(dto.batPathPx)
+        diagnosticsFilename = dto.diagnosticsFilename
         sessionID = dto.sessionID
         notes = dto.notes
     }
@@ -163,6 +165,7 @@ final class SwingEntity {
         bodyJSON = Self.encodeBody(dto.body)
         captureFlagsRaw = dto.captureFlags.map(\.rawValue).joined(separator: "|")
         batPathJSON = Self.encodePath(dto.batPathPx)
+        diagnosticsFilename = dto.diagnosticsFilename
         sessionID = dto.sessionID
         notes = dto.notes
     }
@@ -211,6 +214,7 @@ final class SwingEntity {
         d.captureFlags = captureFlagsRaw.split(separator: "|")
             .compactMap { CaptureFlag(rawValue: String($0)) }
         d.batPathPx = Self.decodePath(batPathJSON)
+        d.diagnosticsFilename = diagnosticsFilename
         d.sessionID = sessionID
         d.notes = notes
         return d
@@ -255,8 +259,11 @@ final class SwiftDataSwingStore: SwingStoring {
         return base.appendingPathComponent("SwingLab.store")
     }
 
-    init(inMemory: Bool = false) throws {
-        try self.init(container: Self.makeContainer(inMemory: inMemory))
+    /// `convenience`, because it delegates: in a class only a convenience
+    /// initializer may call another initializer on the same type. The
+    /// designated one is `init(container:)`.
+    convenience init(inMemory: Bool = false) throws {
+        self.init(container: try Self.makeContainer(inMemory: inMemory))
     }
 
     /// Take an already-opened container. The split exists so the expensive

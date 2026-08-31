@@ -60,7 +60,97 @@ Expect the app to also mark the clip **"No struck ball identified"**. That is
 correct and does not affect this test: a falling ball is not a swing, the
 plausibility gate says so, and the two scale numbers are computed either way.
 
-- Date: ______ Disagreement: ______ % -> Pass? ______
+### G0 result — 2026-08-30, tee_05.mov (FAIL, and it found something)
+
+First run of this test. Indoors, 1920x1080 at 240fps, 12-inch softball dropped
+from head height in front of the camera.
+
+The fall itself is textbook: 63 tracked points over 342 ms fitting a parabola
+with a **0.55 px** residual. That is what makes the rest of this trustworthy.
+
+| | apparent ball diameter | implied scale | vs gravity |
+|---|---|---|---|
+| what gravity requires | **~38 px** | ~2.55 mm/px | — |
+| raw colour mask | 35.0 px | 2.771 mm/px | +9% |
+| **what the app measured** | **32.8 px** | 2.958 mm/px | **+14%** |
+
+**Verdict: the app under-measures the ball, so every exit velocity it reports
+is roughly 14% too high.** The app flagged `SCALE_DISAGREE` on the clip, which
+is the gate working — it refused to stand behind the reading.
+
+Uncertainty on that 14% is a few percent, not tenths. Fitting `g` over sliding
+windows gives 3525-3997 px/s^2, converging near 3950 once the ball is moving
+fast enough for the quadratic term to be well conditioned; the early windows,
+where it has barely started falling, are ill-posed and should be ignored. The
+apparent diameter stayed 34-36 px for the whole fall, so the ball was not
+moving in depth and the two scales really are measuring the same thing.
+
+**Not acted on yet, deliberately.** One clip is not grounds for changing a
+number that `ParityTests` pins and every reading depends on. What would settle
+it, in order of value:
+
+1. **A second drop, framed better.** Keep the ball nearer the middle of the
+   frame and let it fall further before it leaves — the ill-conditioned early
+   windows are what widen the error bar. Two clips agreeing to a couple of
+   percent turns this from a finding into a correction.
+2. **A drop at a different distance.** If the bias is the same percentage at
+   4 m as at 2 m, it is the diameter measurement. If it changes with distance,
+   it is the optics.
+3. **Then, and only then, fix the mechanism** — `_subpixel_minor_diameter`,
+   which reads 32.8 px where the raw mask reads 35.0 and gravity wants 38.
+   Its alpha = 0.5 crossing lands inside the true silhouette. Fixing the
+   measurement is right; scaling its output by a number derived from one clip
+   is not.
+
+Readings taken before this is resolved should be treated as **~14% high in
+speed**. Launch angle is unaffected — it is an angle, and needs no scale.
+
+### G0 second run — tee_06.mov: the error is SIZE-DEPENDENT
+
+A second drop, further back, so the ball is about 26 px instead of 37. This
+was shot to answer one question: is the bias the same percentage at two
+distances (then it is the diameter measurement) or does it change (then it is
+the optics)? It changes, and by a lot.
+
+Measured with the app's own colour window on both clips, against gravity:
+
+| clip | ball px (gravity) | raw colour mask | app's refined diameter | error |
+|---|---|---|---|---|
+| tee_05, ball 37 px | 37.00 | 35.00 (-5.4%) | 32.80 | **-11.4%** |
+| tee_06, ball 26 px | 26.24 | 24.00 (-8.5%) | 14.99 | **-42.8%** |
+
+Both falls are clean — parabola residuals of 0.55 px and 0.45 px over 342 and
+442 ms — so the reference is sound in both cases.
+
+**So `_subpixel_minor_diameter` degrades as the ball gets smaller, and no
+calibration constant can fix it.** A single factor would be right at one
+apparent size and wrong at every other. This is a measurement to repair, not
+a number to scale. Until it is repaired:
+
+- **Exit velocity is unreliable by an amount that depends on how big the ball
+  is in frame** — roughly 10% high when it fills 37 px, far worse when it is
+  small. Launch angle is unaffected; it is an angle and needs no scale.
+- **Film so the ball is as large in frame as the flight allows.** This has
+  moved from a nicety to a measurement requirement.
+
+Two candidate causes were tested and **disproven**, which is worth recording so
+they are not re-tried:
+
+1. *The edge search stops at an interior dip.* It does not. Sampling the alpha
+   profile across the ball on tee_06 gives a clean monotonic fall with a single
+   0.5 crossing; searching outside-in returns the same radius as inside-out.
+2. *The hue floor is too low, so skin is being tracked.* Skin IS being tracked
+   on tee_06 — the 121-frame "flight" the app reported at 76.9 degrees is the
+   hitter's leg, then shorts, then shoulder, confirmed frame by frame — but
+   raising the hue floor from 18 to 20, 22 or 24 does not change it. The
+   discriminator is something else.
+
+The app's verdict on tee_06 read "measured 77 degrees, which is not a hit —
+that is the ball going almost straight up. Whatever was tracked, it was not a
+struck ball." That is the honest-measurement machinery working: it refused the
+reading rather than reporting a swing.
+
+- Date: 2026-08-30  Disagreement: 14% (37 px ball) / 43% (26 px ball) -> Pass? **NO**
 
 ### G0b — The two-distance check (no truth needed at all)
 
@@ -125,6 +215,127 @@ outdoor clips with ≥0.25 s of tracked flight.*
 *`check_audio_trigger.py` on ≥5 clips incl. cage.*
 
 - Clips with contact impulse ≥ 15 dB over ambient: ____ / ____ (need ≥ 90%)
+
+### The armed-phone chain — 2026-08-30, IMG_6703 and IMG_6707
+
+The first end-to-end result the project has. Not G5 exactly: G5 asks whether
+contact is loud enough, and this asks the question the phone on the tripod
+actually faces — **armed, with nobody touching it, does the whole chain reach a
+number?** Microphone → trigger → ring buffer becomes a clip → contact corrected
+for sound travel → motion-gated detection → track selection → launch angle and
+exit velocity. Run with `spike/armed_phone_test.py`, which is a port of
+`ContactTrigger.swift` window for window and is given no contact frame, because
+the phone is not given one either.
+
+**Both clips completed the chain.** That is the headline and it is the first
+time it has been true.
+
+| | IMG_6703 | IMG_6707 |
+|---|---|---|
+| Trigger fired | 0.282 s | 0.322 s |
+| Real bat crack | **0.781 s** (37.0 dB) | 0.322 s (30.4 dB) |
+| Candidates after motion gate | 135 over 431 frames (0.31/frame) | 102 over 464 (0.22/frame) |
+| Colour matches the gate removed | 99% | 100% |
+| Candidate chains | 2 (pitch + hit) | 2 (pitch + hit) |
+| Selected chain | 30 frames, straightness **1.00** | 23 frames, straightness **1.00** |
+| Pitch speed | 2708 px/s | 2476 px/s |
+| Hit speed | **6037 px/s** | **6140 px/s** |
+| Reading | LA −5.9°, EV 70.8 mph | LA 18.5°, EV 82.9 mph |
+| Flags | CONTACT_TIME_REJECTED, NO_GRAVITY_CHECK | DEPTH_MOTION, NO_GRAVITY_CHECK |
+
+**Neither reading is validated.** There is no radar gun, no measured carry and
+no second camera behind these numbers, and both carry `NO_GRAVITY_CHECK`, which
+means only one of the two scale witnesses turned up. What *is* established is
+that the chain runs and that its parts separate the right objects.
+
+Four findings, all of them things nothing else would have caught:
+
+**1. These exports are variable frame rate, and the header lies twice over.**
+The containers claim 175.35 and 147.03 fps. Frames-over-duration says 204.5 and
+213.1. The *median* interval is 4.1667 ms — exactly 240.00 fps — with the rest
+of the intervals at 12.5, 25 and 33.3 ms. These are slow-motion **edits**: a
+240fps core with 30fps ramps welded either side, which is what
+`docs/APP_GUIDE.md` and the `PhotoClipPicker` note have always said about the
+Photos export path, now measured. 16% and 12% of intervals are off the median.
+Counting frames puts contact on IMG_6703 at 0.644 s; the timestamps put it at
+0.769 s, which is where the audio impulse and the bracket pinned in
+`ParityTests` both say it is. The app already reads presentation timestamps;
+the Mac scripts did not, and `armed_phone_test.py` now does.
+
+**2. The detector works on real footage, and the motion gate is what makes it
+work.** 99–100% of colour matches were removed by the gate on both clips, and
+what survived built into exactly two chains each — the incoming pitch and the
+struck ball — both at straightness 1.00. This is the first direct confirmation
+of the note in CLAUDE.md that colour alone yields ~130 candidates a frame here.
+
+**3. The hit is 2.3–2.5× the pitch, and that is the cleanest discriminator
+available.** 6037 vs 2708 px/s and 6140 vs 2476 px/s. `select_outbound_track`
+scores on speed alone for exactly this reason and it picked correctly on both
+clips, *including* on IMG_6703 where the contact time it was given was half a
+second wrong.
+
+**4. The default 15 dB threshold is too low at this venue, and the refractory
+window turns that into a wrong number rather than a missing one.** On IMG_6703
+a 17.1 dB noise at 0.282 s fires the trigger; the 2-second refractory then
+covers the real 37.0 dB crack at 0.781 s entirely. The clip is still written —
+the 2.0 s post-roll reaches past the real contact — but it is written with a
+contact time **half a second early**. Handed to the fit, that same 30-frame
+track reported **+4.25° and 105.26 mph** instead of **−5.83° and 70.96 mph**, a
+48% exit-velocity inflation, **carrying exactly the same flags as the correct
+answer**. Nothing in the output told the two apart.
+
+That is now guarded: `CONTACT_MAX_BACK_EXTRAPOLATION_S` bounds how far before
+the first sighting a supplied contact time may sit, and past it the analyzer
+flags `CONTACT_TIME_REJECTED` and falls back to the flight's first frame —
+which on this clip recovers −5.89° and 70.82 mph, within a tenth of a degree of
+the right answer. The threshold at this venue should be **18 dB or more**;
+anything from 18 to 30 fires on the crack and nothing else.
+
+### What was tried as a non-audio trigger and did not work
+
+Whole-frame frame-difference energy does **not** mark contact. On IMG_6707 the
+contact frame ranks #267 of 700 by moved-pixel count; the best frame within
+±3 of contact ranks #105. Restricting the measurement to a 400×400 window
+around the contact point improves it to #63 of 700 and no further. On IMG_6703
+it ranks #21 of 430 either way, and the clip's actual maximum is elsewhere.
+Motion energy is dominated by the background — foliage, the crowd, the ramp
+frames — and contact is not the loudest thing in the picture even locally.
+
+**Body motion — including anything a skeleton could be built on — separates a
+SWING but not a HIT, and the app needs the second one.** IMG_6707 settles this
+by accident: the hitter takes a practice cut 1.1–1.5 s after the real one, and
+in a box drawn round the hitter alone (excluding the tree line, which is what
+swamped the whole-frame measurement) the practice cut is *stronger* than the
+swing that actually hit the ball —
+
+| measured in the hitter's box | real swing | practice cut, no ball |
+|---|---|---|
+| peak moved-pixel share | 23.7% | **24.9%** |
+| peak sweep of the motion centroid | 8.09 px/frame | **13.52 px/frame** |
+| frames over 18% | 7 | **10** |
+
+— and only 3 of the clip's top 12 motion frames belong to the real swing. The
+ball detector confirms there was no ball: two tracks in the whole clip, both
+inside 0.133–0.412 s, nothing at 1.35–1.90 s.
+
+This is not a tuning problem and a better skeleton does not fix it. A practice
+swing *is* a swing; it differs from a hit only in whether a ball was on the end
+of it, and the ball is not in the skeleton. Pose tracking on this footage is
+otherwise excellent material — the hitter is large, side-on and unobstructed —
+so the limit is the question being asked, not the tracker.
+
+Where pose is worth the compute is *after* the clip exists, not as the thing
+that decides it should: rejecting clips where nobody swung at all is the
+`HumanPresenceGate`'s existing job, and it is a different and much easier
+question than "was that swing a hit".
+
+The signal that *does* separate is the ball's own speed, and it is only
+available after detection has run. That is the useful conclusion and it is an
+architectural one: the phone records continuously into a ring buffer, so the
+trigger never gates the camera — it only chooses which 3.5 seconds to keep.
+Audio is good enough for *that* and was right on both clips at a suitable
+threshold. **When contact happened** is a separate question, the video answers
+it better, and the fallback above is what makes the video the one that decides.
 
 ## Observations
 

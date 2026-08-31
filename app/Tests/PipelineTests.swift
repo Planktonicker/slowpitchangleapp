@@ -418,3 +418,74 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(decoded, settings)
     }
 }
+
+/// Measuring in the frame the viewer actually sees.
+///
+/// The bug these pin cost a real clip: a ball dropped from head height, tracked
+/// perfectly for 121 frames, reported as `+76.9 deg` — going almost straight
+/// UP — because the file's buffer is stored upside down and every number was
+/// taken from the buffer. The pipeline then refused the reading as impossible,
+/// which is the right answer to the wrong question. On a swing it would not
+/// have been refused: a hit that rises would simply have been reported as one
+/// that falls.
+final class VideoOrientationTests: XCTestCase {
+
+    func testQuarterTurnsFromTransform() {
+        XCTAssertEqual(VideoOrientation.quarterTurns(.identity), 0)
+        XCTAssertEqual(VideoOrientation.quarterTurns(CGAffineTransform(rotationAngle: .pi / 2)), 1)
+        XCTAssertEqual(VideoOrientation.quarterTurns(CGAffineTransform(rotationAngle: .pi)), 2)
+        XCTAssertEqual(VideoOrientation.quarterTurns(CGAffineTransform(rotationAngle: -.pi / 2)), 3)
+        // The other way round the circle is the same quarter turn.
+        XCTAssertEqual(VideoOrientation.quarterTurns(CGAffineTransform(rotationAngle: 3 * .pi / 2)), 3)
+    }
+
+    func testDisplaySizeSwapsOnAQuarterTurn() {
+        XCTAssertEqual(VideoOrientation.displaySize(width: 1920, height: 1080, quarterTurns: 0).width, 1920)
+        XCTAssertEqual(VideoOrientation.displaySize(width: 1920, height: 1080, quarterTurns: 1).width, 1080)
+        XCTAssertEqual(VideoOrientation.displaySize(width: 1920, height: 1080, quarterTurns: 2).width, 1920)
+        XCTAssertEqual(VideoOrientation.displaySize(width: 1920, height: 1080, quarterTurns: 3).width, 1080)
+    }
+
+    /// The real numbers from tee_06.mov: the ball's first and last tracked
+    /// points in the buffer, and where they actually are on screen.
+    func testTheDropThatReadAsARise() {
+        let w = 1920, h = 1080
+        let first = VideoOrientation.point(x: 1003.11, y: 761.21, width: w, height: h, quarterTurns: 2)
+        let last  = VideoOrientation.point(x: 1028.78, y: 328.40, width: w, height: h, quarterTurns: 2)
+
+        // In the buffer y DECREASES over the fall, which reads as rising.
+        XCTAssertLessThan(328.40, 761.21)
+        // Rotated into the displayed frame it increases, which is falling.
+        XCTAssertGreaterThan(last.y, first.y, "a dropped ball must move down the screen")
+
+        // And the angle flips sign, which is the whole point.
+        let rawAngle = atan2(-(328.40 - 761.21), abs(1028.78 - 1003.11)) * 180 / .pi
+        let upAngle  = atan2(-(last.y - first.y), abs(last.x - first.x)) * 180 / .pi
+        XCTAssertGreaterThan(rawAngle, 80, "the buffer says it went up")
+        XCTAssertLessThan(upAngle, -80, "the screen says it fell")
+    }
+
+    /// A length does not rotate. Diameter is the scale every mph rests on, so
+    /// a rotation that quietly changed it would be worse than the bug it fixes.
+    func testRotationLeavesDiametersAlone() {
+        let track = [BallObservation(frame: 0, t: 0, x: 100, y: 200, diameterPx: 33.5, areaPx: 880)]
+        for q in 0...3 {
+            let r = VideoOrientation.rotate(track: track, width: 1920, height: 1080, quarterTurns: q)
+            XCTAssertEqual(r[0].diameterPx, 33.5, "quarter turns \(q)")
+            XCTAssertEqual(r[0].areaPx, 880, "quarter turns \(q)")
+        }
+    }
+
+    /// Four quarter turns is where you started.
+    func testFourTurnsIsIdentity() {
+        var p = (x: 137.0, y: 991.0)
+        var w = 1920, h = 1080
+        for _ in 0..<4 {
+            p = VideoOrientation.point(x: p.x, y: p.y, width: w, height: h, quarterTurns: 1)
+            let d = VideoOrientation.displaySize(width: w, height: h, quarterTurns: 1)
+            w = d.width; h = d.height
+        }
+        XCTAssertEqual(p.x, 137.0, accuracy: 1e-9)
+        XCTAssertEqual(p.y, 991.0, accuracy: 1e-9)
+    }
+}

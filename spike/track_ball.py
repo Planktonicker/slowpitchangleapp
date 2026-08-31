@@ -78,7 +78,14 @@ def pick_contact_interactive(cap, guess_frame, n_frames, fps):
         cap.set(cv2.CAP_PROP_POS_FRAMES, f)
         ok, frame = cap.read()
         if not ok:
-            f = min(f, n_frames - 1)
+            # Step BACK and keep servicing the keyboard. CAP_PROP_FRAME_COUNT
+            # overstates decodable frames on iPhone slo-mo regularly; clamping
+            # to the same failing index and continuing spun this loop at 100%
+            # CPU with a frozen window and no way to press q.
+            f = max(0, f - 1)
+            if (cv2.waitKey(30) & 0xFF) == ord("q"):
+                cv2.destroyWindow(win)
+                return None
             continue
         disp = frame.copy()
         cv2.putText(disp, f"frame {f}/{n_frames-1}  t={f/fps:.4f}s  (guess={guess_frame})",

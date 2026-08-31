@@ -20,9 +20,12 @@ final class AppModel: ObservableObject {
     @Published var currentSetting: SwingSetting = .tee
     @Published private(set) var analysisProgress: Double?
     @Published private(set) var lastSwing: SwingDTO?
-    /// Swings captured since the last arm. Shown on the HUD so a player can
-    /// see the session is progressing without walking back to the phone.
-    @Published private(set) var sessionSwingCount = 0
+    /// Swings in the round so far — DERIVED, never stored. Five writers used
+    /// to hand-maintain a counter and disagreed: arm() zeroed it mid-round, so
+    /// hitting three, tapping Stop and re-arming showed "no swings yet" on the
+    /// HUD while "This round" listed three; imports joined the round without
+    /// bumping it. The store is the truth, so count the store.
+    var sessionSwingCount: Int { sessionSwings.count }
     @Published var banner: Banner?
     /// Stage-by-stage report from the last imported clip, kept whether the
     /// analysis succeeded or failed. The failures are the ones worth reading,
@@ -38,7 +41,7 @@ final class AppModel: ObservableObject {
     @Published var settings = AppSettings.load() {
         didSet {
             settings.save()
-            capture.requireHitterToTrigger = settings.requireHitter
+            syncHitterGate()
             capture.visionOrientationOverride = settings.visionOrientation.orientation
             capture.triggerThresholdDb = settings.triggerDb
             capture.preRollS = settings.preRollS
@@ -53,9 +56,69 @@ final class AppModel: ObservableObject {
         var text: String
     }
 
-    var scoreboard: ValidationScoreboard { ValidationScoreboard.build(from: swings) }
+    /// Bumped by `reload()`, which is the only place `swings` is ever
+    /// assigned. Everything derived from the swings and cached below keys off
+    /// this rather than comparing arrays: an equality check over every stored
+    /// swing is not free either, and this is O(1).
+    private var swingsRevision = 0
+
+    /// The go/no-go scoreboard, rebuilt only when the swings change.
+    ///
+    /// This was a computed property, and `ValidationView` reads it eighteen
+    /// times per render — once per number on the screen — so opening that
+    /// screen rebuilt the whole board from every stored swing eighteen times,
+    /// and again on every one of the hundreds of publishes an analysis used to
+    /// emit.
+    private var cachedScoreboard: (revision: Int, board: ValidationScoreboard)?
+    var scoreboard: ValidationScoreboard {
+        if let c = cachedScoreboard, c.revision == swingsRevision { return c.board }
+        let board = ValidationScoreboard.build(from: swings)
+        cachedScoreboard = (swingsRevision, board)
+        return board
+    }
 
     var isAnalyzing: Bool { analysisProgress != nil }
+
+    /// A progress callback that only reaches the main actor when the number a
+    /// human could read actually changes.
+    ///
+    /// `ClipAnalyzer` calls its progress closure once per decoded frame, in
+    /// each of three passes: about 2,500 calls for a three-second 240fps clip.
+    /// Every one of them hopped to the main actor and set an `@Published`
+    /// property, and setting that invalidates every view observing `AppModel`
+    /// — including, if they happened to be on screen, the Settings screen
+    /// (which enumerated the clips directory in its body) and the Validation
+    /// screen (which rebuilt its scoreboard from every stored swing, eighteen
+    /// times over). That is where the analysis lag came from: not the decoding,
+    /// which is on a background thread, but a main thread asked to re-render
+    /// the app a thousand times while it ran.
+    ///
+    /// A progress bar has about a hundred distinguishable states. Publishing
+    /// only when the whole percent changes cuts the hops by twenty-five times
+    /// and looks identical.
+    private func throttledProgress() -> @Sendable (Double) -> Void {
+        let lastPercent = LockedInt(-1)
+        return { [weak self] p in
+            let pct = Int((p * 100).rounded(.down))
+            guard lastPercent.setIfDifferent(pct) else { return }
+            Task { @MainActor [weak self] in self?.analysisProgress = p }
+        }
+    }
+
+    /// Minimal thread-safe box. The progress closure is `@Sendable` and called
+    /// from whichever thread the analysis pass is on.
+    private final class LockedInt: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: Int
+        init(_ v: Int) { value = v }
+        /// True when the value changed, i.e. when it is worth publishing.
+        func setIfDifferent(_ v: Int) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            guard v != value else { return false }
+            value = v
+            return true
+        }
+    }
 
     init(store: SwingStoring) {
         self.store = store
@@ -106,7 +169,7 @@ final class AppModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        capture.requireHitterToTrigger = settings.requireHitter
+        syncHitterGate()
         capture.visionOrientationOverride = settings.visionOrientation.orientation
         capture.triggerThresholdDb = settings.triggerDb
         capture.preRollS = settings.preRollS
@@ -143,7 +206,6 @@ final class AppModel: ObservableObject {
         session = Session(mode: mode)
         currentSetting = mode.swingSetting
         finishedSession = nil
-        sessionSwingCount = 0
         hitterGateDisabledForSession = false
         // The camera is NOT started here. `CaptureView.begin()` asks for
         // permission first and starts it after, and starting a 240fps session
@@ -166,7 +228,93 @@ final class AppModel: ObservableObject {
         session = nil
         capture.isArmed = false
         capture.stop()
+        // The escape hatch expires with the round that used it.
+        hitterGateDisabledForSession = false
         finishedSession = SessionSummary.build(session: closed, swings: swings)
+    }
+
+    /// Every finished round, newest first, rebuilt from the swings themselves.
+    ///
+    /// Derived rather than stored — see `Session.derived`. The round in
+    /// progress is excluded: it is not finished, and offering to reopen the
+    /// thing you are already in is a button that can only confuse.
+    /// Cached for the same reason as `scoreboard`: `RoundsView` reads
+    /// `pastRounds` twice per render — once to ask whether it is empty, once
+    /// to build the list — and each read regrouped every stored swing.
+    private var cachedRounds: (revision: Int, rounds: [Session])?
+    var pastRounds: [Session] {
+        let all: [Session]
+        if let c = cachedRounds, c.revision == swingsRevision {
+            all = c.rounds
+        } else {
+            all = Session.allDerived(from: swings)
+            cachedRounds = (swingsRevision, all)
+        }
+        // Filtered outside the cache: the round in progress can change without
+        // the swings changing.
+        return all.filter { $0.id != session?.id }
+    }
+
+    /// Cached per round. This is called from inside `RoundsView`'s row builder,
+    /// so a list of ten finished rounds rebuilt ten summaries — each a pass
+    /// over every stored swing — every time anything published.
+    private var cachedSummaries: (revision: Int, byRound: [UUID: SessionSummary]) = (-1, [:])
+    func summary(for round: Session) -> SessionSummary {
+        if cachedSummaries.revision != swingsRevision {
+            cachedSummaries = (swingsRevision, [:])
+        }
+        if let hit = cachedSummaries.byRound[round.id] { return hit }
+        let built = SessionSummary.build(session: round, swings: swings)
+        cachedSummaries.byRound[round.id] = built
+        return built
+    }
+
+    /// Pick a finished round back up and keep hitting into it.
+    ///
+    /// For the round ended by accident, and for the one that turned out to be
+    /// half a round — you went to fetch more balls, the app was closed, and
+    /// what comes next is plainly the same session. Rebuilding it by hand meant
+    /// adding every swing to a new round one at a time.
+    ///
+    /// A reopened round keeps its ORIGINAL id, so every swing already in it
+    /// stays in it and nothing has to be re-tagged. `endedAt` clears, because a
+    /// round you are hitting into has not ended; when it ends again the summary
+    /// is rebuilt from scratch over the whole set, which is exactly what makes
+    /// the late swings count.
+    func reopenSession(_ round: Session) {
+        if session != nil { endSession() }
+        var reopened = round
+        reopened.endedAt = nil
+        session = reopened
+        currentSetting = round.mode.swingSetting
+        finishedSession = nil
+        hitterGateDisabledForSession = false
+        banner = Banner(kind: .info,
+                        text: "Back in that round — \(sessionSwingCount) swing"
+                            + (sessionSwingCount == 1 ? "" : "s") + " already in it.")
+    }
+
+    /// Put an existing swing into the round in progress.
+    ///
+    /// For the clip filmed before anyone thought to start a session, and for
+    /// the swing that landed in the wrong round because it was imported after
+    /// one ended. A round is a grouping the hitter makes, not a fact about the
+    /// footage, so it has to be editable — otherwise the only way to fix a
+    /// mis-grouped swing is to delete it.
+    func addToCurrentSession(_ swing: SwingDTO) {
+        guard let id = session?.id, swing.sessionID != id else { return }
+        var updated = swing
+        updated.sessionID = id
+        update(updated)
+    }
+
+    /// Take it back out. Leaves the swing in the full history — this changes
+    /// which round it belongs to, it does not delete anything.
+    func removeFromSession(_ swing: SwingDTO) {
+        guard swing.sessionID != nil else { return }
+        var updated = swing
+        updated.sessionID = nil
+        update(updated)
     }
 
     /// Discard a round that recorded nothing, without showing a summary of
@@ -195,7 +343,6 @@ final class AppModel: ObservableObject {
         }
         capture.isArmed = true
         armedAt = CACurrentMediaTime()
-        sessionSwingCount = 0
         // Zero, not `capture.droppedFrameCount`. Arming resets that counter,
         // but asynchronously — `isArmed`'s didSet hops to the pipeline queue,
         // then the session queue, then back to main — so reading it here
@@ -218,20 +365,55 @@ final class AppModel: ObservableObject {
     /// seen a person — almost certainly the gate failing rather than an empty
     /// field, and it would otherwise suppress every trigger in silence.
     var hitterGateLooksStuck: Bool {
-        capture.isArmed && settings.requireHitter && armedAt > 0
-            && capture.hitterGateNeverFired(since: armedAt)
+        // Once the escape has been taken the gate is off — offering it again
+        // is a button that changes nothing, shown beside a chip saying the
+        // check is already off.
+        capture.isArmed && settings.requireHitter && !hitterGateDisabledForSession
+            && armedAt > 0 && capture.hitterGateNeverFired(since: armedAt)
     }
 
     /// Give up on the hitter requirement for this session. Swings captured
     /// afterwards carry `.hitterGateDisabled` so the looser gate is on record.
+    /// Give up on the hitter requirement **for this round**.
+    ///
+    /// It used to do that by writing `settings.requireHitter = false`, and
+    /// `settings` saves itself on every change — so a button labelled "for the
+    /// session", offered whenever the gate had been quiet a while and easy to
+    /// tap once out of curiosity, turned the requirement off PERMANENTLY and
+    /// wrote it to disk.
+    ///
+    /// The next round then started with `hitterGateDisabledForSession` reset
+    /// to false and `settings.requireHitter` still false: the gate was off, and
+    /// because the flag that records "the gate was off" was the session one,
+    /// nothing on the swing said so. That is the exact combination that
+    /// recorded an empty room and reported 331 mph with no note explaining how
+    /// it got past a requirement the owner believed was on.
+    ///
+    /// Now it is session state and only session state. The stored setting is
+    /// never touched, and it goes back on by itself at the end of the round.
     func trustAudioTriggerForSession() {
-        settings.requireHitter = false
         hitterGateDisabledForSession = true
         banner = Banner(kind: .info,
-                        text: "Trigger will now fire on sound alone. Swings are flagged so you know.")
+                        text: "Trigger will fire on sound alone for the rest of this round. Swings are flagged so you know, and the setting goes back on when the round ends.")
     }
 
-    private(set) var hitterGateDisabledForSession = false
+    private(set) var hitterGateDisabledForSession = false {
+        didSet { syncHitterGate() }
+    }
+
+    /// Whether a trigger currently needs a person in frame. Both the stored
+    /// setting and the round's escape hatch have a say, and the capture
+    /// controller must hear about either changing.
+    private func syncHitterGate() {
+        capture.requireHitterToTrigger = settings.requireHitter && !hitterGateDisabledForSession
+    }
+
+    /// True when the swing about to be recorded is not being checked for a
+    /// hitter — whichever of the two reasons it is. Flagged on the record, so
+    /// a reading taken without the check can never look like one taken with it.
+    var hitterCheckIsOff: Bool {
+        !settings.requireHitter || hitterGateDisabledForSession
+    }
 
     func disarm() { capture.isArmed = false }
 
@@ -239,10 +421,13 @@ final class AppModel: ObservableObject {
     /// contact. Recorded as such so gate G5 stays honest.
     func triggerManually() {
         capture.triggerManually()
-        pendingManual = true
+        // No flag kept here. Whether a clip was manual is recorded ON the
+        // clip by ClipRecorder — a pending flag consumed by whichever clip
+        // finished next mislabelled an auto clip as manual whenever the
+        // manual press was swallowed (button hit during a post-roll), which
+        // corrupted the G5 statistic and skipped the sound-travel correction
+        // on a clip that needed it.
     }
-
-    private var pendingManual = false
     /// Dropped-frame count when the current clip began, so the flag reflects
     /// drops during THIS clip rather than the whole session.
     private var dropsAtClipStart = 0
@@ -270,15 +455,73 @@ final class AppModel: ObservableObject {
     /// All three absences arrive as `.importedClip` on the swing, rather than
     /// as numbers that look like every other swing's.
     func importClip(from picked: URL) {
+        // Security-scoped access has to survive the checks below AND the copy,
+        // and the checks are async — so the scope is opened here and closed in
+        // the task rather than by a `defer` that would fire first.
         let needsScope = picked.startAccessingSecurityScopedResource()
-        defer { if needsScope { picked.stopAccessingSecurityScopedResource() } }
+        Task { @MainActor [weak self] in
+            defer { if needsScope { picked.stopAccessingSecurityScopedResource() } }
+            guard let self else { return }
 
-        do {
-            importCopiedClip(at: try ClipStore.importClip(from: picked))
-        } catch {
-            banner = Banner(kind: .error,
-                            text: "Could not read that file: \(error.localizedDescription)")
+            // Checked BEFORE the copy, not after the analysis.
+            //
+            // A file that is not a readable video used to be copied into the
+            // store, handed to the analyzer, decoded until the reader gave up,
+            // and reported as "Nothing measurable in that clip" — which reads
+            // as a detection failure on a real swing. It is not; it is a file
+            // with no video in it, and saying so costs one metadata load.
+            if let problem = await Self.importProblem(with: picked) {
+                self.banner = Banner(kind: .warning, text: problem)
+                return
+            }
+            // ...and a file already in the store is not measured twice.
+            if let dupe = await Self.duplicateOf(picked) {
+                self.banner = Banner(kind: .warning, text: dupe)
+                return
+            }
+            do {
+                self.importCopiedClip(at: try ClipStore.importClip(from: picked))
+            } catch {
+                self.banner = Banner(kind: .error,
+                                     text: "Could not read that file: \(error.localizedDescription)")
+            }
         }
+    }
+
+    /// Why this file cannot be measured, or `nil` if it can be.
+    ///
+    /// Metadata only — no decoding — so it costs nothing next to the three
+    /// full passes it saves when the answer is "there is no video here".
+    static func importProblem(with url: URL) async -> String? {
+        let asset = AVURLAsset(url: url)
+        guard let readable = try? await asset.load(.isReadable), readable else {
+            return "That file could not be opened as a video. If it came from another app, try exporting it again — a placeholder or a still-downloading iCloud file looks like this."
+        }
+        guard let tracks = try? await asset.loadTracks(withMediaType: .video),
+              tracks.first != nil else {
+            return "That file has no video track — there is nothing in it to measure. Audio-only recordings and Live Photos both look like this."
+        }
+        guard let duration = try? await asset.load(.duration).seconds,
+              duration.isFinite, duration > 0.05 else {
+            return "That clip is empty or too short to hold a swing. A hit ball is in frame for a fraction of a second, but the clip still has to contain it."
+        }
+        return nil
+    }
+
+    /// A message naming the clip this one duplicates, or `nil` if it is new.
+    ///
+    /// Size first because it is free, then duration to confirm — two different
+    /// recordings agreeing on both is not something worth guarding against.
+    /// The answer points at re-measuring rather than at importing again: a
+    /// second copy of a clip already measured adds a duplicate swing to the
+    /// history, doubles what it costs on a phone that fills quickly at 240fps,
+    /// and skews G1, G4 and G5, all to produce the number already on screen.
+    static func duplicateOf(_ url: URL) async -> String? {
+        guard let existing = ClipStore.existingClipMatchingSize(of: url) else { return nil }
+        let a = try? await AVURLAsset(url: url).load(.duration).seconds
+        let b = try? await AVURLAsset(url: existing).load(.duration).seconds
+        guard let a, let b, abs(a - b) < 0.05 else { return nil }
+        return "Already imported — this is the same clip as \(existing.lastPathComponent), which is in Swings. To measure it again with the current settings, open it there and tap re-measure; importing it a second time would only add a duplicate."
     }
 
     /// Analyse a clip already sitting in the store.
@@ -295,6 +538,25 @@ final class AppModel: ObservableObject {
         // of the work.
         Task { @MainActor [weak self] in
             guard let self else { return }
+            // Both checks again here, because the Photos path does not come
+            // through `importClip` — `PhotoClipPicker` writes the original
+            // recording straight into the store and calls this. Cheap enough
+            // to repeat: metadata loads, no decoding.
+            //
+            // The file is already on disk by the time we get here, and it is
+            // ours, so a rejected clip is removed rather than left behind. The
+            // Files path checks before copying so it never reaches this with
+            // one to clean up.
+            if let problem = await Self.importProblem(with: stored) {
+                try? FileManager.default.removeItem(at: stored)
+                self.banner = Banner(kind: .warning, text: problem)
+                return
+            }
+            if let dupe = await Self.duplicateOf(stored) {
+                try? FileManager.default.removeItem(at: stored)
+                self.banner = Banner(kind: .warning, text: dupe)
+                return
+            }
             if let prompt = await Self.lengthWarning(for: stored) {
                 self.longClipPrompt = prompt
             } else {
@@ -401,9 +663,7 @@ final class AppModel: ObservableObject {
                 analysis = try await ClipAnalyzer.analyze(
                     url: stored, contactTime: nil, options: options,
                     diagnostics: diagnostics,
-                    progress: { p in
-                        Task { @MainActor [weak self] in self?.analysisProgress = p }
-                    })
+                    progress: self.throttledProgress())
             } catch {
                 failure = error.localizedDescription
                 diagnostics.failure = failure
@@ -414,7 +674,8 @@ final class AppModel: ObservableObject {
             await MainActor.run {
                 self.lastDiagnostics = report
                 self.finishImport(stored: stored, setting: setting,
-                                  analysis: finalAnalysis, failure: finalFailure)
+                                  analysis: finalAnalysis, failure: finalFailure,
+                                  report: report)
                 // Back on, so returning to the Capture tab does not find a dead
                 // preview and no explanation for it.
                 if wasRunning { self.startCapture() }
@@ -464,7 +725,8 @@ final class AppModel: ObservableObject {
     private func writeTracks(for analysis: ClipAnalysis,
                              clipName: String?,
                              setting: SwingSetting,
-                             into dto: inout SwingDTO) {
+                             into dto: inout SwingDTO,
+                             report: String? = nil) {
         guard let clipName else { return }
         let base = (clipName as NSString).deletingPathExtension
 
@@ -505,10 +767,21 @@ final class AppModel: ObservableObject {
             try? data.write(to: ClipStore.trackURL(named: traceName), options: .atomic)
             dto.traceFilename = traceName
         }
+
+        // The stage-by-stage report, for every swing and not only for imports.
+        // A live-captured swing is precisely the one that cannot be re-run to
+        // find out what happened — the moment is gone — so if the report is
+        // going to exist anywhere it has to be written at capture time.
+        if let report, let data = report.data(using: .utf8) {
+            let name = base + ".report.txt"
+            try? data.write(to: ClipStore.trackURL(named: name), options: .atomic)
+            dto.diagnosticsFilename = name
+        }
     }
 
     private func finishImport(stored: URL, setting: SwingSetting,
-                              analysis: ClipAnalysis?, failure: String?) {
+                              analysis: ClipAnalysis?, failure: String?,
+                              report: String? = nil) {
         analysisProgress = nil
         guard let analysis else {
             // Kept, not deleted. A clip the pipeline made nothing of is exactly
@@ -525,12 +798,22 @@ final class AppModel: ObservableObject {
         var dto = SwingDTO(analysis: analysis, setting: setting,
                            clipFilename: name, autoTriggered: false)
         dto.captureFlags = [.importedClip]
+        // Imported INTO the round it was imported during. Without this a clip
+        // brought in mid-session vanished: "This round" filters on the session
+        // id, so the swing appeared nowhere on the screen that had just been
+        // used to import it, and the end-of-round summary never counted it.
+        //
+        // The round is where the swing was looked at, not where it was filmed,
+        // and that is the honest reading — the record still carries
+        // `.importedClip`, so nothing about its provenance is lost.
+        dto.sessionID = session?.id
         confirmBall(analysis, into: &dto)
         // Carried on the record so re-analysis uses the same lens the first
         // pass assumed, and so the horizon tool has a focal length to work
         // with. Assumed, not measured — hence the flag above.
         dto.cameraFovDeg = settings.importFovDeg
-        writeTracks(for: analysis, clipName: name, setting: setting, into: &dto)
+        writeTracks(for: analysis, clipName: name, setting: setting,
+                    into: &dto, report: report)
         do {
             try store.save(dto)
             reload()
@@ -559,11 +842,63 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: - Hardware decoder contention
+
+    /// Run a decode-heavy job, and if it fails while the camera is running,
+    /// free the hardware decoder and try once more.
+    ///
+    /// The capture session CAN hold the decoder — the documented "Operation
+    /// Interrupted after zero frames", which the import path avoids by
+    /// stopping the camera first. The live path cannot do that up front: it
+    /// analyzes the swing that just happened while staying armed for the next
+    /// one, and stopping the session between pitches would be worse than the
+    /// failure. Field evidence also says decode-while-capturing usually works
+    /// (live swings have measured). So the camera is only stopped when the
+    /// failure actually occurs, the job retried once, and the session — and
+    /// the armed state a round expects — restored after.
+    private func retryingWithFreeDecoder<T: Sendable>(
+        _ body: @Sendable () async throws -> T) async throws -> T {
+        do { return try await body() }
+        catch {
+            let (running, armed) = await MainActor.run {
+                (capture.status == .running, capture.isArmed)
+            }
+            guard running else { throw error }
+            await MainActor.run { self.stopCapture() }
+            await capture.quiesce()
+            defer {
+                Task { @MainActor in
+                    self.startCapture()
+                    if armed { self.capture.isArmed = true }
+                }
+            }
+            return try await body()
+        }
+    }
+
+    /// The overlay exporter and other view-driven decoders use the same
+    /// retry, so a mid-round export does not die on decoder contention.
+    func runFreeingDecoderIfNeeded<T: Sendable>(
+        _ body: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await retryingWithFreeDecoder(body)
+    }
+
     // MARK: - Clip handling
 
     func handleClip(_ output: ClipRecorder.Output, autoTriggered: Bool) {
-        let wasManual = pendingManual
-        pendingManual = false
+        let wasManual = output.manual
+        // Snapshot the conditions of CAPTURE, not of analysis-finish. Analysis
+        // takes seconds, and ending the round during it resets both the
+        // session and the gate override — reading them afterwards stripped the
+        // .hitterGateDisabled flag and the round membership from exactly the
+        // swing recorded under them.
+        let capturedSessionID = session?.id
+        let capturedGateOff = hitterCheckIsOff
+        // Read and cleared here, for the same reason as the two above: the
+        // controller sets it as the clip closes, and the next clip's trigger
+        // would otherwise inherit this one's verdict.
+        let capturedWrongSound = capture.lastClipHeardLouderImpulse
+        capture.lastClipHeardLouderImpulse = false
         let setting = currentSetting
         let placement = wizard.placement
         let droppedDuringClip = capture.droppedFrameCount > dropsAtClipStart
@@ -576,50 +911,67 @@ final class AppModel: ObservableObject {
         options.trackBody = settings.trackBody
 
         analysisProgress = 0
+        // A report for every swing, not only for imports. A live-captured
+        // swing is the one that cannot be re-run to find out what happened,
+        // because the moment is gone — so if the evidence is going to exist at
+        // all it has to be gathered on the pass that measures it.
+        let diagnostics = ClipDiagnostics()
 
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             var analysis: ClipAnalysis?
             var failure: String?
             do {
-                analysis = try await ClipAnalyzer.analyze(
-                    url: output.url,
-                    // Not the trigger time. The trigger fires when the crack
-                    // reaches the phone, one sound-travel-time after contact —
-                    // three frames at 240fps from a normal tripod distance,
-                    // measured against a field clip. See `contactTimeFromAudio`.
-                    contactTime: SLA.contactTimeFromAudio(
-                        audioT: output.contactOffset,
-                        distanceM: wasManual ? nil : placement.distanceM),
-                    options: options,
-                    progress: { p in
-                        Task { @MainActor [weak self] in self?.analysisProgress = p }
-                    }
-                )
+                analysis = try await self.retryingWithFreeDecoder {
+                    try await ClipAnalyzer.analyze(
+                        url: output.url,
+                        // Not the trigger time. The trigger fires when the crack
+                        // reaches the phone, one sound-travel-time after contact —
+                        // three frames at 240fps from a normal tripod distance,
+                        // measured against a field clip. See `contactTimeFromAudio`.
+                        contactTime: SLA.contactTimeFromAudio(
+                            audioT: output.contactOffset,
+                            distanceM: wasManual ? nil : placement.distanceM),
+                        options: options,
+                        diagnostics: diagnostics,
+                        progress: self.throttledProgress()
+                    )
+                }
             } catch {
                 failure = error.localizedDescription
+                diagnostics.failure = failure
             }
             let finalAnalysis = analysis
             let finalFailure = failure
+            let finalReport = diagnostics.report(detector: options.detector)
             await MainActor.run {
+                self.lastDiagnostics = finalReport
                 self.finishClip(output: output,
+                                report: finalReport,
                                 setting: setting,
                                 placement: placement,
                                 droppedFrames: droppedDuringClip,
                                 analysis: finalAnalysis,
                                 failure: finalFailure,
-                                autoTriggered: autoTriggered && !wasManual)
+                                autoTriggered: autoTriggered && !wasManual,
+                                sessionID: capturedSessionID,
+                                gateWasOff: capturedGateOff,
+                                triggeredOnWrongSound: capturedWrongSound)
             }
         }
     }
 
     private func finishClip(output: ClipRecorder.Output,
+                            report: String?,
                             setting: SwingSetting,
                             placement: PlacementWizard.Placement,
                             droppedFrames: Bool,
                             analysis: ClipAnalysis?,
                             failure: String?,
-                            autoTriggered: Bool) {
+                            autoTriggered: Bool,
+                            sessionID: UUID?,
+                            gateWasOff: Bool,
+                            triggeredOnWrongSound: Bool) {
         analysisProgress = nil
 
         let clipName = settings.keepClips
@@ -632,7 +984,8 @@ final class AppModel: ObservableObject {
             dto = SwingDTO(analysis: analysis, setting: setting,
                            clipFilename: clipName, autoTriggered: autoTriggered)
             confirmBall(analysis, into: &dto)
-            writeTracks(for: analysis, clipName: clipName, setting: setting, into: &dto)
+            writeTracks(for: analysis, clipName: clipName, setting: setting,
+                        into: &dto, report: report)
         } else {
             // A clip where tracking failed still counts — it is a G1 miss, and
             // dropping it would flatter the trackability number.
@@ -651,10 +1004,10 @@ final class AppModel: ObservableObject {
         dto.cameraFovDeg = placement.fovDeg > 0 ? placement.fovDeg : nil
         dto.visionOrientation = capture.visionOrientationForFrames
         dto.captureFlags = placement.captureFlags
-            + (hitterGateDisabledForSession ? [.hitterGateDisabled] : [])
+            + (gateWasOff ? [.hitterGateDisabled] : [])
             + (droppedFrames ? [.framesDropped] : [])
-        dto.sessionID = session?.id
-        sessionSwingCount += 1
+            + (triggeredOnWrongSound ? [.triggeredOnWrongSound] : [])
+        dto.sessionID = sessionID
 
         do {
             try store.save(dto)
@@ -684,7 +1037,32 @@ final class AppModel: ObservableObject {
         ClipStore.delete(trackNamed: swing.trackCSVFilename)
         ClipStore.delete(trackNamed: swing.poseFilename)
         ClipStore.delete(trackNamed: swing.traceFilename)
+        // The report too. Every one of the files above got a delete line when
+        // it was added and this one did not, so "Delete all swings" — which
+        // promises to remove the measurements and the footage behind them —
+        // left one .report.txt per swing behind forever, on a device the app
+        // itself warns fills quickly at 240fps.
+        ClipStore.delete(trackNamed: swing.diagnosticsFilename)
         try? store.delete(id: swing.id)
+        reload()
+    }
+
+    /// Delete every stored swing, reloading once at the end.
+    ///
+    /// The Settings button used to loop `delete(_:)` over `model.swings`, and
+    /// each of those re-fetched the whole store and rebuilt every derived
+    /// view of it — so clearing two hundred swings did two hundred full
+    /// fetches on the main thread while the confirmation sheet sat on screen
+    /// waiting to dismiss.
+    func deleteAll() {
+        for swing in swings {
+            ClipStore.delete(clipNamed: swing.clipFilename)
+            ClipStore.delete(trackNamed: swing.trackCSVFilename)
+            ClipStore.delete(trackNamed: swing.poseFilename)
+            ClipStore.delete(trackNamed: swing.traceFilename)
+            ClipStore.delete(trackNamed: swing.diagnosticsFilename)
+            try? store.delete(id: swing.id)
+        }
         reload()
     }
 
@@ -711,18 +1089,36 @@ final class AppModel: ObservableObject {
         options.trackBody = settings.trackBody
         options.forceFallbackDetector = forceFallback
         analysisProgress = 0
+        // Re-analysis gets its own report, for the same reason the first pass
+        // does: the whole point of re-measuring is to find out whether a change
+        // helped, and the stage-by-stage account is the only thing that says
+        // where it helped. Without this the button that exists to produce
+        // evidence was deleting it.
+        let diagnostics = ClipDiagnostics()
 
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
             do {
-                let analysis = try await ClipAnalyzer.analyze(
+                let analysis = try await self.retryingWithFreeDecoder {
+                    try await ClipAnalyzer.analyze(
                     url: url,
-                    contactTime: swing.contactTime > 0 ? swing.contactTime : nil,
+                    // Only a LIVE swing's contact time is a measurement — the
+                    // audio trigger. On an import the stored value is just the
+                    // first point of the PREVIOUS track, and on the tap-the-ball
+                    // recovery flow that previous track is the wrong object by
+                    // definition: feeding its start back in as "contact" made
+                    // the analyzer extrapolate the corrected fit a second past
+                    // its own data and filter out tracks starting before a
+                    // contact that never happened.
+                    contactTime: !swing.captureFlags.contains(.importedClip)
+                        && swing.contactTime > 0 ? swing.contactTime : nil,
                     options: options,
-                    progress: { p in
-                        Task { @MainActor [weak self] in self?.analysisProgress = p }
-                    })
+                    diagnostics: diagnostics,
+                    progress: self.throttledProgress())
+                }
+                let report = diagnostics.report(detector: options.detector)
                 await MainActor.run {
+                    self.lastDiagnostics = report
                     var updated = SwingDTO(analysis: analysis,
                                            setting: swing.setting,
                                            clipFilename: clipName,
@@ -744,6 +1140,13 @@ final class AppModel: ObservableObject {
                     updated.ballSeedX = swing.ballSeedX
                     updated.ballSeedY = swing.ballSeedY
                     updated.visionOrientationRaw = swing.visionOrientationRaw
+                    // The round the swing belongs to. Re-measuring a swing is
+                    // not moving it: without this line the rebuilt DTO started
+                    // with a nil session id, and "This round" filters on that,
+                    // so tapping re-measure made the swing vanish from the
+                    // round it was hit in, from that round's summary and from
+                    // the past-rounds list derived off the same field.
+                    updated.sessionID = swing.sessionID
                     // Recomputed, not carried: a re-analysis that finally
                     // found the ball must be able to CLEAR this, and one that
                     // still has not must not inherit a clean bill from before.
@@ -759,7 +1162,8 @@ final class AppModel: ObservableObject {
                     // number beside it. Anyone checking whether a fix had
                     // worked was reading stale evidence.
                     self.writeTracks(for: analysis, clipName: clipName,
-                                     setting: swing.setting, into: &updated)
+                                     setting: swing.setting, into: &updated,
+                                     report: report)
                     self.analysisProgress = nil
                     self.update(updated)
                     self.banner = AppModel.Banner(kind: .info, text: "Re-analyzed.")
@@ -781,6 +1185,8 @@ final class AppModel: ObservableObject {
     func reload() {
         do {
             swings = try store.all()
+            // Every derived-and-cached view of the swings keys off this.
+            swingsRevision &+= 1
         } catch {
             banner = Banner(kind: .error, text: "Could not read stored swings: \(error.localizedDescription)")
         }

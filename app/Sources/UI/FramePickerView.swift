@@ -89,17 +89,27 @@ struct FramePickerView: View {
         .frame(height: 220)
     }
 
+    @State private var previewRefresh: Task<Void, Never>?
+
     private var scrubber: some View {
         VStack(spacing: 4) {
             Slider(value: $scrubS, in: 0...max(0.01, durationS))
                 .tint(Theme.yellow)
-                // On the release, not continuously: an exact seek on a 240fps
-                // clip decodes a frame, and doing that per slider tick makes
-                // the whole screen crawl.
-                .onChange(of: scrubS) { _, _ in }
-                .simultaneousGesture(DragGesture().onEnded { _ in
-                    Task { await refreshPreview() }
-                })
+                // Debounced from the VALUE, not from a parallel drag gesture.
+                // The gesture needed 10 pt of travel to register, so a small
+                // nudge — or any accessibility adjustment — moved the time
+                // readout while the picture stayed on the previous frame, and
+                // "Use current" banked a time whose frame was never shown, on
+                // the tool that exists to pick exact frames. Cancel-and-restart
+                // keeps it to one decode per pause instead of one per tick.
+                .onChange(of: scrubS) { _, _ in
+                    previewRefresh?.cancel()
+                    previewRefresh = Task {
+                        try? await Task.sleep(nanoseconds: 120_000_000)
+                        guard !Task.isCancelled else { return }
+                        await refreshPreview()
+                    }
+                }
             HStack {
                 Text(String(format: "%.2f s", scrubS))
                 Spacer()
@@ -166,10 +176,9 @@ struct FramePickerView: View {
         picks = FrameExporter.defaultTimes(durationS: durationS)
         scrubS = picks.first ?? 0
 
-        let g = AVAssetImageGenerator(asset: AVURLAsset(url: clipURL))
-        g.appliesPreferredTrackTransform = true
-        g.requestedTimeToleranceBefore = .zero
-        g.requestedTimeToleranceAfter = .zero
+        // Through the shared factory, so the exact-seek contract lives in
+        // one place instead of being a convention every screen re-types.
+        let g = FrameExporter.exactSeekGenerator(for: AVURLAsset(url: clipURL))
         // The preview only has to be looked at, so it is capped — decoding a
         // full 1080p frame for a thumbnail on every scrub is wasted work. The
         // exported files are not capped.

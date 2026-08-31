@@ -15,8 +15,15 @@ import Foundation
 /// here.
 final class ContactTrigger {
 
-    /// Fired with the presentation time of the impulse.
-    var onContact: ((CMTime) -> Void)?
+    /// Fired with the presentation time of the impulse and how far it stood
+    /// over the rolling floor.
+    ///
+    /// The dB is carried because the level alone decides whether a clip was
+    /// triggered by the hit or by something else that happened to be loud.
+    /// Measured on IMG_6703: a 17.1 dB noise fires the trigger half a second
+    /// before a 37.0 dB bat crack, and without the number at fire time nothing
+    /// downstream can tell that clip from one triggered correctly.
+    var onContact: ((CMTime, Double) -> Void)?
 
     /// Everything below is touched from two queues: audio buffers arrive on
     /// the capture queue and run `process`, while arming and disarming happen
@@ -27,7 +34,24 @@ final class ContactTrigger {
     private let lock = NSLock()
 
     private var _lastDb: Double = 0
+    private var _peakDb: Double = -.infinity
+    private var _peakSinceArm: Double = -.infinity
     /// Live level for the UI, in dB over the rolling floor.
+    /// The loudest 5 ms window since the last call, then the hold resets.
+    ///
+    /// `lastDb` is only the FINAL window of the most recent buffer — a bat
+    /// crack occupies one or two windows in the middle of a ~23 ms buffer, so
+    /// any consumer sampling `lastDb` at UI rate reads the ring-out, tens of
+    /// dB under the impulse. Calibration was built on exactly that misread and
+    /// suggested thresholds the live trigger — which sees every window — then
+    /// blew straight through.
+    func consumePeakDb() -> Double {
+        lock.lock(); defer { lock.unlock() }
+        let peak = _peakDb == -.infinity ? _lastDb : _peakDb
+        _peakDb = -.infinity
+        return peak
+    }
+
     var lastDb: Double {
         lock.lock(); defer { lock.unlock() }
         return _lastDb
@@ -47,7 +71,13 @@ final class ContactTrigger {
         set { lock.lock(); _refractoryS = newValue; lock.unlock() }
     }
 
-    private var _isArmed = true
+    /// DISARMED until somebody arms it. This defaulted to true, and
+    /// `CaptureController` only synced it when its own `isArmed` CHANGED — so
+    /// from the moment the camera configured until the first press of ARM, the
+    /// trigger was live while the screen said "2 · Arm". A bat drop, a clap,
+    /// or a door recorded a clip from a ring buffer that was still discarding
+    /// late frames, on a phone whose owner had not armed anything.
+    private var _isArmed = false
     var isArmed: Bool {
         get { lock.lock(); defer { lock.unlock() }; return _isArmed }
         set { lock.lock(); _isArmed = newValue; lock.unlock() }
@@ -69,6 +99,7 @@ final class ContactTrigger {
         floorHistory.removeAll()
         carry.removeAll()
         lastFireTime = -.infinity
+        _peakSinceArm = -.infinity
         lock.unlock()
     }
 
@@ -85,7 +116,7 @@ final class ContactTrigger {
         // Impulses are collected and fired after the lock is released: the
         // callback hops to the pipeline queue, and calling out from inside a
         // lock that the pipeline queue also takes is how deadlocks are made.
-        var fires: [Double] = []
+        var fires: [(Double, Double)] = []
 
         lock.lock()
         carry.append(contentsOf: mono)
@@ -101,6 +132,7 @@ final class ContactTrigger {
             let floor = medianFloor() + 1e-9
             let db = 20 * log10(rms / floor)
             _lastDb = db
+            if db > _peakDb { _peakDb = db }
 
             let windowTime = startSeconds
                 + Double(offset) / sampleRate
@@ -111,8 +143,15 @@ final class ContactTrigger {
                floorHistory.count >= maxFloorSamples / 2,
                windowTime - lastFireTime >= _refractoryS {
                 lastFireTime = windowTime
-                fires.append(windowTime)
+                fires.append((windowTime, db))
             }
+            // Measured even when the trigger is disarmed, which is the state
+            // it is in for the whole of a clip. The loudest thing heard while
+            // recording is the evidence that the thing which STARTED the
+            // recording was not the hit — on IMG_6703 the trigger fired on
+            // 17.1 dB and the bat crack 0.5 s later reached 37.0, and by then
+            // the trigger had been disarmed and never saw it.
+            if db > _peakSinceArm { _peakSinceArm = db }
 
             floorHistory.append(rms)
             if floorHistory.count > maxFloorSamples { floorHistory.removeFirst() }
@@ -128,9 +167,20 @@ final class ContactTrigger {
         }
         lock.unlock()
 
-        for windowTime in fires {
-            onContact?(CMTime(seconds: windowTime, preferredTimescale: 44_100))
+        for (windowTime, db) in fires {
+            onContact?(CMTime(seconds: windowTime, preferredTimescale: 44_100), db)
         }
+    }
+
+    /// The loudest window since this was last called, over the rolling floor.
+    /// Unlike `consumePeakDb` this is not reset by the UI meter — it exists so
+    /// the recording path can ask "was anything in that clip much louder than
+    /// what triggered it" without racing the meter for the same value.
+    func consumePeakSinceArm() -> Double {
+        lock.lock(); defer { lock.unlock() }
+        let peak = _peakSinceArm
+        _peakSinceArm = -.infinity
+        return peak
     }
 
     private func medianFloor() -> Double {

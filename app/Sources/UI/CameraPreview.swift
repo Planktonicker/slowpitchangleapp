@@ -180,11 +180,6 @@ struct CameraPreview: UIViewRepresentable {
             onTap(devicePoint, location)
         }
 
-        /// Where a camera point lands on screen — used to draw the reticle
-        /// back over the ball the detector actually found.
-        func layerPoint(fromDevicePoint point: CGPoint) -> CGPoint {
-            videoPreviewLayer.layerPointConverted(fromCaptureDevicePoint: point)
-        }
 
         override func didMoveToWindow() {
             super.didMoveToWindow()

@@ -73,7 +73,23 @@ enum TrackBuilder {
                 // roughly a hundred times the turn any real flight makes in one
                 // frame at 240fps, which is the point — this refuses reversals,
                 // it does not enforce smoothness.
-                let heading = speedPxPerFrame >= SLA.buildTurnMinStepPx
+                // The GATE keeps the last-pair velocity above: it predicts
+                // where the object will be next, and the freshest estimate is
+                // right for that. The HEADING is fitted over a window, because
+                // it answers a different question — which way has this been
+                // going — and the last pair is the worst possible evidence for
+                // it right at a reversal.
+                //
+                // On a real clip the ball arrived at 10 px a frame and its very
+                // last step before contact measured 4.98, because the last step
+                // before contact is when the ball is slowest. Read from that
+                // pair the heading fell 0.02 px under the floor, the guard
+                // switched off for exactly that frame, and one 59-frame track
+                // came out that was half incoming ball and half struck ball.
+                // Over five observations the same moment reads 8.98.
+                let head = segmentVelocity(Array(obs.suffix(SLA.buildHeadingWindow)))
+                let headingSpeed = (head.vx * head.vx + head.vy * head.vy).squareRoot()
+                let heading = headingSpeed / fps >= SLA.buildTurnMinStepPx
                 let cosMax = cos(SLA.buildMaxTurnDeg * .pi / 180)
 
                 var inGate: [(d: Double, ci: Int)] = []
@@ -98,7 +114,8 @@ enum TrackBuilder {
                     let c0 = cands[best.ci]
                     let sx = c0.x - last.x, sy = c0.y - last.y
                     let step = (sx * sx + sy * sy).squareRoot()
-                    if step > 1e-9, (sx * vx + sy * vy) / (step * speed) < cosMax {
+                    if step > 1e-9,
+                       (sx * head.vx + sy * head.vy) / (step * headingSpeed) < cosMax {
                         continue
                     }
                 }
@@ -453,9 +470,22 @@ enum TrackBuilder {
         return (dx * dx + dy * dy).squareRoot() / walked
     }
 
+    /// - Parameter contactTime: when the caller knows it. A hit ball did not
+    ///   exist before the bat met it, so any track already in flight at contact
+    ///   is something else — the pitch above all, which is the one piece of
+    ///   clutter that survives every other filter: it is a ball, it genuinely
+    ///   moves, it is straight, and it is fast. Speed alone usually beats it
+    ///   because a hit is three to seven times quicker, and usually is not
+    ///   always: a mis-hit dribbles out slower than the pitch came in, and then
+    ///   the fastest track in the clip is the pitch. Nothing but the contact
+    ///   instant separates those two.
+    ///
+    ///   `.auto` does NOT infer a direction — it cannot, from one track. It
+    ///   means "no direction constraint". Mirrors `select_outbound_track`.
     static func selectOutboundTrack(_ tracks: [[BallObservation]],
                                     direction: Direction = .auto,
-                                    minLen: Int = SLA.minTrackFrames) -> [BallObservation]? {
+                                    minLen: Int = SLA.minTrackFrames,
+                                    contactTime: Double? = nil) -> [BallObservation]? {
         struct Scored {
             /// Speed alone. Length used to multiply this, and in slow-pitch
             /// that is exactly backwards: a lobbed pitch is slow and hangs in
@@ -489,6 +519,15 @@ enum TrackBuilder {
         // raggedly enough to fail it.
         let straight = scored.filter { $0.straightness >= SLA.trackStraightnessMin }
         scored = straight.isEmpty ? scored : straight
+
+        // Then, when contact is known, only what began at or after it. Same
+        // fall-back rule: a filter that empties the pool has told us nothing.
+        if let contactTime {
+            let after = scored.filter {
+                ($0.track.first?.t ?? 0) >= contactTime - SLA.selectContactTolS
+            }
+            if !after.isEmpty { scored = after }
+        }
 
         // Descending by score; the index tiebreak reproduces Python's stable
         // sort so the two implementations pick the same track on a tie.

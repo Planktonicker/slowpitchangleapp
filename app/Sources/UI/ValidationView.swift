@@ -15,35 +15,37 @@ struct ValidationView: View {
 
     private var board: ValidationScoreboard { model.scoreboard }
 
+    /// No `NavigationStack` of its own. This is pushed from Settings now, and
+    /// a stack inside a stack gives two title bars and a back button that goes
+    /// nowhere.
     var body: some View {
-        NavigationStack {
-            List {
-                verdictSection
-                g1Section
-                g2Section
-                g3Section
-                g4Section
-                g5Section
-            }
-            .navigationTitle("Validation")
-            .scrollContentBackground(.hidden)
-            .background(Theme.black)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        if let url = try? CSVExport.write(
-                            CSVExport.scoreboardText(board),
-                            filename: "validation_scoreboard.txt") {
-                            shareURLs = [url]
-                            showShare = true
-                        }
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
+        List {
+            verdictSection
+            g1Section
+            g2Section
+            g3Section
+            g4Section
+            g5Section
+        }
+        .navigationTitle("Validation")
+        .navigationBarTitleDisplayMode(.inline)
+        .scrollContentBackground(.hidden)
+        .background(Theme.black)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    if let url = try? CSVExport.write(
+                        CSVExport.scoreboardText(board),
+                        filename: "validation_scoreboard.txt") {
+                        shareURLs = [url]
+                        showShare = true
                     }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
                 }
             }
-            .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }
         }
+        .sheet(isPresented: $showShare) { ShareSheet(items: shareURLs) }
     }
 
     private var verdictSection: some View {

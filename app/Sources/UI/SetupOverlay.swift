@@ -431,7 +431,12 @@ struct SetupOverlay: View {
             // The one line that would have saved the first field trip. It sits
             // ON the guide rather than in the advisory list, because the guide
             // is what the user is looking at while they move the tripod.
-            if !valid {
+            // Only when the tilt is past what the rectifier can undo. A camera
+            // aiming up six degrees is a corrected camera, not a broken one,
+            // and shouting AIM LEVEL FIRST at it in red — over an outline, a
+            // horizon band, a flight arrow and a distance card — was both
+            // wrong and most of the noise on this screen.
+            if !valid, showsHardWarning {
                 Text(invalidGuideReason)
                     .font(Theme.label(10)).tracking(1.1)
                     .multilineTextAlignment(.center)
@@ -451,6 +456,21 @@ struct SetupOverlay: View {
         }
     }
 
+    /// Whether the placement is bad enough to say so loudly.
+    ///
+    /// The bar moved when tilt stopped being a requirement. Inside
+    /// `tiltCorrectableMaxDeg` the track is warped back to a level view before
+    /// anything is measured and the reading is exact under a pinhole model —
+    /// measured error at 20 degrees of tilt is about a degree of launch angle,
+    /// and zero once the rectifier has run. That is not a red banner; it is a
+    /// correction the app makes silently and records. Past the correctable
+    /// range it is, because there the lens's own distortion takes over and
+    /// nothing downstream can undo it.
+    private var showsHardWarning: Bool {
+        let level = wizard.level
+        return level.hasReading && abs(level.tiltDeg) > SLA.tiltCorrectableMaxDeg
+    }
+
     /// Why the outline is not a target right now, worst cause first.
     ///
     /// Tilt outranks height because it is both the more damaging fault and the
@@ -459,8 +479,8 @@ struct SetupOverlay: View {
     /// error for a real one.
     private var invalidGuideReason: String {
         let level = wizard.level
-        if level.hasReading, !level.isTiltOK {
-            return String(format: "AIM LEVEL FIRST — CAMERA IS %.0f° %@\nTHIS OUTLINE ASSUMES A LEVEL LENS",
+        if level.hasReading, abs(level.tiltDeg) > SLA.tiltCorrectableMaxDeg {
+            return String(format: "AIMING %.0f° %@ — TOO STEEP TO CORRECT\nBRING IT CLOSER TO LEVEL",
                           abs(level.tiltDeg), level.tiltDeg > 0 ? "DOWN" : "UP")
         }
         if let h = wizard.lensHeightEstimateM {
@@ -493,11 +513,14 @@ struct SetupOverlay: View {
                         footFraction: isLandscape ? 0.80 : 0.64)
         guard fov > 5 else { return fallback }
 
-        let horizontalHalf = fov * .pi / 360
-        let visibleVerticalHalf = isLandscape
-            ? atan(tan(horizontalHalf) / max(0.1, screenAspect))
-            : horizontalHalf
-        let visibleMetres = 2 * targetDistanceM * tan(visibleVerticalHalf)
+        // Through CameraPose, which also places the horizon guide on this
+        // same preview. Two framing aids deriving the crop independently is
+        // how a future correction moves one and not the other, and the two
+        // contradict each other on the one screen meant to be trusted.
+        guard let vHalfDeg = CameraPose.visibleVerticalHalfAngleDeg(
+            horizontalFovDeg: fov, isLandscape: isLandscape,
+            screenAspect: screenAspect) else { return fallback }
+        let visibleMetres = 2 * targetDistanceM * tan(vHalfDeg * .pi / 180)
         guard visibleMetres > 0.1 else { return fallback }
 
         // The lens is at contact height, so the ground is `lensHeightM` below
@@ -783,7 +806,7 @@ struct SetupOverlay: View {
             if let advice = wizard.topAdvisory {
                 Text(advice.text)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(advice.level == .blocking ? Theme.warn : Theme.steel)
+                    .foregroundStyle(advice.level == .warning ? Theme.warn : Theme.steel)
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)

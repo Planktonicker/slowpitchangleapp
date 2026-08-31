@@ -78,6 +78,26 @@ FLAG_NO_GRAVITY_CHECK = "NO_GRAVITY_CHECK"
 FLAG_SCALE_DISAGREE = "SCALE_DISAGREE"
 FLAG_DEPTH_MOTION = "DEPTH_MOTION"
 FLAG_HIGH_RESIDUAL = "HIGH_RESIDUAL"
+FLAG_CONTACT_TIME_REJECTED = "CONTACT_TIME_REJECTED"
+
+# How far before the track's first sighting a supplied contact time may sit
+# before it stops being believable.
+#
+# The reason to extrapolate backwards at all is occlusion: the ball leaves the
+# bat behind the hitter's body and the first frames of the flight are hidden,
+# so the fit is evaluated at contact rather than at the first sighting. That is
+# a handful of frames. 60 ms is fourteen at 240fps — a ball leaving at 25 px a
+# frame stays hidden for 350 px of travel, which is wider than a hitter is in a
+# 1280-wide frame.
+#
+# Beyond that the number is not an occlusion correction, it is a false trigger.
+# Measured on IMG_6703: a 17 dB noise 0.5 s before contact fires the trigger at
+# the default threshold, the refractory window then covers the real 37 dB crack,
+# and the clip is saved with a contact time half a second early. Handed to the
+# fit, that same 30-frame track reported +4.25 deg and 105.26 mph instead of
+# -5.83 deg and 70.96 mph — a 48% exit-velocity inflation — WITH THE SAME FLAGS
+# as the correct answer. Nothing in the output told the two apart.
+CONTACT_MAX_BACK_EXTRAPOLATION_S = 0.06
 
 
 # ---------------------------------------------------------------------------
@@ -164,9 +184,25 @@ def motion_mask(
     barely changes between frames. Growing the mask closes it back into one
     blob, so the colour stage sees a whole ball rather than two crescents that
     fail the roundness gate.
+
+    `dilate_px` must be odd. An even kernel has no centre pixel, so OpenCV
+    anchors it at ``(k//2, k//2)`` and grows the mask ONE-SIDEDLY — 2 gives a
+    3x3 block offset down and right of the moved pixel, not a centred one. The
+    Swift port (`MotionMask.mask`) dilates with a symmetric radius, which is
+    exact for odd kernels and wrong for even ones, and the difference is not
+    cosmetic: the gate decides which blobs survive, and a differently-cut blob
+    has a different minor axis, which is the ball diameter, which is the scale
+    behind every number the app reports. Refused rather than silently
+    diverging, because the only thing that would notice is a field trip.
     """
     if prev_gray is None:
         return None
+    if dilate_px > 0 and dilate_px % 2 == 0:
+        raise ValueError(
+            f"dilate_px must be odd (got {dilate_px}); "
+            "even kernels dilate one-sidedly in OpenCV and the Swift port "
+            "cannot reproduce that with a symmetric radius"
+        )
     diff = cv2.absdiff(gray, prev_gray)
     mask = (diff > threshold).astype(np.uint8) * 255
     if dilate_px > 0:
@@ -352,6 +388,25 @@ BUILD_MAX_TURN_DEG = 60.0
 # pitch, which runs 11.
 BUILD_TURN_MIN_STEP_PX = 5.0
 
+# Observations the heading is fitted over.
+#
+# NOT the last pair, and this is the whole of a real failure. On a field clip
+# the ball arrived down-left at 10 px a frame, and on the very last step before
+# contact it moved 4.98 — because the last step before contact is exactly when
+# the ball is slowest. Read from that one pair the heading fell 0.02 px under
+# the floor, the guard switched itself off for that frame, and association
+# walked straight through the reversal: one 59-frame "track", half of it the
+# incoming ball and half the struck one, straightness 0.33, reported as a swing
+# at -37.9 degrees.
+#
+# A heading is a property of where a track has been going, not of its last two
+# points, and the noisiest single step is the one that matters most. Fitted
+# over five the same moment reads 8.98 px a frame and the reversal is refused
+# at 151 degrees. This also makes the floor stricter against clutter rather
+# than looser: jitter that alternates direction averages toward zero over a
+# window, where a single lucky pair can look like travel.
+BUILD_HEADING_WINDOW = 5
+
 
 def build_tracks(
     per_frame: dict[int, list[BallObservation]],
@@ -414,7 +469,16 @@ def build_tracks(
             speed = math.hypot(vx, vy)
             speed_px_fr = speed / fps
             gate = max(base_gate_px, 2.5 * speed_px_fr) * gap
-            heading = speed_px_fr >= BUILD_TURN_MIN_STEP_PX
+
+            # The GATE keeps the last-pair velocity: it is a prediction of
+            # where the object will be next, and the freshest estimate is the
+            # right one for that. The HEADING is fitted over a window, because
+            # it answers a different question — which way has this been going —
+            # and the last pair is the worst possible evidence for it right at
+            # a reversal. See BUILD_HEADING_WINDOW.
+            hvx, hvy = _segment_velocity(obs[-BUILD_HEADING_WINDOW:])
+            heading_speed = math.hypot(hvx, hvy)
+            heading = heading_speed / fps >= BUILD_TURN_MIN_STEP_PX
             cos_max = math.cos(math.radians(BUILD_MAX_TURN_DEG))
 
             in_gate: list[tuple[float, int]] = []
@@ -440,7 +504,7 @@ def build_tracks(
                 c0 = cands[ci0]
                 sx, sy = c0.x - obs[-1].x, c0.y - obs[-1].y
                 step = math.hypot(sx, sy)
-                if step > 1e-9 and (sx * vx + sy * vy) / (step * speed) < cos_max:
+                if step > 1e-9 and (sx * hvx + sy * hvy) / (step * heading_speed) < cos_max:
                     continue
 
             for d, ci in in_gate:
@@ -862,13 +926,35 @@ def _prune_to_ballistic(track: list[BallObservation], passes: int = 2) -> list[B
         rel = [t - t0 for t in ts]
         # x is linear in t, y is quadratic — the physical model, not a
         # y-versus-x curve, which is ill-conditioned for a steep flight.
+        #
+        # Every accumulation below is spelled out left-to-right rather than
+        # handed to sum(), for the reason `_segment_velocity` gives: CPython
+        # 3.12 gave sum() Neumaier compensated summation for floats and the
+        # Swift port (`TrackBuilder.pruneToBallistic`) uses a naive reduce.
+        # This function is where that matters MOST, not least: the seed_track
+        # fixtures pin discrete outputs — expected_len, expected_first_frame,
+        # expected_last_frame — so a last-ulp difference in a residual that
+        # happens to land on `limit` keeps an observation on one side and drops
+        # it on the other, and the parity failure is an integer mismatch with
+        # nothing anywhere naming the cause.
         n = len(out)
-        mean_t = sum(rel) / n
-        var_t = sum((t - mean_t) ** 2 for t in rel)
+        acc = 0.0
+        for t in rel:
+            acc += t
+        mean_t = acc / n
+        var_t = 0.0
+        for t in rel:
+            var_t += (t - mean_t) ** 2
         if var_t <= 1e-12:
             return out
-        vx = sum((rel[i] - mean_t) * out[i].x for i in range(n)) / var_t
-        x0 = sum(o.x for o in out) / n - vx * mean_t
+        num = 0.0
+        for i in range(n):
+            num += (rel[i] - mean_t) * out[i].x
+        vx = num / var_t
+        sum_x = 0.0
+        for o in out:
+            sum_x += o.x
+        x0 = sum_x / n - vx * mean_t
         coeffs, _rms = fit_quadratic(np.asarray(rel), np.asarray([o.y for o in out]))
         res = []
         for i, o in enumerate(out):
@@ -945,11 +1031,26 @@ def track_straightness(track: list[BallObservation]) -> float:
     return net / walked
 
 
+# A hit ball did not exist before the bat met it. Anything already in flight at
+# contact is something else — the pitch, most obviously, which is the one piece
+# of clutter that survives every other filter: it is a ball, it is genuinely
+# moving, it is straight, and it is fast.
+#
+# Tolerance because the two clocks are not the same clock. The audio trigger
+# fires a sound-travel-time after contact (corrected for, but not perfectly),
+# and the detector's first sighting of the hit can land a frame or two either
+# side of it. 50 ms is twelve frames at 240fps — far wider than that error, and
+# far narrower than the several hundred milliseconds a pitch spends in frame
+# before contact, which is the gap this actually has to resolve.
+SELECT_CONTACT_TOL_S = 0.05
+
+
 def select_outbound_track(
     tracks: list[list[BallObservation]],
     fps: float,
     direction: str = "auto",     # "left" | "right" | "auto"
     min_len: int = MIN_TRACK_FRAMES,
+    contact_time: float | None = None,
 ) -> list[BallObservation] | None:
     """Pick the hit ball: the FASTEST coherent track going the right way.
 
@@ -975,8 +1076,19 @@ def select_outbound_track(
     doubtful and flagged.
 
     An inbound pitch also travels, straight and fast enough to survive both
-    filters, so `direction` is what finally excludes it: it crosses the frame
-    the opposite way to the hit.
+    filters. Two things exclude it.
+
+    `contact_time`, when the caller knows it, is the reliable one: a hit ball
+    did not exist before the bat met it, so any track already in flight at
+    contact is something else. This is a preference like straightness — if
+    nothing starts after contact the whole field is scored anyway.
+
+    `direction` is the fallback, and only when the caller states it. "auto"
+    does NOT infer a direction; it cannot, from one track. It means "no
+    direction constraint", so on a clip with no contact time the pitch is
+    excluded by being slower than the hit and by nothing else. That is usually
+    enough — a hit is three to seven times faster — and it is not always
+    enough, which is why the ball can be pointed at by hand.
     """
     scored = []
     for tr in tracks:
@@ -999,6 +1111,15 @@ def select_outbound_track(
     # than reporting no ball.
     straight = [s for s in scored if s[1] >= TRACK_STRAIGHTNESS_MIN]
     pool = straight if straight else scored
+
+    # Then, when contact is known, keep only what began at or after it. Same
+    # fall-back rule: a filter that empties the pool has told us nothing, and
+    # returning nothing is worse than returning something doubtful and flagged.
+    if contact_time is not None:
+        after = [s for s in pool if s[3][0].t >= contact_time - SELECT_CONTACT_TOL_S]
+        if after:
+            pool = after
+
     pool.sort(key=lambda s: -s[0])
     scored = pool
 
@@ -1207,6 +1328,24 @@ def analyze_track(
     flags: list[str] = []
     n = len(track)
     t0 = contact_time if contact_time is not None else track[0].t
+    # A contact time far earlier than the flight is not a contact time.
+    #
+    # The fit is a quadratic in t evaluated at t0, so a t0 half a second before
+    # the first sighting does not merely shift the answer, it EXTRAPOLATES the
+    # curve back over ten times the span it was fitted on, and reports the
+    # velocity of a moment the camera never saw. There was no guard: whatever
+    # the caller passed was used, however far away, and the result carried the
+    # same flags as a clean reading. See CONTACT_MAX_BACK_EXTRAPOLATION_S for
+    # the field measurement that produced this.
+    #
+    # Falling back to the first sighting rather than refusing the swing: that
+    # is what the analyzer does when it is given no contact time at all, it is
+    # the best defensible number available from this track, and on the clip
+    # above it recovers the correct reading to a tenth of a degree. The flag is
+    # what stops it being reported as if the trigger had been right.
+    if contact_time is not None and track[0].t - t0 > CONTACT_MAX_BACK_EXTRAPOLATION_S:
+        flags.append(FLAG_CONTACT_TIME_REJECTED)
+        t0 = track[0].t
     ts = np.array([o.t for o in track]) - t0
     xs = np.array([o.x for o in track])
     ys = np.array([o.y for o in track])

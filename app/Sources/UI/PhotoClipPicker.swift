@@ -116,20 +116,21 @@ struct PhotoClipPicker: UIViewControllerRepresentable {
                 return
             }
             provider.loadFileRepresentation(forTypeIdentifier: type) { [weak self] url, error in
-                DispatchQueue.main.async {
-                    guard let url else {
+                // The provider's file is deleted the moment this closure
+                // returns — which is why the copy happens HERE, synchronously,
+                // on the provider's queue. The old code hopped to the main
+                // queue first, returned, and then tried to copy a file the
+                // system had already deleted: every clip taking this fallback
+                // failed with "could not read that file" despite being fine.
+                // Only the RESULT goes to the main queue.
+                guard let url else {
+                    DispatchQueue.main.async {
                         self?.onPick(.failure(error ?? PickError.notAMovie))
-                        return
                     }
-                    // The provider's file is deleted the moment this closure
-                    // returns, so it has to be copied, not referenced.
-                    do {
-                        let dst = try ClipStore.importClip(from: url)
-                        self?.onPick(.success(dst))
-                    } catch {
-                        self?.onPick(.failure(error))
-                    }
+                    return
                 }
+                let result = Result { try ClipStore.importClip(from: url) }
+                DispatchQueue.main.async { self?.onPick(result) }
             }
         }
     }

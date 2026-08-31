@@ -52,22 +52,6 @@ struct RootView: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: model.banner)
-        // Hosted here rather than on the importing screen, because there are
-        // three ways in now — the Files picker, the Photos picker, and the
-        // history sheet on the start screen — and all of them dismiss
-        // themselves before the analysis starts.
-        .alert("That is a long clip",
-               isPresented: Binding(get: { model.longClipPrompt != nil },
-                                    set: { if !$0 { model.longClipPrompt = nil } }),
-               presenting: model.longClipPrompt) { prompt in
-            Button("Measure it anyway") {
-                model.longClipPrompt = nil
-                model.beginAnalysis(of: prompt.url)
-            }
-            Button("Cancel", role: .cancel) { model.longClipPrompt = nil }
-        } message: { prompt in
-            Text(prompt.message)
-        }
     }
 
     private var sessionTabs: some View {

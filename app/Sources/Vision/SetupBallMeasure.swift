@@ -322,24 +322,15 @@ enum SetupBallMeasure {
         let w = roi.x1 - roi.x0, h = roi.y1 - roi.y0
         guard w > 8, h > 8 else { return .failed(.nothingThere, trace: "window clipped away") }
 
-        var mask = [UInt8](repeating: 0, count: w * h)
-        for yy in 0..<h {
-            let iy = roi.y0 + yy
-            let rowBase = yy * w
-            for xx in 0..<w {
-                let p = image.pixel(x: roi.x0 + xx, y: iy)
-                if HSVConvert.inRange(b: p.b, g: p.g, r: p.r,
-                                      lo: settings.hsvLo, hi: settings.hsvHi) {
-                    mask[rowBase + xx] = 255
-                }
-            }
-        }
-        Morphology.open(&mask, width: w, height: h)
         // Closing repairs the holes that seams, stitching and printed lettering
         // punch in a real ball's mask. It can also bridge the ball into what it
         // rests on, so it is one variant among several rather than the default,
         // and a bridged blob is caught by the elongation and ray gates anyway.
-        if close { Morphology.close(&mask, width: w, height: h) }
+        // The stage itself is the shared one — see `maskAfterMorphology`.
+        let mask = BallDetector.maskAfterMorphology(image: image, roi: roi,
+                                                    lo: settings.hsvLo,
+                                                    hi: settings.hsvHi,
+                                                    motion: nil, close: close)
 
         let (blobs, labels) = ConnectedComponents.labelDetailed(mask: mask, width: w, height: h)
 
