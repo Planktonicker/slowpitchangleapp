@@ -27,6 +27,12 @@ jobs:
   build-and-test:
     runs-on: macos-latest
     timeout-minutes: 30
+    # Needed only by the screenshot step, which pushes rendered PNGs to their
+    # own branch. Artifact upload cannot be used for them: the artifact store
+    # lives on a host this project's tooling cannot reach, so an uploaded
+    # screenshot is one nobody can look at.
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -105,6 +111,38 @@ jobs:
             -destination "platform=iOS Simulator,name=$SIM_NAME,OS=$SIM_OS" \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee -a /tmp/xcodebuild.log
+
+      # The pictures. `SetupShotTests` renders the setup panels and the HUD
+      # controls to PNG during the test run and writes them beside the source
+      # tree; this puts them on a branch of their own so they can be looked at.
+      #
+      # A branch, not an artifact, and not `main`: the workflow triggers on
+      # `main` and `claude/**` (see `on:` above), so publishing here would
+      # retrigger it forever. The branch is orphaned and force-pushed every
+      # run, so the binaries never accumulate into the repository's history.
+      - name: Publish screenshots
+        if: always()
+        run: |
+          set -e
+          shopt -s nullglob
+          shots=(build/shots/*.png)
+          if [ ${#shots[@]} -eq 0 ]; then
+            echo "No screenshots were rendered — nothing to publish."
+            exit 0
+          fi
+          echo "Rendered ${#shots[@]} screenshots."
+          staging=$(mktemp -d)
+          cp build/shots/*.png "$staging/"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --orphan screenshots
+          rm -rf build
+          mkdir -p shots
+          cp "$staging"/*.png shots/
+          git add -f shots
+          git commit -q -m "Screenshots from ${GITHUB_SHA:0:7} on ${GITHUB_REF_NAME}"
+          git push -f origin screenshots
+          echo "Published to the 'screenshots' branch."
 
       # An xcodebuild log runs to tens of thousands of lines. The summary is
       # what makes a failure readable in one look rather than ten.
