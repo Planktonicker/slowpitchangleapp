@@ -355,12 +355,13 @@ final class CaptureController: NSObject, ObservableObject {
             session.removeConnection(existing)
             previewConnection = nil
         }
-        // Layer mutations are implicitly animated; that animation on a preview
-        // layer reads as a flash of black.
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
+        // No CATransaction here, for the reason spelled out in
+        // `applyPreviewRotation`: a commit from this queue drains the main
+        // thread's pending layout onto it. The implicit animation this used to
+        // suppress — which on a preview layer reads as a flash of black — is
+        // turned off on the layer itself instead, once, in
+        // `CameraPreview.PreviewLayerView.init`.
         layer.setSessionWithNoConnection(session)
-        CATransaction.commit()
 
         let connection = AVCaptureConnection(inputPort: port, videoPreviewLayer: layer)
         guard session.canAddConnection(connection) else { return }
@@ -370,7 +371,18 @@ final class CaptureController: NSObject, ObservableObject {
         // whatever the last known one was before anything is drawn through it.
         if let angle = lastPreviewRotationAngle { applyPreviewRotation(angle) }
 
-        installRotationCoordinator(device: input.device, layer: layer)
+        // Re-enqueued rather than called here. `RotationCoordinator`'s init
+        // has to read the layer's window and scene, which is main-thread work,
+        // and this call site still holds the session's begin/commit pair — the
+        // commit is in the `defer` above. Reaching for the main thread while
+        // holding that lock is the same shape of trouble as the transaction
+        // above. `sessionQueue` is serial, so this simply runs once the commit
+        // has returned, and `rotationCoordinator` and `rotationObservations`
+        // stay owned by the queue that has always owned them.
+        let device = input.device
+        sessionQueue.async { [weak self] in
+            self?.installRotationCoordinator(device: device, layer: layer)
+        }
     }
 
     /// Re-apply the current rotation to whatever connection exists now.
@@ -427,10 +439,31 @@ final class CaptureController: NSObject, ObservableObject {
         lastPreviewRotationAngle = angle
         guard let connection = previewConnection,
               connection.isVideoRotationAngleSupported(angle) else { return }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        connection.videoRotationAngle = angle
-        CATransaction.commit()
+        // The write, and its transaction, on the MAIN thread — this is the
+        // rotation hang.
+        //
+        // This connection belongs to the preview layer, so setting its angle
+        // moves geometry in the window's layer tree. CoreAnimation's
+        // needs-layout set is process-wide, not per-transaction: whichever
+        // thread commits next drains it. A commit from `sessionQueue`
+        // therefore pulls whatever layout the main thread has outstanding onto
+        // `sessionQueue` — and the one moment this code runs is a rotation,
+        // when the main thread has the entire hierarchy marked needs-layout
+        // and is part way through it. Two threads then run UIKit layout over
+        // the same views and the update wedges: a landscape guide and a
+        // landscape tab bar inside a portrait window, with the picture already
+        // turned because THIS write is the half that got through.
+        //
+        // This is not the `layer.session` rule from CLAUDE.md. That rule is
+        // about BUILDING the graph, which really does block for seconds
+        // against a running 240fps session. Writing an angle to a connection
+        // that already exists is a property write on a UI object.
+        DispatchQueue.main.async {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            connection.videoRotationAngle = angle
+            CATransaction.commit()
+        }
     }
 
     private func setVisionOrientation(_ orientation: CGImagePropertyOrientation) {

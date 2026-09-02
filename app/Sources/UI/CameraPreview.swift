@@ -393,6 +393,21 @@ struct CameraPreview: UIViewRepresentable {
         override init(frame: CGRect) {
             super.init(frame: frame)
             videoPreviewLayer.videoGravity = .resizeAspectFill
+            // Implicit animation off on the layer itself, once and for good.
+            //
+            // Some of this layer's geometry is mutated from `sessionQueue` —
+            // attaching the session, and the connection's rotation angle — and
+            // UIKit's usual suppression only applies on the main thread, which
+            // is what made an attach flash black. The old cure was a
+            // CATransaction around each mutation, but a transaction COMMITTED
+            // off the main thread drains the main thread's pending layout onto
+            // that queue, and during a rotation that hangs the app. Declaring
+            // the actions once needs no transaction at all.
+            videoPreviewLayer.actions = [
+                "bounds": NSNull(), "position": NSNull(), "transform": NSNull(),
+                "contents": NSNull(), "sublayers": NSNull(), "hidden": NSNull(),
+                "onOrderIn": NSNull(), "onOrderOut": NSNull(),
+            ]
             layer.addSublayer(skeletonLayer)
             layer.addSublayer(jointLayer)
             layer.addSublayer(plateLineLayer)
