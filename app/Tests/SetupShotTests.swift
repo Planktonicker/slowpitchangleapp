@@ -23,6 +23,10 @@ import XCTest
 /// So these are the PARTS, at the sizes they really get, in states chosen by
 /// hand. That is enough to catch the faults above, and it is not a substitute
 /// for looking at a phone.
+///
+/// One artefact to know before reading the images: `ImageRenderer` does not
+/// draw a `Menu`'s label, so the "..." control in the hitter panel comes out as
+/// a missing-symbol sign. It is correct on device. Do not chase it.
 @MainActor
 final class SetupShotTests: XCTestCase {
 

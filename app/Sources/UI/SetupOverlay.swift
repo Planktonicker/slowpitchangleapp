@@ -180,7 +180,13 @@ struct SetupOverlay: View {
 
     private func rightInset(in size: CGSize, isLandscape: Bool) -> Double {
         guard isLandscape else { return 0 }
-        return Double((Self.panelWidth + 28) / max(1, size.width))
+        // A margin, not the panel's whole column. This used to fence off the
+        // full 300 pt width for its entire height, from when the panel WAS a
+        // full-height column — and it cost the guide two fifths of a landscape
+        // frame, so the flight arrow stopped short in the middle of the screen
+        // with nothing beside it. The panel now sits against the bottom, and
+        // the arrow climbs to the top right, so they do not meet.
+        return Double(28 / max(1, size.width))
     }
 
     /// Points, not a fraction of each axis: it is the same stack of controls in

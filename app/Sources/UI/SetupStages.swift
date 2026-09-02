@@ -502,6 +502,7 @@ struct HitterStagePanel: View {
         HStack(spacing: 8) {
             Button("Back") { onBack() }
                 .buttonStyle(OutlineButtonStyle(verticalPadding: 8, cornerRadius: 10))
+                .frame(width: 96)
             methodMenu
             // An explicit Text label: a ternary of two string literals can
             // match both the LocalizedStringKey and the StringProtocol
@@ -564,8 +565,12 @@ struct ReadyStagePanel: View {
             // phone and left Back half-drawn against the panel's edge, which
             // reads as a broken screen rather than as something to scroll.
             HStack(spacing: 8) {
+                // Fixed and narrow. Left to itself the outlined button split
+                // the row evenly with Arm, so the way OUT of the screen was as
+                // prominent as the thing the screen exists to do.
                 Button("Back") { onBack() }
                     .buttonStyle(OutlineButtonStyle(verticalPadding: 8, cornerRadius: 10))
+                    .frame(width: 96)
                 armButton
             }
         }
