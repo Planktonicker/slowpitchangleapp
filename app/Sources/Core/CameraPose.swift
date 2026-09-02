@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Full terms in LICENSE at the repository root. No warranty.
 
+import CoreGraphics
 import Foundation
+// `CGImagePropertyOrientation` lives in ImageIO, not CoreGraphics.
+import ImageIO
 
 /// Where the camera actually is, worked backwards from what it can see.
 ///
@@ -139,6 +142,35 @@ enum CameraPose {
         let h = distanceM * tan(depression)
         guard h.isFinite, h < 12 else { return nil }
         return h
+    }
+
+    /// A raw buffer pixel made upright for the phone's landscape orientation.
+    ///
+    /// The capture buffer is landscape-native however the phone is held, so
+    /// "down the buffer" is only "down in the world" for one of the two
+    /// landscape orientations; the other is the same picture turned through
+    /// 180 degrees. `nil` for portrait, where the buffer's y axis runs
+    /// sideways across the world and no vertical reading exists to take —
+    /// returning a number there would not be slightly wrong, it would be
+    /// confidently sideways.
+    ///
+    /// One table, shared. The orientation-to-quarter-turns mapping already
+    /// exists in `VideoOrientation` and is exercised by the clip pipeline;
+    /// a second copy here is how the live path and the recorded path end up
+    /// disagreeing about which way up a frame was, which is precisely the
+    /// class of bug that made a dropped ball read as +76.9 degrees.
+    ///
+    /// Mirrored variants are treated as their unmirrored quarter turn. A
+    /// mirror is a left-right flip, which does not move a *vertical*
+    /// fraction, so refusing them was over-cautious rather than correct.
+    static func uprightBufferPoint(_ p: CGPoint,
+                                   orientation: CGImagePropertyOrientation,
+                                   width: Double, height: Double) -> CGPoint? {
+        switch VideoOrientation.quarterTurns(from: orientation) {
+        case 0: return p
+        case 2: return CGPoint(x: width - Double(p.x), y: height - Double(p.y))
+        default: return nil
+        }
     }
 
     /// Contact height, and the height the batter outline is drawn for.

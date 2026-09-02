@@ -36,6 +36,9 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
     /// height estimate both do, and this says they were skipped.
     case distanceNotMeasured = "DISTANCE_NOT_MEASURED"
     case scaleFromManualDistance = "SCALE_FROM_MANUAL_DISTANCE"
+    /// The camera distance came from the hitter's own body: a height typed in
+    /// Settings, and the pose's nose-to-ankle span assumed to be 0.87 of it.
+    case distanceFromHitterHeight = "DISTANCE_FROM_HITTER_HEIGHT"
     /// Something in this clip was much louder than the impulse that triggered
     /// it, so the trigger fired on the wrong sound. Stamped at capture time
     /// because the trigger is disarmed for the whole of a clip and cannot
@@ -76,6 +79,8 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
             return "The camera distance was never measured for this swing — the ball was not tapped during setup. Launch angle and exit velocity do not need it: the scale comes from the ball's own size in the picture. What was skipped is the sound-travel correction on contact time, about three frames at 240fps, and the lens-height estimate."
         case .scaleFromManualDistance:
             return "Scale came from a typed distance rather than a measured object, so it inherits whatever error is in that number."
+        case .distanceFromHitterHeight:
+            return "The camera distance was measured from the hitter's body — the typed standing height, and the pose's nose-to-ankle span taken to be 0.87 of it. That fraction is a population average: it varies by two or three percent between people, and it has never been checked against a taped distance on this app's own footage. Launch angle and exit velocity do not use the distance at all — their scale comes from the ball's own size in the picture. What does use it is the sound-travel correction on contact time and the lens-height estimate, and both tolerate far more error than this."
         case .triggeredOnWrongSound:
             return "Something during this clip was much louder than the sound that started the recording, so the trigger fired on something that was not the hit — and once a clip is recording the trigger is off, so it never heard the real one. The contact time on this swing is the time of the wrong sound. Launch angle and exit velocity survive it (the analysis falls back to the first frame of the flight and flags that), but the bat metrics do not, and the next swing here will do the same. Settings → Trigger → Calibrate measures what a hit at this venue actually sounds like."
         case .hitterGateDisabled:
@@ -101,6 +106,7 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
         case .distanceOutsideProtocol: return "distance"
         case .distanceNotMeasured: return "no distance"
         case .scaleFromManualDistance: return "typed distance"
+        case .distanceFromHitterHeight: return "hitter-height distance"
         case .triggeredOnWrongSound: return "wrong trigger sound"
         case .hitterGateDisabled: return "no hitter check"
         case .cameraHeightOffProtocol: return "camera height"

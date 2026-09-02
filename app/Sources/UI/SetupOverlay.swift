@@ -168,18 +168,16 @@ struct SetupOverlay: View {
     static func feetFraction(from joints: [PoseJoint: CGPoint]?,
                              orientation: CGImagePropertyOrientation) -> Double? {
         guard let joints else { return nil }
-        let flip: Bool
-        switch orientation {
-        case .up:   flip = false
-        case .down: flip = true
-        // Portrait, or a mirrored variant: no vertical reading to take.
-        default:    return nil
-        }
-        let ankles: [Double] = [joints[.leftAnkle], joints[.rightAnkle]]
-            .compactMap { $0.map { Double($0.y) } }
+        let ankles: [CGPoint] = [joints[.leftAnkle], joints[.rightAnkle]].compactMap { $0 }
         guard !ankles.isEmpty else { return nil }
-        let mean = ankles.reduce(0, +) / Double(ankles.count)
-        return flip ? 1 - mean : mean
+        let mean = ankles.reduce(0.0) { $0 + Double($1.y) } / Double(ankles.count)
+        // Through the shared helper rather than a second orientation table of
+        // its own. The joints are already normalized, so the picture is one
+        // unit across and one unit high.
+        guard let upright = CameraPose.uprightBufferPoint(
+            CGPoint(x: 0, y: mean), orientation: orientation,
+            width: 1, height: 1) else { return nil }
+        return Double(upright.y)
     }
 
     /// Width of the landscape control column. Named because the framing guide

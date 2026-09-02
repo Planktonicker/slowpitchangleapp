@@ -82,6 +82,15 @@ struct AppSettings: Codable, Equatable {
     var keepClips = true
     var fpsOverride: Double?
 
+    /// The hitter's standing height, in centimetres.
+    ///
+    /// Typed once, in Settings, and used by the setup screen to turn the pose's
+    /// nose-to-ankle span into a camera distance — see `HitterScale`. Optional
+    /// because there is no sensible default height: guessing one would produce
+    /// a confident distance for a person nobody measured. One height, not a
+    /// per-athlete profile; the app has no athlete identity anywhere.
+    var hitterHeightCm: Double?
+
     /// Horizontal field of view assumed for imported clips, in degrees.
     ///
     /// A clip this app filmed carries its own optics. One from the stock
@@ -215,6 +224,8 @@ extension AppSettings {
         keepClips = take(.keepClips, d.keepClips)
         // Genuinely optional: absent and null both mean "measure it".
         fpsOverride = (try? c.decodeIfPresent(Double.self, forKey: .fpsOverride)) ?? nil
+        // Genuinely optional too: absent and null both mean "nobody has said".
+        hitterHeightCm = (try? c.decodeIfPresent(Double.self, forKey: .hitterHeightCm)) ?? nil
         importFovDeg = take(.importFovDeg, d.importFovDeg)
         visionOrientation = take(.visionOrientation, d.visionOrientation)
         speedUnit = take(.speedUnit, d.speedUnit)
