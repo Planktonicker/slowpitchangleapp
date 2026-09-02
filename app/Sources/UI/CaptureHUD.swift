@@ -147,7 +147,15 @@ struct ScoreBug: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .frame(width: 148, height: height, alignment: .leading)
+                // Flexible, not a fixed 148. The tile sits in a row with the
+                // action buttons and, in portrait, above them — and a fixed
+                // width left it stopping two thirds of the way across while
+                // everything below it ran to the edge. A ragged right edge is
+                // most of what made this screen look unconsidered. The minimum
+                // keeps the readout from being squeezed to nothing when it
+                // shares a landscape row.
+                .frame(minWidth: 148, maxWidth: .infinity,
+                       minHeight: height, maxHeight: height, alignment: .leading)
                 .padding(.horizontal, 11)
                 .background(.black.opacity(0.86))
             }

@@ -245,30 +245,42 @@ struct CaptureScreen: View {
     /// heights is how a row stops looking like a row.
     private static let controlHeight: CGFloat = 60
 
+    /// One block in both orientations: a `controlHeight` row, then the
+    /// secondary action across the full width beneath it.
+    ///
+    /// Landscape used to be a bug pinned bottom-left and a two-high stack of
+    /// buttons pinned bottom-right, with a third of the screen of nothing
+    /// between them. Bottom-aligning clusters of different heights staggers
+    /// their tops, so the two islands lined up on no edge at all and read as
+    /// unrelated. Sharing one row gives every control on the screen the same
+    /// height and the same two edges.
+    ///
+    /// Portrait keeps the action on its own row — squeezing it beside the bug
+    /// is what once turned the primary button into "1 · SE…".
     private func bottomRow(isLandscape: Bool) -> some View {
-        // Landscape has room for bug and action side by side. Portrait does
-        // not — squeezing them together is what turned the primary button into
-        // "1 · SE…" — so there the action gets its own full-width row.
         Group {
             if isLandscape {
-                HStack(alignment: .bottom, spacing: 12) {
-                    bug
-                    Spacer(minLength: 0)
-                    VStack(spacing: 4) {
-                        actionCluster
-                        endSessionButton
+                VStack(spacing: Self.controlGap) {
+                    HStack(spacing: Self.controlGap) {
+                        bug
+                        actionCluster.frame(width: 300)
                     }
-                    .frame(width: 264)
+                    .frame(height: Self.controlHeight)
+                    endSessionButton
                 }
             } else {
-                VStack(spacing: 10) {
-                    bug.frame(maxWidth: .infinity, alignment: .leading)
+                VStack(spacing: Self.controlGap) {
+                    bug
                     actionCluster
                     endSessionButton
                 }
             }
         }
     }
+
+    /// The one gap between stacked controls. Named because using 4 in one
+    /// place and 12 in another is how a set of controls stops reading as a set.
+    private static let controlGap: CGFloat = 10
 
     private var bug: some View {
         ScoreBug(state: hudState,
