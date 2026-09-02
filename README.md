@@ -102,7 +102,7 @@ app/        XcodeGen project.yml + Swift sources
   Sources/Core/          ← the port of sla_common.py; must match it number-for-number
   Sources/Capture/       ← 240fps capture, pre-roll ring, audio contact trigger
   Sources/Vision/        ← detection, Vision trajectory locator, bat tracking
-  Sources/Wizard/        ← guided placement (level, ARKit distance, plate scale)
+  Sources/Wizard/        ← guided placement (level, hitter-height / ball / plate distance)
   Sources/Storage/       ← SwiftData behind a thin protocol + the validation scoreboard
   Tests/                 ← parity tests against spike/, plus pipeline tests
 ```

@@ -58,21 +58,30 @@ that is the whole point of them.
 Same geometry as [CAPTURE_PROTOCOL.md](CAPTURE_PROTOCOL.md), but it is now one
 screen and needs no tape measure and no AR:
 
-1. Tripod side-on, on the hitter's **open** side, lens at belt height,
-   5-7 big steps back. Tap the **?** on the setup screen for the diagram.
-2. Match the dashed guides: hitter fills the tall box, ball on the circle.
-3. Level the tripod until the bar goes green. Roll is fed into the maths as a
-   correction; tilt cannot be corrected, so the bar is strict about it.
-4. Put the ball on the tee and press **Tap the ball**. The app measures the
-   ball (known 9.7 cm) against the lens field of view and derives the
-   distance itself. No plate? No problem — the ball is always there.
-   Alternatives under **Other**: mark home plate's 43 cm front edge, or type
-   a paced-off distance.
-5. **Arm.** Focus and exposure lock automatically at that moment.
+Tripod side-on, on the hitter's **open** side, lens at belt height, 5-7 big
+steps back. Tap the **?** on the setup screen for the diagram. Then three
+stages, in order, each skippable:
 
-Arming stays blocked until level and distance pass — every number is scaled
-from pixels, so a camera that moved between sessions silently changes the
-readings. 4.5-6 m reads "Good"; 3.5-8.5 m is accepted as "Workable".
+1. **Level.** A dashed line runs across the picture — that is where level
+   actually falls. Aim until it sits in the green band and the ball is on the
+   beam's centre mark. Roll is fed into the maths as a correction and tilt is
+   rectified, so this is an accuracy improvement rather than a gate.
+2. **Hitter.** Type the hitter's height once (Settings → Hitter, or inline on
+   this panel). The hitter stands in the box facing the phone and **stands
+   tall** — the app measures the span from nose to ankles at about 10 Hz, and
+   after five good samples it locks the distance and chimes. A batting crouch
+   shortens that span by about a tenth, so the app waits rather than measuring
+   one. Alternatives under **…**: tap the ball (9.7 cm), mark home plate
+   (43 cm, front edge to rear point — pinch to zoom first), or type a paced-off
+   distance.
+3. **Arm.** Four rows — level, hitter detected, distance and its source, lens
+   height — then the button. Focus and exposure lock at that moment.
+
+Nothing here blocks arming. Every number is scaled from pixels, but the scale
+that reaches a launch angle comes from the ball's own diameter in the flight
+frames, not from this distance; what the distance buys is a sound-travel
+correction on contact time and a lens-height check. Whatever was skipped is
+stamped on the swing instead. 4.5-6 m reads "Good"; 3.5-8.5 m is "Workable".
 
 The app also refuses to auto-trigger unless a person has been seen in frame
 within the last ~1.5 s (on-device body-pose detection, ~10 checks a second).

@@ -34,14 +34,15 @@ routine once it works.
 
 ## Part B — Prove every detector indoors (10 min, before any field trip)
 
-Launch the app. Allow camera and microphone when asked. The setup screen
-("Set up the camera") opens by itself whenever no ball has been measured yet.
+Launch the app. Allow camera and microphone when asked. The setup screen opens
+by itself on a first run only; after that it is the **SET UP** button, top
+right.
 
 ### B1 — The hitter detector
 Point the phone at a person (or yourself in a mirror), a few metres away.
 
-**Check:** the chip under the title flips to **"Hitter detected ✓"** and a
-yellow **skeleton** draws over the person.
+**Check:** a yellow **skeleton** draws over the person, and the **ARM** stage
+(3, in the stepper) shows **Hitter — detected ✓**.
 - Stays "Looking for hitter…" → Settings tab → **Camera orientation** →
   try **"Right (90°)"**, then each other option. One of them will light it up;
   tell Claude which one worked, because Auto should have.
@@ -72,7 +73,7 @@ and **clap hard** near the phone.
   screenshot that sheet and send it.
 
 ### B4 — The whole chain
-Tap **"2 · Arm"**. **Step into the camera's view** and clap hard once —
+Tap **"Arm"**. **Step into the camera's view** and clap hard once —
 the trigger deliberately ignores sounds when nobody has been in frame for
 ~1.5 s, so a clap from behind the phone is eaten and "N ignored" counts up
 (that is the gate working, not a bug).
@@ -156,29 +157,50 @@ garden, too low for a cage.
 1. Tripod **side-on** to the swing, on the side the hitter **faces**
    (1B side for a right-hander), **4.5–6 m** from the plate — five big steps.
 2. Phone **landscape**, roughly level. Open SwingLab.
-3. Setup opens itself (or tap **"SET UP"**, top right).
-4. **Horizon line first, outline second.** A dashed line runs across the
-   picture — that is where level actually falls. Aim the phone until it sits in
-   the green band and reads **"LEVEL ✓"**. Off the bottom of the screen means
-   you are aiming up; off the top, aiming down.
+3. Setup opens itself on a first run (otherwise tap **"SET UP"**, top right).
+   It runs in three stages — the stepper at the top says which one you are on,
+   and the segments are tappable if you want to go back.
+4. **Stage 1, LEVEL.** A dashed line runs across the picture — that is where
+   level actually falls. Aim the phone until it sits in the green band and
+   reads **"LEVEL ✓"**, and keep the ball on the roll beam's centre mark. Off
+   the bottom of the screen means you are aiming up; off the top, aiming down.
 
    Do this *before* worrying about the outline. The outline can be matched
    perfectly from a phone lying in the grass aimed upward — backing up and
    tilting fits a person into it just as well as standing it at belt height —
-   so an outline that fits proves nothing on its own.
-5. Match the scene to the batter outline: hitter where the figure stands, ball
+   so an outline that fits proves nothing on its own. **Next** goes green when
+   the phone is level; **Skip** is always there.
+5. **Stage 2, HITTER.** Type the hitter's height once, in centimetres. The
+   hitter steps into the box facing the phone and **stands tall** — knees
+   straight, no lean — until it **chimes**. The panel counts "Hold still… 3 of
+   5"; if it says "Stand up straight" or "Stand tall, don't lean" it is
+   refusing to measure a crouch, which would read as a camera a third of a
+   metre further away than it is.
+
+   You should then see **"≈ 5.2 m · from hitter height"** and a **Good** chip.
+   Check it against a tape to the hitter's feet once — expect within about 5%.
+
+   No hitter to hand? The **…** menu has: tap the ball (9.7 cm), mark home
+   plate, type a distance, and clear. For the plate, **pinch to zoom** first —
+   put one handle on the **front edge** (the side facing the pitcher, seen
+   end-on, where the two corners meet) and the other on the **point** facing
+   the catcher. That span is 43 cm and it runs across the picture; the front
+   edge itself points at the lens and cannot be measured. Expect the plate
+   reading to be roughly 0.7 m *less* than the hitter reading, because the
+   camera is on the open side and the hitter stands behind the plate.
+6. Match the scene to the batter outline: hitter where the figure stands, ball
    on the tee circle. **If the outline is red**, it is telling you it is not a
-   valid target from where the phone is; the red banner across it says which
-   fault to fix. Only a **yellow** outline is worth matching.
-6. Hitter steps in → **"Hitter detected ✓"**.
-7. Ball on the tee → **tap it on screen** → **"Ball found"**, distance chip
-   **"Good"**.
-8. A **"Lens 1.1 m up ✓"** chip now appears beside the level chip — the app has
-   worked out how high the phone actually is, from the hitter's feet, the
-   distance and the tilt. Amber means it is far from the 1.1 m the outline
-   assumes. Raise or lower the tripod, but **keep it level**: aiming up to
-   compensate for a short tripod costs far more than the low camera does.
-9. Close setup (X) → tap **"2 · Arm"**.
+   valid target from where the phone is. Only a **yellow** outline is worth
+   matching, and it is a picture rather than a check either way.
+7. **Stage 3, ARM.** Four rows: Level, Hitter (**detected ✓** is the proof the
+   pose gate will let your swings through), Distance and where it came from,
+   and Lens height — the app has worked out how high the phone actually is,
+   from the hitter's feet, the distance and the tilt. Amber means it is far
+   from the 1.1 m the outline assumes. Raise or lower the tripod, but **keep it
+   level**: aiming up to compensate for a short tripod costs far more than the
+   low camera does.
+8. Tap **ARM**. It is never blocked; anything you skipped is stamped on the
+   swing instead.
 
 ### Each swing
 Hit. The app records by itself and the swing card appears in a few seconds with

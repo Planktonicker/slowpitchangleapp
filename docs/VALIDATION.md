@@ -193,6 +193,32 @@ outdoor clips with ≥0.25 s of tracked flight.*
 - Note whether the gravity check worked **per swing** or only as a session
   aggregate (line drives have little curvature in a short window): ______
 
+### Nose-to-ankle fraction (0.87)
+
+*The setup screen's default camera distance comes from the hitter's own body:
+`HitterScale` takes the rectified nose-to-mid-ankle span to be
+`0.87 x standing height` (Drillis-Contini: nose ~0.91 H, malleolus ~0.04 H).
+That fraction is a population average and has never been checked against a
+tape on this app's footage. Nothing about launch angle or exit velocity
+depends on it — the scale that reaches those comes from the ball's own
+diameter in the flight frames — but the sound-travel contact correction and
+the lens-height estimate do.*
+
+Measure a hitter of known height on the first real clip, with a taped distance
+from the lens to where their feet stand.
+
+| Hitter | True height (cm) | Taped distance (m) | App distance (m) | Error |
+|--------|------------------|--------------------|------------------|-------|
+|        |                  |                    |                  |       |
+|        |                  |                    |                  |       |
+
+- Threshold: **within 3%**. Outside it, correct
+  `HitterScale.noseToAnkleStatureFraction` rather than the app's arithmetic:
+  the geometry round-trips exactly in `HitterScaleTests`, so a miss here is
+  the assumption, not the maths.
+- Note the stance in each row. The upright gate refuses knees under 160 deg
+  and lean over 12 deg, so a row that measured at all was taken standing tall.
+
 ## G3 — Fly-ball physics ground truth
 
 *Per clip: `analyze_swing.py out/fly_NN.csv --flyball --hang T --carry-m D`.*

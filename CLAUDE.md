@@ -107,9 +107,31 @@ Open, in rough priority order:
   tilt that match the outline exactly, including a phone lying in the grass.
   The first real clip was filmed that way, from a guide glowing confident
   yellow. `CameraPose` closes the system: tilt from the IMU, distance from the
-  ball tap, feet from the live pose, and the height falls out. Any new framing
-  aid has to be checked the same way — count the constraints against the
-  unknowns before trusting it.
+  setup measurement (by default the hitter's own nose-to-ankle span —
+  `HitterScale`), feet from the live pose, and the height falls out. Any new
+  framing aid has to be checked the same way — count the constraints against
+  the unknowns before trusting it.
+
+- **A side-on camera cannot measure home plate's front edge.** The protocol
+  camera is perpendicular to the pitch line, so the 17 in front edge points
+  *at* the lens and is seen end-on: the pixels between its two corners are
+  depth foreshortening, not 43 cm, and a distance derived from them is
+  arbitrary rather than approximate. The 17 in that does run across the
+  picture is **front edge to rear point** — hence `plateDepthM`, and hence
+  where the two markers go.
+
+- **Pinch-to-zoom on the preview is a display transform, never
+  `videoZoomFactor`.** Sensor zoom is a centre crop that cannot be panned, and
+  the plate sits about a third of the way in from the frame edge by protocol,
+  so at 3x it leaves the picture entirely. It also changes the buffers and the
+  field of view the wizard read once at configure time, which silently
+  invalidates every distance on the screen doing the zooming.
+
+- **Never put a transform on a `UIViewRepresentable`'s own view.** SwiftUI
+  assigns that view's `frame` on every layout pass, and `frame` is undefined
+  while `transform` is not the identity. `CameraPreview` is a plain container
+  that is never transformed, wrapping an inner view whose backing layer is the
+  preview layer and which carries the zoom.
 
 - **One `AVCaptureVideoPreviewLayer` in the whole app.** Two sharing a session
   fight over the preview connection and leave the screen permanently black.
