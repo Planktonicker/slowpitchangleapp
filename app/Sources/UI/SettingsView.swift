@@ -21,6 +21,9 @@ struct SettingsView: View {
     /// running this screen scanned the disk once per progress tick, on the
     /// main thread, for a number nobody watches change.
     @State private var clipBytes: Int64 = 0
+    /// The height field's raw text. Seeded from settings when the screen
+    /// appears; see `commitHitterHeight` for why it is not a formatted binding.
+    @State private var heightText = ""
 
     /// Both built outside the view body. String interpolation inside a ternary,
     /// inside a `Form` this size, is exactly the shape that sends Swift's type
@@ -28,6 +31,33 @@ struct SettingsView: View {
     private var deleteButtonTitle: String {
         model.swings.isEmpty ? "Delete all swings"
                              : "Delete all " + String(model.swings.count) + " swings"
+    }
+
+    /// Committed from the field's own text rather than through a formatted
+    /// `Binding<Double?>`.
+    ///
+    /// A binding that reformats the stored value on every keystroke fights the
+    /// typist: half of "175" is "17", which is outside the accepted range, and
+    /// a setter that clamps or refuses it makes the field snap back under the
+    /// cursor. So the text is edited freely and only a complete, in-range
+    /// number is stored; clearing the field clears the setting.
+    private func commitHitterHeight() {
+        let trimmed = heightText.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            model.settings.hitterHeightCm = nil
+            return
+        }
+        guard let value = Double(trimmed.replacingOccurrences(of: ",", with: ".")),
+              HitterScale.heightCmRange.contains(value) else { return }
+        model.settings.hitterHeightCm = value
+    }
+
+    private var hitterHeightHint: String? {
+        guard !heightText.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        guard model.settings.hitterHeightCm == nil else { return nil }
+        let range = HitterScale.heightCmRange
+        return String(format: "Enter a height between %.0f and %.0f cm.",
+                      range.lowerBound, range.upperBound)
     }
 
     private var deleteMessage: String {
@@ -110,6 +140,24 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
+                Section("Hitter") {
+                    HStack {
+                        Text("Height")
+                        Spacer()
+                        TextField("not set", text: $heightText)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 96)
+                            .onChange(of: heightText) { _, _ in commitHitterHeight() }
+                        Text("cm").foregroundStyle(.secondary)
+                    }
+                    if let hint = hitterHeightHint {
+                        Text(hint).font(.caption).foregroundStyle(Theme.warn)
+                    }
+                    Text("Used by the setup screen to work out how far away the camera is: the pose measures the span from the hitter's nose to their ankles, and that span is taken to be 0.87 of standing height. The 0.87 is a population average — it varies two to three percent between people, and it has not been checked against a taped distance on this app's own footage. Nothing about launch angle or exit velocity depends on it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
                 Section("Storage") {
                     Toggle("Keep clips after analysis", isOn: $model.settings.keepClips)
                     HStack {
@@ -151,6 +199,9 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .task {
+                if let cm = model.settings.hitterHeightCm {
+                    heightText = String(format: "%.0f", cm)
+                }
                 let bytes = await Task.detached(priority: .utility) {
                     ClipStore.totalClipBytes()
                 }.value

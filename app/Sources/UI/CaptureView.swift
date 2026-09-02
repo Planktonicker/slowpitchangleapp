@@ -102,7 +102,9 @@ struct CaptureScreen: View {
                 // the last thing wanted over a live swing you are watching.
                 CameraPreview(controller: capture,
                               onTap: handleTap,
-                              skeleton: showSetup ? capture.skeleton : nil)
+                              skeleton: showSetup ? capture.skeleton : nil,
+                              plateMarkers: plateMarkers,
+                              onPlateMarkerMoved: movePlateMarker)
                     .ignoresSafeArea()
 
                 tapMarker
@@ -154,6 +156,7 @@ struct CaptureScreen: View {
                 }
             }
             .onChange(of: wizard.scaleSource) { _, _ in syncLiveMeasurement() }
+            .onChange(of: wizard.distanceMethod) { _, _ in syncLiveMeasurement() }
             .onChange(of: capture.isArmed) { _, _ in syncIdleTimer() }
             .onChange(of: capture.isRecordingClip) { _, _ in syncIdleTimer() }
             .onChange(of: showSetup) { _, _ in syncIdleTimer() }
@@ -336,7 +339,7 @@ struct CaptureScreen: View {
             Button { model.startCapture() } label: { Text("Retry") }
                 .buttonStyle(SlabButtonStyle(size: 17, verticalPadding: 0, minHeight: Self.controlHeight))
         case .ready:
-            Button { model.arm() } label: { Text("2 · Arm") }
+            Button { model.arm() } label: { Text("Arm") }
                 .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 0, minHeight: Self.controlHeight))
         case .armed:
             Button { model.disarm() } label: { Text("Stop") }
@@ -555,11 +558,34 @@ struct CaptureScreen: View {
 
     // MARK: - Tap
 
+    /// The plate markers, and only while they are being laid.
+    ///
+    /// Non-nil is what puts the preview into plate mode: handles drawn, pinch
+    /// and pan live, taps no longer read as "the ball is here".
+    private var plateMarkers: PlateMarkerPair? {
+        guard showSetup, wizard.distanceMethod == .plate else { return nil }
+        return PlateMarkerPair(start: wizard.plateStart, end: wizard.plateEnd)
+    }
+
+    private func movePlateMarker(_ index: Int, _ point: CGPoint) {
+        if index == 0 { wizard.plateStart = point } else { wizard.plateEnd = point }
+        wizard.applyPlateMeasurement()
+    }
+
+    /// Whether a touch on the picture means "measure the ball here".
+    ///
+    /// Inside setup it means that only while the ball is the chosen method —
+    /// during the hitter stage the user is standing in frame, not pointing at
+    /// anything, and a stray tap that reset the scale would be silent. Outside
+    /// setup the HUD still says "tap the ball" whenever there is no scale, and
+    /// that has to keep being true wherever the text is on screen.
+    private var canMeasureByTap: Bool {
+        if showSetup { return wizard.distanceMethod == .ball }
+        return wizard.scaleSource == .none
+    }
+
     private func handleTap(_ devicePoint: CGPoint, _ viewPoint: CGPoint) {
-        // Measuring is allowed whenever there is no scale yet — not only while
-        // the setup panel is open. The HUD says "tap the ball in the picture",
-        // and it has to be true wherever that text is on screen.
-        guard showSetup || wizard.scaleSource == .none else {
+        guard canMeasureByTap else {
             capture.lockExposureAndFocus(at: devicePoint)
             return
         }
@@ -588,7 +614,7 @@ struct CaptureScreen: View {
     /// looking where you pointed. Positioned in raw screen coordinates, in a
     /// full-bleed space matching the preview view the gesture came from.
     @ViewBuilder private var tapMarker: some View {
-        if let point = tapViewPoint, showSetup || wizard.scaleSource == .none {
+        if let point = tapViewPoint, canMeasureByTap {
             GeometryReader { _ in
                 Circle()
                     .strokeBorder(foundBall ? Theme.pass : Theme.warn, lineWidth: 2.5)
@@ -637,6 +663,9 @@ struct CaptureScreen: View {
     private func openSetup() {
         model.settings.hasCompletedFirstSetup = true
         showSetup = true
+        // Always from the top. Re-opening setup after arming used to drop the
+        // user back into whichever stage they happened to leave.
+        wizard.beginSetup()
         capture.wantsSkeleton = true
         syncLiveMeasurement()
     }
@@ -671,8 +700,13 @@ struct CaptureScreen: View {
     /// wherever it is shown. With conversion off, the first such tap could only
     /// ever come back `.noFrameYet` — the app asking for something it had
     /// switched off its own ability to receive.
+    ///
+    /// Narrowed to exactly the taps that can measure, which now means it is OFF
+    /// through the whole hitter stage: converting every tenth frame to BGRA for
+    /// a tap that cannot arrive is work a phone running at 240fps does not have
+    /// spare.
     private func syncLiveMeasurement() {
-        capture.wantsLiveMeasurement = showSetup || wizard.scaleSource == .none
+        capture.wantsLiveMeasurement = canMeasureByTap
     }
 }
 

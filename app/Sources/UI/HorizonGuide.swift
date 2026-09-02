@@ -115,9 +115,11 @@ struct HorizonGuide: View {
     /// Where level belongs, and which way the camera has to swing to bring it
     /// there. Drawn on the target band, which is mid-frame by construction.
     ///
-    /// No angle in the text. The level chip and the framing guide's own banner
-    /// both state it already, and a third copy is not a third reading — it is
-    /// the same one, in the way.
+    /// No angle in the text. The line itself already says where level fell,
+    /// which is the same reading in the units the eye is using, and a number
+    /// beside it is not a second reading — it is the same one, in the way. The
+    /// setup screen used to state this angle six different ways at once; this
+    /// line is now the only one of them left.
     private func bandLabel(centre: Double, up: Bool, w: CGFloat, h: CGFloat,
                            colour: Color) -> some View {
         HStack(spacing: 5) {
