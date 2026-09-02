@@ -42,6 +42,7 @@ final class AppModel: ObservableObject {
         didSet {
             settings.save()
             syncHitterGate()
+            wizard.hitterHeightM = settings.hitterHeightCm.map { $0 / 100 }
             capture.visionOrientationOverride = settings.visionOrientation.orientation
             capture.triggerThresholdDb = settings.triggerDb
             capture.preRollS = settings.preRollS
@@ -169,7 +170,17 @@ final class AppModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        // Which way up the buffer is. The hitter-height measurement reads pose
+        // joints in buffer coordinates, and the buffer is landscape-native
+        // however the phone is held — so without this the span is measured in
+        // the wrong frame for one of the two landscapes, silently.
+        capture.$visionOrientation
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] orientation in self?.wizard.bufferOrientation = orientation }
+            .store(in: &cancellables)
+
         syncHitterGate()
+        wizard.hitterHeightM = settings.hitterHeightCm.map { $0 / 100 }
         capture.visionOrientationOverride = settings.visionOrientation.orientation
         capture.triggerThresholdDb = settings.triggerDb
         capture.preRollS = settings.preRollS
@@ -338,7 +349,7 @@ final class AppModel: ObservableObject {
         guard wizard.isArmingAllowed else {
             banner = Banner(kind: .warning,
                             text: wizard.topAdvisory?.text
-                                ?? "Tap the ball in the picture to set the distance.")
+                                ?? "Measure the distance in Set up.")
             return
         }
         capture.isArmed = true

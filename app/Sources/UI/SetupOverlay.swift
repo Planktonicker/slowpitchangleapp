@@ -107,7 +107,7 @@ struct SetupOverlay: View {
                         if model.settings.hitterOnLeft { Spacer(minLength: 0) }
                         VStack(spacing: 10) {
                             Spacer()
-                            if wizard.showPlateMarkers { plateHint }
+                            if wizard.distanceMethod == .plate { plateHint }
                             distanceCard
                             armButton
                         }
@@ -120,14 +120,14 @@ struct SetupOverlay: View {
                         topBar
                         levelBar
                         Spacer()
-                        if wizard.showPlateMarkers { plateHint }
+                        if wizard.distanceMethod == .plate { plateHint }
                         distanceCard
                         armButton
                     }
                     .padding(14)
                 }
 
-                if wizard.showPlateMarkers {
+                if wizard.distanceMethod == .plate {
                     GeometryReader { markerGeo in
                         PlateMarkers(start: plateBinding(\.plateStart),
                                      end: plateBinding(\.plateEnd),
@@ -668,7 +668,7 @@ struct SetupOverlay: View {
 
                     Menu {
                         Button("Mark home plate instead") {
-                            wizard.showPlateMarkers = true
+                            wizard.distanceMethod = .plate
                             wizard.applyPlateMeasurement()
                         }
                         if wizard.scaleSource != .none {
