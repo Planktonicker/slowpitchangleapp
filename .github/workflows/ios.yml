@@ -1,0 +1,138 @@
+# Builds and tests SwingLab on a macOS runner.
+#
+# This exists because the app is frequently edited from an environment with no
+# Swift toolchain, where nothing can be compiled before it is pushed. Relaying
+# errors by screenshot is a round trip per error and truncates the log; this
+# workflow is the compiler of record instead.
+#
+# Simulator only. A device build would need signing, and every measurement this
+# app makes needs a real camera and a real IMU anyway — CI can prove the code
+# compiles and the pure-maths tests pass, and nothing beyond that.
+name: iOS
+
+on:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+  pull_request:
+  workflow_dispatch:
+
+# A fix-and-push loop should not queue up runs of code that is already stale.
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Written to the log on purpose: the runner image changes over time, and
+      # whoever is reading this log cannot see the machine.
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version || true
+          xcrun simctl list devices available
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      # The .xcodeproj is generated and gitignored. Forgetting this step is
+      # exactly how "Cannot find 'X' in scope" appears for a file that is
+      # plainly on disk.
+      - name: Generate the project
+        run: cd app && xcodegen generate
+
+      # Picked from what the image actually has, never hard-coded: a named
+      # simulator that has been retired fails the build for a reason that has
+      # nothing to do with the code.
+      - name: Choose a simulator
+        run: |
+          set -o pipefail
+          xcrun simctl list devices available --json > /tmp/sims.json
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json, os, re, sys
+
+          data = json.load(open("/tmp/sims.json"))["devices"]
+          best = None
+          for runtime, devices in data.items():
+              match = re.search(r"iOS-(\d+)-(\d+)", runtime)
+              if not match:
+                  continue
+              version = (int(match.group(1)), int(match.group(2)))
+              for device in devices:
+                  if not device.get("isAvailable"):
+                      continue
+                  if not device["name"].startswith("iPhone"):
+                      continue
+                  if best is None or version > best[0]:
+                      best = (version, device["name"])
+                  break
+
+          if best is None:
+              sys.stderr.write("no available iPhone simulator on this image\n")
+              sys.exit(1)
+
+          (major, minor), name = best
+          print(f"SIM_NAME={name}")
+          print(f"SIM_OS={major}.{minor}")
+          PY
+          grep '^SIM_' "$GITHUB_ENV"
+
+      # Build before test: a pure compile error surfaces here, without the test
+      # runner's output wrapped around it.
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project app/SwingLab.xcodeproj \
+            -scheme SwingLab \
+            -destination "platform=iOS Simulator,name=$SIM_NAME,OS=$SIM_OS" \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee -a /tmp/xcodebuild.log
+
+      - name: Test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project app/SwingLab.xcodeproj \
+            -scheme SwingLab \
+            -destination "platform=iOS Simulator,name=$SIM_NAME,OS=$SIM_OS" \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee -a /tmp/xcodebuild.log
+
+      # An xcodebuild log runs to tens of thousands of lines. The summary is
+      # what makes a failure readable in one look rather than ten.
+      - name: Summarise
+        if: always()
+        run: |
+          touch /tmp/xcodebuild.log
+          {
+            echo "### Simulator"
+            echo "\`${SIM_NAME:-unknown} / iOS ${SIM_OS:-unknown}\`"
+            echo
+            echo "### Errors"
+            echo '```'
+            grep -E "error:|Testing failed|Test Suite .* failed|XCTAssert" /tmp/xcodebuild.log \
+              | sort -u | head -60 || echo "none"
+            echo '```'
+            echo
+            echo "### Test results"
+            echo '```'
+            grep -E "Test Suite .* (passed|failed)|Executed [0-9]+ test" /tmp/xcodebuild.log \
+              | tail -20 || echo "no test output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the full log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: /tmp/xcodebuild.log
+          if-no-files-found: ignore

@@ -63,8 +63,17 @@ Tests: ⌘U in Xcode, or
 
 ```
 xcodebuild test -project app/SwingLab.xcodeproj -scheme SwingLab \
-  -destination 'platform=iOS Simulator,name=iPhone 15 Pro'
+  -destination 'platform=iOS Simulator,name=iPhone 16'
 ```
+
+Any installed iPhone simulator works; the name above is only an example, and a
+retired one fails the build for a reason that has nothing to do with the code.
+CI picks the newest available automatically.
+
+**CI is the compiler of record.** `.github/workflows/ios.yml` generates the
+project, builds and tests on every push, and writes the errors into the run's
+job summary. Most of this app is edited from a machine with no Swift toolchain,
+so that summary — not a screenshot — is how a compile error gets read.
 
 Python side:
 
@@ -164,6 +173,15 @@ Open, in rough priority order:
   frame; `-Onone` makes analysis take minutes instead of seconds.
 - `AVAssetImageGenerator` defaults to **half a second** of seek tolerance — 120
   frames at 240fps. Always set both tolerances to `.zero`.
+
+- **"Cannot find 'X' in scope" for a type whose file is plainly on disk means
+  the generated project is stale, not that the code is wrong.** Quit Xcode
+  first, then `xcodegen generate`, then reopen — a running Xcode can write its
+  old in-memory project back over the new one. The symptom cascades and hides
+  its own cause: an enum with a payload of the missing type stops synthesising
+  `Equatable`, which reads as a second, unrelated bug in a file that is fine.
+  Decline "Update to recommended settings" while you are there; it edits the
+  generated, gitignored `.xcodeproj`.
 
 ## Style
 
