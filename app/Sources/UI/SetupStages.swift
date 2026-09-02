@@ -488,7 +488,12 @@ struct HitterStagePanel: View {
             Button("Back") { onBack() }
                 .buttonStyle(OutlineButtonStyle(verticalPadding: 8, cornerRadius: 10))
             methodMenu
-            Button(wizard.scaleSource == .none ? "Skip" : "Next") { onNext() }
+            // An explicit Text label: a ternary of two string literals can
+            // match both the LocalizedStringKey and the StringProtocol
+            // initialisers, and the ambiguity only shows up at compile time.
+            Button { onNext() } label: {
+                Text(wizard.scaleSource == .none ? "Skip" : "Next")
+            }
                 .buttonStyle(SlabButtonStyle(
                     fill: wizard.scaleSource == .none ? Theme.surface : Theme.yellow,
                     textColor: wizard.scaleSource == .none ? Theme.steel : .black,
