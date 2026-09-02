@@ -209,26 +209,40 @@ struct SetupOverlay: View {
     /// picture above it is the thing being set up.
     private static let portraitPanelFraction: CGFloat = 0.55
 
+    /// What is left of a landscape screen once the padding, the header and the
+    /// roll beam have taken their share. A floor, because a 320 pt-tall phone
+    /// in landscape must still show something.
+    private func landscapePanelCap(in size: CGSize) -> CGFloat {
+        let chrome: CGFloat = wizard.stage == .level ? 130 : 94
+        return max(120, size.height - chrome)
+    }
+
     // MARK: - Controls
 
     @ViewBuilder
     private func controls(in size: CGSize, isLandscape: Bool) -> some View {
         if isLandscape {
-            // The column sits on whichever side the ball flies toward, because
-            // that is the side the guide leaves empty. Pinned to the right it
-            // buried the batter, the tee and both captions the moment the guide
-            // was mirrored.
-            // Top-aligned: with the panel hugging its content, centring it left
-            // it floating halfway down the column, unmoored from the header it
-            // belongs with.
-            HStack(alignment: .top, spacing: 0) {
-                if model.settings.hitterOnLeft {
-                    instrumentColumn
-                    stagePanel(maxHeight: size.height - 28).frame(width: Self.panelWidth)
-                } else {
-                    stagePanel(maxHeight: size.height - 28).frame(width: Self.panelWidth)
-                    instrumentColumn
+            // The header and the beam run the FULL width, above everything
+            // else. They used to live in a column beside the panel, which
+            // centred the stepper and the bubble in that column rather than on
+            // the screen — so "1 LEVEL" sat off to one side, and which side it
+            // was depended on which way the guide was mirrored. An instrument
+            // that reads centre when the phone is level has to BE centred.
+            VStack(spacing: 10) {
+                header
+                if wizard.stage == .level { rollBeam }
+                // The panel takes the space left over, against the bottom on
+                // whichever side the ball flies toward — that is the side the
+                // guide leaves empty. Bottom, not top: it carries the stage's
+                // action, and a button in the top corner of a phone held
+                // sideways is the one place a thumb cannot reach.
+                HStack(spacing: 0) {
+                    if model.settings.hitterOnLeft { Spacer(minLength: 0) }
+                    stagePanel(maxHeight: landscapePanelCap(in: size))
+                        .frame(width: Self.panelWidth)
+                    if !model.settings.hitterOnLeft { Spacer(minLength: 0) }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
             .padding(14)
         } else {
@@ -240,15 +254,6 @@ struct SetupOverlay: View {
             }
             .padding(14)
         }
-    }
-
-    private var instrumentColumn: some View {
-        VStack(spacing: 10) {
-            header
-            if wizard.stage == .level { rollBeam }
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity)
     }
 
     private var header: some View {
