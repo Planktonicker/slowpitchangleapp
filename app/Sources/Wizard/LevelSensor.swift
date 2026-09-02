@@ -93,6 +93,14 @@ final class LevelSensor: ObservableObject {
         guard !motion.isDeviceMotionActive else { return }
         DispatchQueue.main.async {
             self.isAvailable = true
+            // Without this the notification below is never posted, so the
+            // observer was dead code and the offset kept whatever value it had
+            // at launch. Rotate the phone after starting and roll read a
+            // quarter turn out — and roll is stamped on every swing and taken
+            // back out of the launch angle, so the error was silent rather
+            // than visible. UIKit reference-counts these, so the matching
+            // `endGenerating` in `stop()` is not optional.
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             self.refreshOrientation()
         }
         // Rotating the phone is the ONE event that changes the offset, and it
@@ -100,9 +108,18 @@ final class LevelSensor: ObservableObject {
         orientationObserver = NotificationCenter.default.addObserver(
             forName: UIDevice.orientationDidChangeNotification,
             object: nil, queue: .main) { [weak self] _ in
-                // The queue is `.main`, but `refreshOrientation` is
-                // `@MainActor` and the compiler cannot see that from here.
-                Task { @MainActor in self?.refreshOrientation() }
+                // Twice, deliberately. This notification reports the DEVICE
+                // turning, and `refreshOrientation` reads the INTERFACE
+                // orientation, which UIKit may not have updated yet — so the
+                // first read can still return the old value. The second, a
+                // run-loop turn later, is the one that is reliably right.
+                // Reading it twice costs nothing; missing the change puts 90
+                // degrees into a measurement.
+                Task { @MainActor in
+                    self?.refreshOrientation()
+                    await Task.yield()
+                    self?.refreshOrientation()
+                }
             }
         motion.deviceMotionUpdateInterval = 1.0 / 30.0
         // Off the main queue: this used to publish 30 times a second onto the
@@ -167,9 +184,16 @@ final class LevelSensor: ObservableObject {
 
     func stop() {
         motion.stopDeviceMotionUpdates()
+        // Balanced against the `beginGenerating` in `start()`, and tied to the
+        // observer because that is set in the same breath: both of `start()`'s
+        // early returns bail out before either, so keying off the observer is
+        // what keeps the reference count honest.
         if let orientationObserver {
             NotificationCenter.default.removeObserver(orientationObserver)
             self.orientationObserver = nil
+            DispatchQueue.main.async {
+                UIDevice.current.endGeneratingDeviceOrientationNotifications()
+            }
         }
         stateLock.lock()
         smoothedRoll = nil

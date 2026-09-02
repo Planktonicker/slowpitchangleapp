@@ -559,9 +559,15 @@ struct ReadyStagePanel: View {
             distanceRow
             heightRow
             advisory
-            armButton
-            Button("Back") { onBack() }
-                .buttonStyle(OutlineButtonStyle(verticalPadding: 8, cornerRadius: 10))
+            // Back beside Arm, not under it — the same row the Hitter stage
+            // uses. Stacked, this panel ran off the bottom of a landscape
+            // phone and left Back half-drawn against the panel's edge, which
+            // reads as a broken screen rather than as something to scroll.
+            HStack(spacing: 8) {
+                Button("Back") { onBack() }
+                    .buttonStyle(OutlineButtonStyle(verticalPadding: 8, cornerRadius: 10))
+                armButton
+            }
         }
     }
 
@@ -620,6 +626,6 @@ struct ReadyStagePanel: View {
         Button(action: onArm) {
             Text("Arm — let's hit")
         }
-        .buttonStyle(SlabButtonStyle(size: 18, verticalPadding: 15))
+        .buttonStyle(SlabButtonStyle(size: 17, verticalPadding: 12))
     }
 }
