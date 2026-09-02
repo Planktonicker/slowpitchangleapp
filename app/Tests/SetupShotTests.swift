@@ -166,7 +166,7 @@ final class SetupShotTests: XCTestCase {
         shoot("guide-landscape", width: 852,
               FramingGuide(fov: 68, isLandscape: true, screenAspect: 852.0 / 393.0,
                            hitterOnLeft: true, hitterHeightM: 1.81,
-                           rightInset: (300 + 28) / 852, topInset: 100 / 393,
+                           rightInset: 28 / 852, topInset: 100 / 393,
                            bottomInset: 0, outlineValid: true)
                 .frame(width: 852, height: 393))
         shoot("guide-portrait", width: 393,
