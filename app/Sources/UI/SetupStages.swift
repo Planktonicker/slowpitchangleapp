@@ -57,27 +57,42 @@ struct StageStepper: View {
     var onSelect: (PlacementWizard.SetupStage) -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
-            segment(.level, "1 LEVEL")
-            segment(.hitter, "2 HITTER")
-            segment(.ready, "3 ARM")
+        HStack(spacing: 4) {
+            segment(.level, number: "1", word: "LEVEL")
+            segment(.hitter, number: "2", word: "HITTER")
+            segment(.ready, number: "3", word: "ARM")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .background(.black.opacity(0.6), in: Capsule())
     }
 
-    private func segment(_ which: PlacementWizard.SetupStage, _ title: String) -> some View {
+    /// The tick REPLACES the number rather than joining it.
+    ///
+    /// Three segments plus four buttons very nearly fill a portrait header, so
+    /// a completed stage that grew by a tick and a gap was enough to wrap
+    /// "1 LEVEL" onto two lines. Swapping the glyph for the digit keeps every
+    /// segment the width it has always been, whatever progress has been made —
+    /// and the ordinal has done its job by the time a stage is behind you.
+    private func segment(_ which: PlacementWizard.SetupStage,
+                         number: String, word: String) -> some View {
         let isDone = which.rawValue < stage.rawValue
         let isCurrent = which == stage
         let tint: Color = isCurrent ? Theme.yellow : (isDone ? Theme.pass : Theme.steel)
         return Button { onSelect(which) } label: {
             HStack(spacing: 3) {
                 if isDone {
-                    Image(systemName: "checkmark").font(.system(size: 8, weight: .black))
+                    Image(systemName: "checkmark").font(.system(size: 9, weight: .black))
+                } else {
+                    Text(number).font(Theme.label(10)).tracking(0.8)
                 }
-                Text(title).font(Theme.label(10)).tracking(1)
+                Text(word).font(Theme.label(10)).tracking(0.8)
             }
+            // Belt and braces on a header that is tight by construction: never
+            // wrap, and shrink the type a little rather than truncate a word if
+            // some future device is narrower still.
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
             .foregroundStyle(tint)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)

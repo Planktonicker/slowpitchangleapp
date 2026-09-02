@@ -198,8 +198,16 @@ struct SetupOverlay: View {
     /// underneath it, showing through the translucency as text printed twice.
     private func bottomInset(in size: CGSize, isLandscape: Bool) -> Double {
         guard !isLandscape else { return 0 }
-        return Double((panelHeight + 14) / max(1, size.height))
+        // The panel hugs its content up to the cap, so the drawn height is the
+        // smaller of the two — reserving the full content height for a panel
+        // that is scrolling would push the guide's captions off the screen.
+        let drawn = min(panelHeight, size.height * Self.portraitPanelFraction)
+        return Double((drawn + 14) / max(1, size.height))
     }
+
+    /// Most of the lower half is available to the panel, but never more: the
+    /// picture above it is the thing being set up.
+    private static let portraitPanelFraction: CGFloat = 0.55
 
     // MARK: - Controls
 
@@ -210,12 +218,15 @@ struct SetupOverlay: View {
             // that is the side the guide leaves empty. Pinned to the right it
             // buried the batter, the tee and both captions the moment the guide
             // was mirrored.
-            HStack(spacing: 0) {
+            // Top-aligned: with the panel hugging its content, centring it left
+            // it floating halfway down the column, unmoored from the header it
+            // belongs with.
+            HStack(alignment: .top, spacing: 0) {
                 if model.settings.hitterOnLeft {
                     instrumentColumn
-                    stagePanel(maxHeight: nil).frame(width: Self.panelWidth)
+                    stagePanel(maxHeight: size.height - 28).frame(width: Self.panelWidth)
                 } else {
-                    stagePanel(maxHeight: nil).frame(width: Self.panelWidth)
+                    stagePanel(maxHeight: size.height - 28).frame(width: Self.panelWidth)
                     instrumentColumn
                 }
             }
@@ -225,7 +236,7 @@ struct SetupOverlay: View {
                 header
                 if wizard.stage == .level { rollBeam }
                 Spacer(minLength: 0)
-                stagePanel(maxHeight: size.height * 0.55)
+                stagePanel(maxHeight: size.height * Self.portraitPanelFraction)
             }
             .padding(14)
         }
@@ -254,13 +265,25 @@ struct SetupOverlay: View {
 
     /// Scrolls, because the ball sub-mode's diagnostic report can be several
     /// lines and a landscape phone is 390 pt tall.
+    ///
+    /// Sized to its CONTENT, capped — not merely capped. A `ScrollView` takes
+    /// every point of height it is offered, so `maxHeight` alone made a
+    /// two-line panel a black slab over half the picture, which is the picture
+    /// the user is trying to frame. `panelHeight` is the measured height of the
+    /// content inside, so this hugs it until the content genuinely needs the
+    /// cap, and only then starts scrolling. No feedback loop: the content's
+    /// height depends on the panel's WIDTH, which this does not touch.
     private func stagePanel(maxHeight: CGFloat?) -> some View {
-        ScrollView {
+        let cap = maxHeight ?? .greatestFiniteMagnitude
+        // nil for the first frame only, before the preference has been read —
+        // pinning it to zero would flash an invisible panel instead.
+        let height: CGFloat? = panelHeight > 0 ? min(panelHeight, cap) : nil
+        return ScrollView {
             stageContent
                 .padding(12)
                 .background(panelHeightReader)
         }
-        .frame(maxHeight: maxHeight)
+        .frame(height: height)
         // Nearly opaque, not 0.65. The framing guide is drawn behind it, and at
         // 0.65 the guide's captions read straight through the body copy, which
         // looked like the text had been printed twice.
