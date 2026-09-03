@@ -102,7 +102,7 @@ struct CaptureScreen: View {
                 // the last thing wanted over a live swing you are watching.
                 CameraPreview(controller: capture,
                               onTap: handleTap,
-                              skeleton: showSetup ? capture.skeleton : nil,
+                              skeleton: capture.skeleton,
                               plateMarkers: plateMarkers,
                               onPlateMarkerMoved: movePlateMarker)
                     .ignoresSafeArea()
@@ -157,13 +157,31 @@ struct CaptureScreen: View {
             }
             .onChange(of: wizard.scaleSource) { _, _ in syncLiveMeasurement() }
             .onChange(of: wizard.distanceMethod) { _, _ in syncLiveMeasurement() }
-            .onChange(of: capture.isArmed) { _, _ in syncIdleTimer() }
+            .onChange(of: capture.isArmed) { _, _ in
+                syncIdleTimer()
+                syncSkeleton()
+                syncLiveMeasurement()
+            }
+            // The Bool, never `model.settings` — that struct is Equatable, so
+            // observing it compiles and then fires on every settings change in
+            // the app.
+            .onChange(of: model.settings.showSkeletonWhileArmed) { _, _ in syncSkeleton() }
             .onChange(of: capture.isRecordingClip) { _, _ in syncIdleTimer() }
-            .onChange(of: showSetup) { _, _ in syncIdleTimer() }
+            .onChange(of: showSetup) { _, _ in syncIdleTimer(); syncSkeleton() }
+            .onAppear {
+                // A retained tab that comes back does not re-run `.task`, and
+                // `showSetup` has not changed, so nothing else would restore
+                // what `onDisappear` switched off.
+                syncSkeleton()
+            }
             .onDisappear {
                 // Never leave it disabled behind us — a stuck idle timer is a
                 // flat battery in a pocket, and nothing on screen would say why.
                 UIApplication.shared.isIdleTimerDisabled = false
+                // Literally false rather than `syncSkeleton()`: setup may still
+                // be open underneath, and there is nothing to draw on a tab
+                // nobody is looking at.
+                capture.wantsSkeleton = false
             }
             .sheet(isPresented: $showStatus) {
                 StatusSheet(capture: capture, wizard: wizard).environmentObject(model)
@@ -678,13 +696,16 @@ struct CaptureScreen: View {
         // Always from the top. Re-opening setup after arming used to drop the
         // user back into whichever stage they happened to leave.
         wizard.beginSetup()
-        capture.wantsSkeleton = true
+        // `syncSkeleton`, not a bare assignment: closing setup used to clear
+        // the flag outright, which would now switch the armed skeleton off
+        // behind the setting's back.
+        syncSkeleton()
         syncLiveMeasurement()
     }
 
     private func closeSetup() {
         showSetup = false
-        capture.wantsSkeleton = false
+        syncSkeleton()
         syncLiveMeasurement()
     }
 
@@ -718,7 +739,26 @@ struct CaptureScreen: View {
     /// a tap that cannot arrive is work a phone running at 240fps does not have
     /// spare.
     private func syncLiveMeasurement() {
-        capture.wantsLiveMeasurement = canMeasureByTap
+        // Never while armed. This gates a full-frame YUV to BGRA conversion of
+        // a 1080p buffer ten times a second, and skipping the ball tap is now
+        // the ordinary case — so an armed round spent the whole round
+        // converting frames for a tap that was never coming. `handleTap` arms
+        // it on demand and asks again, so the capability survives at the cost
+        // of one extra tap, in a case nobody is in a position to use anyway:
+        // while armed the hitter is at the plate, not at the tripod.
+        capture.wantsLiveMeasurement = canMeasureByTap && !capture.isArmed
+    }
+
+    /// Keep the joint conversion on exactly while something wants the joints.
+    ///
+    /// The setup half is deliberately NOT conditional on the setting.
+    /// `SetupOverlay` reads `capture.skeleton` to drive `noteHitterFeet` and
+    /// `noteSkeleton`, which is where the hitter-height distance and the lens
+    /// height come from — gating that on a drawing preference would turn the
+    /// switch off and silently stamp DISTANCE_NOT_MEASURED on every swing.
+    private func syncSkeleton() {
+        capture.wantsSkeleton = showSetup
+            || (capture.isArmed && model.settings.showSkeletonWhileArmed)
     }
 }
 

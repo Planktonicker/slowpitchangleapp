@@ -130,6 +130,13 @@ struct SettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
 
+                Section("Capture screen") {
+                    Toggle("Draw the skeleton while armed",
+                           isOn: $model.settings.showSkeletonWhileArmed)
+                    Text("Draws the pose the app is finding over the live picture. It changes nothing that is recorded or measured — the skeleton is painted on the viewfinder, not into the clip. The pose itself is computed either way, because it is what stops a slammed car door being recorded as a swing; this only draws what was already found. Worth leaving on: it is the one thing that shows the app can see this hitter, in this light, from here.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
                 Section("Units") {
                     Picker("Speed", selection: $model.settings.speedUnit) {
                         ForEach(SpeedUnit.allCases, id: \.self) { u in

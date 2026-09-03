@@ -75,6 +75,18 @@ struct AppSettings: Codable, Equatable {
     /// the last second and a half. Kills the no-human false trigger; manual
     /// capture always bypasses it.
     var requireHitter = true
+    /// Draw the live pose skeleton over the picture while ARMED.
+    ///
+    /// Setup draws it regardless and is not affected by this switch: judging
+    /// the pose is what that screen is for, and the setup overlay reads the
+    /// same joints to work out the camera distance and height.
+    ///
+    /// On by default. It costs almost nothing — the pose is already being
+    /// computed every tenth of a second because it IS the hitter gate, so this
+    /// only draws what was found — and it is the one thing that answers "can
+    /// the app see this hitter, in this light, from here?" before a swing is
+    /// missed rather than after.
+    var showSkeletonWhileArmed = true
     var forceFallbackDetector = false
     /// Keep clips after analysis. Off would save space, but the whole point
     /// of Phase 0 is being able to go back to the footage when a number looks
@@ -220,6 +232,7 @@ extension AppSettings {
         postRollS = take(.postRollS, d.postRollS)
         direction = take(.direction, d.direction)
         requireHitter = take(.requireHitter, d.requireHitter)
+        showSkeletonWhileArmed = take(.showSkeletonWhileArmed, d.showSkeletonWhileArmed)
         forceFallbackDetector = take(.forceFallbackDetector, d.forceFallbackDetector)
         keepClips = take(.keepClips, d.keepClips)
         // Genuinely optional: absent and null both mean "measure it".

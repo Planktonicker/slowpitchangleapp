@@ -113,7 +113,15 @@ struct CameraPreview: UIViewRepresentable {
         var onPlateMarkerMoved: ((Int, CGPoint) -> Void)?
 
         var skeleton: [PoseJoint: CGPoint]? {
-            didSet { inner.skeleton = skeleton }
+            didSet {
+                // SwiftUI writes this on every pass, and while armed those
+                // arrive from the trigger meter and the analysis state as well
+                // as from the pose. Without this, each unrelated re-render
+                // rebuilt both paths and re-ran a converter per joint for a
+                // skeleton that had not moved.
+                guard skeleton != oldValue else { return }
+                inner.skeleton = skeleton
+            }
         }
 
         var plateMarkers: PlateMarkerPair? {
@@ -463,6 +471,16 @@ struct CameraPreview: UIViewRepresentable {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             skeletonLayer.path = bones
+            // A shadow with no `shadowPath` makes CoreAnimation render the
+            // layer offscreen and blur it on every redraw. Tolerable on a
+            // setup screen; this now runs for a whole armed round. The path
+            // has to be the STROKED outline — `shadowPath` is filled, so
+            // handing it `bones` would shadow the polygon the skeleton
+            // encloses rather than its bones.
+            skeletonLayer.shadowPath = bones.copy(strokingWithWidth: 3,
+                                                  lineCap: .round,
+                                                  lineJoin: .round,
+                                                  miterLimit: 10)
             jointLayer.path = dots
             CATransaction.commit()
         }

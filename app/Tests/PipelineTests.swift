@@ -413,6 +413,11 @@ final class PipelineTests: XCTestCase {
         var settings = AppSettings()
         settings.detector.hsvLo = HSVBounds(h: 20, s: 80, v: 130)
         settings.triggerDb = 12
+        // Non-default on purpose. A stored property with a declaration default
+        // compiles fine when its line in the hand-written decoder is forgotten,
+        // and then silently never survives a launch — which this test can only
+        // catch if the value it round-trips differs from the default.
+        settings.showSkeletonWhileArmed = !AppSettings().showSkeletonWhileArmed
         let data = try! JSONEncoder().encode(settings)
         let decoded = try! JSONDecoder().decode(AppSettings.self, from: data)
         XCTAssertEqual(decoded, settings)

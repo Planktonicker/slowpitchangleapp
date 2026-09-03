@@ -36,18 +36,30 @@ final class CaptureController: NSObject, ObservableObject {
     @Published private(set) var exposureLocked = false
     /// A person is currently detected in frame (pose gate, ~10 Hz).
     @Published private(set) var hitterPresent = false
-    /// The hitter's skeleton in capture-device coordinates, for the setup
-    /// overlay to draw. Populated only while `wantsSkeleton` is set — the pose
-    /// request runs regardless (it is the hitter gate), but converting and
+    /// The hitter's skeleton in capture-device coordinates, for whichever
+    /// screen is drawing it. Populated only while `wantsSkeleton` is set — the
+    /// pose request runs regardless (it is the hitter gate), but converting and
     /// publishing its joints is pure cost when nothing is drawing them.
     @Published private(set) var skeleton: [PoseJoint: CGPoint]?
 
-    /// Set while the setup overlay is on screen. See `skeleton`.
+    /// Set while something wants the joints: the setup overlay always, the
+    /// armed HUD if the hitter asked for it. See `skeleton`.
     var wantsSkeleton = false {
         didSet {
             guard wantsSkeleton != oldValue else { return }
             presenceGate.onPose = wantsSkeleton
-                ? { [weak self] joints in self?.skeleton = joints }
+                ? { [weak self] joints in
+                    guard let self else { return }
+                    // Inference runs at 10 Hz whether or not anybody is in
+                    // frame, and `@Published` fires on every assignment,
+                    // changed or not — so an empty field re-rendered the whole
+                    // capture screen ten times a second to draw the same
+                    // nothing. This guards only that case: with a hitter in
+                    // frame the joints differ every sample and the publish rate
+                    // is unchanged, which is the point of drawing them.
+                    if joints == nil && self.skeleton == nil { return }
+                    self.skeleton = joints
+                }
                 : nil
             if !wantsSkeleton { skeleton = nil }
         }
