@@ -47,13 +47,25 @@ Point the phone at a person (or yourself in a mirror), a few metres away.
   try **"Right (90°)"**, then each other option. One of them will light it up;
   tell Claude which one worked, because Auto should have.
 
-### B2 — The ball detector (this is the one that has been failing)
-Put a softball on a chair across the room, 4–6 m away. Tap it **on the screen**.
+### B2a — Distance from the hitter (the default, no ball needed)
+On the **HITTER** stage (2 in the stepper), type the hitter's height in cm once,
+then stand in frame, side-on, **standing tall with your knees straight**.
 
-**Check:** the ring where you tapped turns **green** and the card collapses to
-one Distance row: **"≈ x.x m"** with a chip — "Good" (4.5–6 m), "Workable"
-(3.5–8.5 m), or "Move". Tap the Distance row to expand it and see
-**"Ball found — N px across"**. (Chips render in CAPITALS on screen.)
+**Check:** the panel counts "Hold still… 3 of 5", then chimes and shows
+**"≈ x.x m · from hitter height"** with a chip — GOOD (4.5–6 m), WORKABLE
+(3.5–8.5 m) or MOVE.
+- "Stand up straight — knees locked" or "Stand tall, don't lean" → it is
+  refusing a crouch on purpose. A batting stance shortens the measured span by
+  7–12%, which would read as a camera a third of a metre out.
+- "Turn the phone sideways to measure" → portrait cannot measure this. Rotate.
+- Nothing counts → the pose is not being found; see B1.
+
+### B2b — The ball detector (the alternative, and the one that has been failing)
+Only if you want it: **"…"** → **Tap the ball instead**. Put a softball on a
+chair 4–6 m away and tap it **on the screen**.
+
+**Check:** the ring where you tapped turns **green** and the panel reads
+**"Ball found — N px across"**.
 - Ring stays amber and a message appears → **the message is the instruction**.
   Do what it says ("move it onto a different-coloured surface", "move it into
   the light", …) and tap again.
