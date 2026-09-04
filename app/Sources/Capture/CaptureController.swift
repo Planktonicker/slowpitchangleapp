@@ -265,6 +265,16 @@ final class CaptureController: NSObject, ObservableObject {
     private var publishedDrops = 0
     private var pendingReasons = DropReasons()
     private var publishedReasons = DropReasons()
+    /// The drop-reason constants, bridged once rather than per dropped frame.
+    /// Explicitly typed, so the coercion happens here where it is a plain
+    /// conversion and not in a pattern position where it is not.
+    private static let dropReasonLate: String =
+        kCMSampleBufferDroppedFrameReason_FrameWasLate as String
+    private static let dropReasonOutOfBuffers: String =
+        kCMSampleBufferDroppedFrameReason_OutOfBuffers as String
+    private static let dropReasonDiscontinuity: String =
+        kCMSampleBufferDroppedFrameReason_Discontinuity as String
+
     /// Whether `didDrop` counts at all.
     ///
     /// Guarded by `uiLock`, which the drop callback already takes — rather than
@@ -1099,14 +1109,17 @@ extension CaptureController: AVCaptureVideoDataOutputSampleBufferDelegate,
         // a fault — see `syncArmed`.
         if countingDrops {
             pendingDrops += 1
-            switch reason {
-            case kCMSampleBufferDroppedFrameReason_FrameWasLate as String:
+            // `if`, not `switch`, and compared against constants bridged
+            // above. Inside a `case`, `x as String` parses as a cast PATTERN
+            // rather than a coercion, so the pattern kept its CFString type
+            // and could not match the bridged String subject.
+            if reason == Self.dropReasonLate {
                 pendingReasons.late += 1
-            case kCMSampleBufferDroppedFrameReason_OutOfBuffers as String:
+            } else if reason == Self.dropReasonOutOfBuffers {
                 pendingReasons.outOfBuffers += 1
-            case kCMSampleBufferDroppedFrameReason_Discontinuity as String:
+            } else if reason == Self.dropReasonDiscontinuity {
                 pendingReasons.discontinuity += 1
-            default:
+            } else {
                 pendingReasons.other += 1
             }
         }
