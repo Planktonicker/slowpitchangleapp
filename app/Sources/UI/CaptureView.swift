@@ -232,7 +232,10 @@ struct CaptureScreen: View {
                         Spacer(minLength: 0)
                         if let swing = model.lastSwing, hudState != .recording {
                             lastSwingCard(swing)
-                                .frame(maxWidth: isLandscape ? 460 : .infinity)
+                                // Shares the control block's right edge, or it
+                                // would hang past a column that now stops short.
+                                .frame(maxWidth: isLandscape ? 460 : Self.clusterWidth)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         if model.hitterGateLooksStuck { hitterGateEscape }
                     }
@@ -240,20 +243,16 @@ struct CaptureScreen: View {
                     .padding(.bottom, 6)
                 }
 
-                if hudState != .starting {
-                    SeamMeter(db: capture.triggerLevelDb,
-                              thresholdDb: model.settings.triggerDb)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 10)
-                }
-
                 bottomRow(isLandscape: isLandscape)
                     .padding(.horizontal, 16)
                     // Just enough to sit off the tab bar. The TabView already
                     // insets its content for the floating bar, so the earlier
                     // 64pt clearance was stacked on top of that inset and
-                    // stranded the controls halfway up the screen.
-                    .padding(.bottom, 8)
+                    // stranded the controls halfway up the screen. 12 rather
+                    // than 8 now that the meter is the bottom edge: a 4pt
+                    // hairline any closer to a floating tab bar reads as a
+                    // page indicator rather than an audio level.
+                    .padding(.bottom, 12)
             }
         }
     }
@@ -261,7 +260,21 @@ struct CaptureScreen: View {
     /// Height of the bottom controls. One constant, used by the bug, the
     /// context button and the primary slab, because three separately-tuned
     /// heights is how a row stops looking like a row.
-    private static let controlHeight: CGFloat = 60
+    private static let controlHeight: CGFloat = 52
+
+    /// Width of the right-hand control column.
+    ///
+    /// The three controls stop on one edge, and it is the right one: the
+    /// picture the phone is filming is worth more than the chrome sitting on
+    /// it. 300 is a floor plus headroom rather than a round number —
+    /// `ScoreBug` cannot go below 242 (a 72pt tile, a 148pt minimum readout,
+    /// 22 of padding) and a `maxWidth` on an ancestor cannot compress a stated
+    /// `minWidth`, so under that it would overhang the very edge this exists
+    /// to create. Its armed subline wraps somewhere near 268. 300 clears both.
+    private static let clusterWidth: CGFloat = 300
+
+    /// Bug, gap, action cluster. End round and the meter span the whole block.
+    private static let landscapeBlockWidth: CGFloat = 2 * clusterWidth + controlGap
 
     /// One block in both orientations: a `controlHeight` row, then the
     /// secondary action across the full width beneath it.
@@ -276,24 +289,34 @@ struct CaptureScreen: View {
     /// Portrait keeps the action on its own row — squeezing it beside the bug
     /// is what once turned the primary button into "1 · SE…".
     private func bottomRow(isLandscape: Bool) -> some View {
-        Group {
+        VStack(spacing: Self.controlGap) {
             if isLandscape {
-                VStack(spacing: Self.controlGap) {
-                    HStack(spacing: Self.controlGap) {
-                        bug
-                        actionCluster.frame(width: 300)
-                    }
-                    .frame(height: Self.controlHeight)
-                    endSessionButton
-                }
-            } else {
-                VStack(spacing: Self.controlGap) {
+                HStack(spacing: Self.controlGap) {
                     bug
-                    actionCluster
-                    endSessionButton
+                    actionCluster.frame(width: Self.clusterWidth)
                 }
+                .frame(height: Self.controlHeight)
+            } else {
+                bug
+                actionCluster
             }
+            endSessionButton
+            // Below the buttons rather than on the seam above them. The meter
+            // is the audio trigger's readout and ARM is the audio trigger's
+            // switch, so it belongs beside the control it explains.
+            //
+            // `.opacity`, never `if`: this block is bottom-anchored, so
+            // removing the meter would drop everything above it by 14pt and
+            // then shove it back up under a reaching thumb the moment the
+            // camera reached `.running`.
+            SeamMeter(db: capture.triggerLevelDb,
+                      thresholdDb: model.settings.triggerDb)
+                .opacity(hudState == .starting ? 0 : 1)
         }
+        // Cap, then pin. Two frames, because `maxWidth:alignment:` aligns the
+        // CONTENT inside the frame, not the frame inside its parent.
+        .frame(maxWidth: isLandscape ? Self.landscapeBlockWidth : Self.clusterWidth)
+        .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     /// The one gap between stacked controls. Named because using 4 in one
@@ -333,7 +356,11 @@ struct CaptureScreen: View {
             Label("End round", systemImage: "flag.checkered")
                 .font(Theme.label(12)).tracking(1)
         }
-        .buttonStyle(OutlineButtonStyle(verticalPadding: 7, cornerRadius: 10))
+        // The ink stays a ~29pt pill — the "smaller" that was asked for —
+        // while the tappable region reaches the 44pt minimum. Inside the
+        // style, not stacked after it; see `OutlineButtonStyle.hitHeight`.
+        .buttonStyle(OutlineButtonStyle(verticalPadding: 7, cornerRadius: 10,
+                                        hitHeight: 44))
     }
 
     private var actionCluster: some View {

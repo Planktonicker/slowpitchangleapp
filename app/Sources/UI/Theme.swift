@@ -127,6 +127,14 @@ struct OutlineButtonStyle: ButtonStyle {
     var cornerRadius: CGFloat = 12
     /// See `SlabButtonStyle.minHeight`.
     var minHeight: CGFloat?
+    /// Tappable height, for when the pill must LOOK smaller than the 44pt
+    /// minimum touch target.
+    ///
+    /// Applied inside `makeBody`, which is the button's own body. A
+    /// `.frame`/`.contentShape` pair stacked AFTER `.buttonStyle` wraps the
+    /// Button from outside, so the touch lands on the wrapper and the pill
+    /// stays as small a target as it looks.
+    var hitHeight: CGFloat?
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -141,6 +149,8 @@ struct OutlineButtonStyle: ButtonStyle {
                 .strokeBorder(Theme.yellow.opacity(isEnabled ? 0.85 : 0.3), lineWidth: 1.5))
             .foregroundStyle(isEnabled ? Theme.yellow : Theme.steel)
             .opacity(configuration.isPressed ? 0.7 : 1)
+            .frame(height: hitHeight)
+            .contentShape(Rectangle())
     }
 }
 
