@@ -141,6 +141,13 @@ struct ScoreBug: View {
                             Text(subline)
                                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
                                 .foregroundStyle(Theme.steel)
+                                // Two lines, then truncate. The readout's
+                                // height is pinned to the row, so a third line
+                                // is not wrapped, it is clipped — and the
+                                // longest real subline is a mode title plus
+                                // "· no swings yet", which reaches three lines
+                                // in the narrow column.
+                                .lineLimit(2)
                         }
                     } else {
                         HStack(spacing: 5) {

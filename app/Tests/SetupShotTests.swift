@@ -194,6 +194,8 @@ final class SetupShotTests: XCTestCase {
     func testShootControlColumn() {
         for (name, width) in [("portrait", CGFloat(140)), ("landscape", CGFloat(256))] {
             shoot("controls-\(name)", width: width, VStack(spacing: 10) {
+                // Armed: MANUAL takes 52 and the gap 10, and STOP gets what
+                // is left. This is the state that sets the floor.
                 HStack(spacing: 10) {
                     Button {} label: {
                         VStack(spacing: 2) {
@@ -205,11 +207,18 @@ final class SetupShotTests: XCTestCase {
                     .buttonStyle(OutlineButtonStyle(verticalPadding: 0, cornerRadius: 14,
                                                     minHeight: 52))
                     .frame(width: 52)
-                    Button {} label: { Text("Measuring…") }
-                        .buttonStyle(SlabButtonStyle(fill: Theme.surface, textColor: Theme.steel,
-                                                     size: 15, verticalPadding: 0, minHeight: 52))
+                    Button {} label: { Text("Stop") }
+                        .buttonStyle(SlabButtonStyle(fill: Theme.fail, textColor: .white,
+                                                     size: 19, verticalPadding: 0, minHeight: 52))
                 }
                 .frame(height: 52)
+                // Analysing: no MANUAL — `contextAction` returns nil — so the
+                // longest word on the screen gets the whole width. Drawing the
+                // two together, as this render first did, invents a state the
+                // app cannot reach and makes the column look too narrow.
+                Button {} label: { Text("Measuring…") }
+                    .buttonStyle(SlabButtonStyle(fill: Theme.surface, textColor: Theme.steel,
+                                                 size: 15, verticalPadding: 0, minHeight: 52))
                 Button {} label: { Text("Arm") }
                     .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 0, minHeight: 52))
                 Button {} label: {

@@ -275,11 +275,12 @@ struct CaptureScreen: View {
 
     /// The buttons: ARM (with MANUAL beside it while armed) and End round.
     ///
-    /// The floor is what the widest state needs, not a round number. Armed,
-    /// the row is a 52pt MANUAL button, the 10pt gap, and a primary slab that
-    /// has to hold "MEASURING…"; below ~140 that slab starts shrinking its own
-    /// text, and a primary action that changes size as the state changes is
-    /// worse than one that is slightly wider than asked for.
+    /// The floor is what the tightest state needs, not a round number. Two
+    /// states compete for it and neither is the obvious one: armed, the row
+    /// gives 62pt to MANUAL and its gap and the rest to STOP; analysing, the
+    /// slab is alone but has to hold "MEASURING…" at 15pt. Both clear 140 and
+    /// neither clears much less, and a primary action that shrinks its own
+    /// text as the state changes is worse than one slightly wider than asked.
     private static func actionWidth(screen: CGFloat) -> CGFloat {
         max((screen * actionWidthFraction).rounded(), 140)
     }
