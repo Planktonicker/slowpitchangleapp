@@ -32,6 +32,12 @@ struct StartView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         header
+                        // Three panels, and there is no fourth. Mode, start,
+                        // and everything that is not this session. The screen
+                        // used to carry seven tappable rectangles — three mode
+                        // cards, the slab, the library row and two outline
+                        // buttons — which is a menu, not a decision, and the
+                        // decision is the only thing this screen is for.
                         modePicker
                         startButton
                         // Always shown, empty or not. When it was conditional
@@ -40,7 +46,6 @@ struct StartView: View {
                         // where importing a clip lives, which is the one thing
                         // somebody with no swings yet is most likely to want.
                         library
-                        if !model.swings.isEmpty { betweenSessions }
                         Spacer(minLength: 8)
                         footer
                     }
@@ -90,37 +95,28 @@ struct StartView: View {
         }
     }
 
+    /// One panel, not one per mode.
+    ///
+    /// Three radio cards spent the top half of the screen restating a question
+    /// whose answer is the same on most days — and made the three modes look
+    /// like three things to weigh up rather than one setting with a value. A
+    /// menu says the same thing in a line and puts the choice one tap away,
+    /// which is the right price for a decision that is usually already made.
+    ///
+    /// The question stays *inside* the panel. Dropped, this stops reading as a
+    /// decision and starts reading as a preference someone else set.
     private var modePicker: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("HOW IS THE BALL COMING IN")
-                .font(Theme.label(11)).tracking(1.3)
-                .foregroundStyle(Theme.steel)
-            ForEach(SessionMode.allCases) { m in
-                Button { mode = m } label: {
-                    HStack(spacing: 14) {
-                        Image(systemName: m.symbol)
-                            .font(.system(size: 22, weight: .semibold))
-                            .frame(width: 30)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(m.title)
-                                .font(.system(size: 17, weight: .bold, design: .rounded))
-                            Text(m.blurb)
-                                .font(.caption)
-                                .foregroundStyle(Theme.steel)
-                        }
-                        Spacer()
-                        Image(systemName: mode == m ? "largecircle.fill.circle" : "circle")
-                            .foregroundStyle(mode == m ? Theme.yellow : Theme.steel)
-                    }
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(mode == m ? Theme.yellow : .clear, lineWidth: 2))
-                    .foregroundStyle(.white)
+        Menu {
+            // A `Picker` rather than three `Button`s: it draws the tick beside
+            // the current mode itself, so the menu says which one is selected
+            // without a second source of truth for that.
+            Picker("How is the ball coming in", selection: $mode) {
+                ForEach(SessionMode.allCases) { m in
+                    Label(m.title, systemImage: m.symbol).tag(m)
                 }
-                .buttonStyle(.plain)
             }
+        } label: {
+            ModeCard(mode: mode)
         }
     }
 
@@ -128,47 +124,28 @@ struct StartView: View {
         VStack(spacing: 10) {
             Button("Start session") { model.startSession(mode: mode) }
                 .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 20))
-            Text("Next: frame the hitter and tap the ball once. The camera does not start until then. To carry on with a round you already started, use Past rounds.")
+            Text("Next: frame the hitter and tap the ball once. The camera does not start until then.")
                 .font(.caption)
                 .foregroundStyle(Theme.steel)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
+    /// Everything that is not this session, in one panel.
+    ///
+    /// Swings, past rounds and trends were a row and two outline buttons, and
+    /// the two buttons appeared only once there were swings — so the route to
+    /// a round you had already started was invisible on precisely the screen
+    /// you would look for it from, the first time you looked. They are three
+    /// destinations of the same kind. They read as one thing now, and the
+    /// panel is the same shape on a fresh install as on a full one: each
+    /// destination has its own empty state and says so on arrival, which is
+    /// more use than not being there.
     private var library: some View {
-        Button { sheet = .swings } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(model.swings.isEmpty
-                         ? "Swings & imports"
-                         : "\(model.swings.count) swing\(model.swings.count == 1 ? "" : "s") recorded")
-                        .font(.system(size: 15, weight: .bold, design: .rounded))
-                    Text(model.swings.isEmpty
-                         ? "Import a clip you already filmed and measure it"
-                         : "Review, export, re-measure, or import a clip")
-                        .font(.caption).foregroundStyle(Theme.steel)
-                }
-                Spacer()
-                Image(systemName: "chevron.right").foregroundStyle(Theme.steel)
-            }
-            .padding(14)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
-            .foregroundStyle(.white)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Your own numbers over time — the one thing on this screen that is about
-    /// hitting rather than about the app. Validation is not here: it is a
-    /// go/no-go scoreboard for the measurement gates, which belongs with the
-    /// rest of the specialist screens under Settings.
-    private var betweenSessions: some View {
-        HStack(spacing: 12) {
-            Button("Past rounds") { sheet = .rounds }
-                .buttonStyle(OutlineButtonStyle())
-            Button("Trends") { sheet = .trends }
-                .buttonStyle(OutlineButtonStyle())
-        }
+        LibraryPanel(swingCount: model.swings.count,
+                     onSwings: { sheet = .swings },
+                     onRounds: { sheet = .rounds },
+                     onTrends: { sheet = .trends })
     }
 
     /// The standing caveat, on the screen every session starts from.
@@ -182,5 +159,126 @@ struct StartView: View {
         Text("Nothing here is validated yet. The tracker follows the ball, but no reading has been checked against a known truth — treat every number as provisional.")
             .font(.caption2)
             .foregroundStyle(Theme.steel.opacity(0.8))
+    }
+}
+
+/// The mode panel's face, split out from the `Menu` that wraps it.
+///
+/// Its own type because `ImageRenderer` does not draw a `Menu`'s label, and
+/// this is the one panel on the screen whose layout is worth looking at
+/// without a phone. Rendering the card directly is the whole picture minus the
+/// menu's own chrome.
+struct ModeCard: View {
+    var mode: SessionMode
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: mode.symbol)
+                .font(.system(size: 22, weight: .semibold))
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("HOW IS THE BALL COMING IN")
+                    .font(Theme.label(10)).tracking(1.2)
+                    .foregroundStyle(Theme.steel)
+                Text(mode.title)
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                Text(mode.blurb)
+                    .font(.caption).foregroundStyle(Theme.steel)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(Theme.yellow)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+        // Outlined, unlike the panel below it. This one is the only thing on
+        // the screen holding a value, and the outline is what says so.
+        .overlay(RoundedRectangle(cornerRadius: 14)
+            .strokeBorder(Theme.yellow.opacity(0.75), lineWidth: 1.5))
+        .foregroundStyle(.white)
+    }
+}
+
+/// Everything that is not this session, in one panel.
+///
+/// Swings, past rounds and trends were a row and two outline buttons, and the
+/// two buttons appeared only once there were swings — so the route to a round
+/// you had already started was invisible on precisely the screen you would
+/// look for it from, the first time you looked. They are three destinations of
+/// the same kind. They read as one thing now, and the panel is the same shape
+/// on a fresh install as on a full one: each destination has its own empty
+/// state and says so on arrival, which is more use than not being there.
+///
+/// Its own type so it can be rendered without an `AppModel` — see
+/// `SetupShotTests`.
+struct LibraryPanel: View {
+    var swingCount: Int
+    var onSwings: () -> Void
+    var onRounds: () -> Void
+    var onTrends: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button(action: onSwings) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(swingCount == 0
+                             ? "Swings & imports"
+                             : "\(swingCount) swing\(swingCount == 1 ? "" : "s") recorded")
+                            .font(.system(size: 16, weight: .bold, design: .rounded))
+                        Text(swingCount == 0
+                             ? "Import a clip you already filmed and measure it"
+                             : "Review, export, re-measure, or import a clip")
+                            .font(.caption).foregroundStyle(Theme.steel)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundStyle(Theme.steel)
+                }
+                .padding(14)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            row("Past rounds", "Pick up a round you already started",
+                "clock.arrow.circlepath", action: onRounds)
+            row("Trends", "Your own numbers over time",
+                "chart.line.uptrend.xyaxis", action: onTrends)
+        }
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+        .foregroundStyle(.white)
+    }
+
+    private func row(_ title: String, _ blurb: String, _ symbol: String,
+                     action: @escaping () -> Void) -> some View {
+        VStack(spacing: 0) {
+            // Inset from the leading edge only, so the rule reads as a
+            // division inside one panel rather than the seam between two.
+            Rectangle()
+                .fill(Theme.steel.opacity(0.22))
+                .frame(height: 1)
+                .padding(.leading, 14)
+            Button(action: action) {
+                HStack(spacing: 12) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Theme.yellow)
+                        .frame(width: 22)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(title).font(.system(size: 15, weight: .bold, design: .rounded))
+                        Text(blurb).font(.caption2).foregroundStyle(Theme.steel)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.steel)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
     }
 }

@@ -245,6 +245,35 @@ final class SetupShotTests: XCTestCase {
                               isLandscape: true))
     }
 
+    // MARK: - The opening screen
+
+    /// The screen the app opens on, panel by panel, at the 353pt a 393pt phone
+    /// gives it. Seven tappable rectangles became three; the question is
+    /// whether three still says everything the seven did.
+    func testShootStartPanels() {
+        for mode in SessionMode.allCases {
+            shoot("start-mode-\(mode.rawValue)", width: 353, ModeCard(mode: mode))
+        }
+        shoot("start-library-empty", width: 353,
+              LibraryPanel(swingCount: 0, onSwings: {}, onRounds: {}, onTrends: {}))
+        shoot("start-library", width: 353,
+              LibraryPanel(swingCount: 3, onSwings: {}, onRounds: {}, onTrends: {}))
+
+        // The three together, in the order and spacing the screen uses, since
+        // the point of the change was the composition rather than any panel.
+        shoot("start-stack", width: 353, VStack(alignment: .leading, spacing: 22) {
+            ModeCard(mode: .live)
+            VStack(spacing: 10) {
+                Button {} label: { Text("Start session") }
+                    .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 20))
+                Text("Next: frame the hitter and tap the ball once. The camera does not start until then.")
+                    .font(.caption).foregroundStyle(Theme.steel)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            LibraryPanel(swingCount: 3, onSwings: {}, onRounds: {}, onTrends: {})
+        })
+    }
+
     // MARK: - Helpers
 
     private func bug(_ state: HUDState, subline: String?) -> some View {
