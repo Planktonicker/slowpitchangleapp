@@ -254,8 +254,7 @@ final class SetupShotTests: XCTestCase {
         for mode in SessionMode.allCases {
             shoot("start-mode-\(mode.rawValue)", width: 353, ModeCard(mode: mode))
         }
-        shoot("start-library-empty", width: 353, LibraryPanel(swingCount: 0) {})
-        shoot("start-library", width: 353, LibraryPanel(swingCount: 3) {})
+        shoot("start-library", width: 353, LibraryPanel {})
 
         // The three together, in the order and spacing the screen uses, since
         // the point of the change was the composition rather than any panel.
@@ -268,7 +267,7 @@ final class SetupShotTests: XCTestCase {
                     .font(.caption).foregroundStyle(Theme.steel)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            LibraryPanel(swingCount: 3) {}
+            LibraryPanel {}
         })
     }
 

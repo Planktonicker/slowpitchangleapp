@@ -29,27 +29,41 @@ struct StartView: View {
         NavigationStack {
             ZStack {
                 Theme.black.ignoresSafeArea()
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 22) {
-                        header
-                        // Three panels, and there is no fourth. Mode, start,
-                        // and everything that is not this session. The screen
-                        // used to carry seven tappable rectangles — three mode
-                        // cards, the slab, the library row and two outline
-                        // buttons — which is a menu, not a decision, and the
-                        // decision is the only thing this screen is for.
-                        modePicker
-                        startButton
-                        // Always shown, empty or not. When it was conditional
-                        // on having swings, a fresh install had no route to the
-                        // history screen at all — and the history screen is
-                        // where importing a clip lives, which is the one thing
-                        // somebody with no swings yet is most likely to want.
-                        library
-                        Spacer(minLength: 8)
-                        footer
+                // Centred, not stacked from the top. The screen holds three
+                // panels and a caveat; pinned to the top that left a third of
+                // the phone empty below them, which reads as a page that has
+                // not finished loading rather than one with little on it.
+                //
+                // Still a ScrollView: at the largest accessibility text sizes,
+                // or on a small phone, the same content is taller than the
+                // screen, and a centred VStack that cannot scroll simply loses
+                // its ends. `minHeight` centres it while there is room and
+                // gets out of the way when there is not.
+                GeometryReader { geo in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 22) {
+                            header
+                            // Three panels, and there is no fourth. Mode,
+                            // start, and everything that is not this session.
+                            // The screen used to carry seven tappable
+                            // rectangles — three mode cards, the slab, the
+                            // library row and two outline buttons — which is a
+                            // menu, not a decision, and the decision is the
+                            // only thing this screen is for.
+                            modePicker
+                            startButton
+                            // Always shown, empty or not. When it was
+                            // conditional on having swings, a fresh install had
+                            // no route to the history screen at all — and the
+                            // history screen is where importing a clip lives,
+                            // which is the one thing somebody with no swings
+                            // yet is most likely to want.
+                            library
+                            footer
+                        }
+                        .padding(20)
+                        .frame(minHeight: geo.size.height, alignment: .center)
                     }
-                    .padding(20)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -130,7 +144,7 @@ struct StartView: View {
     }
 
     private var library: some View {
-        LibraryPanel(swingCount: model.swings.count) { sheet = .library }
+        LibraryPanel { sheet = .library }
     }
 
     /// The standing caveat, on the screen every session starts from.
@@ -194,23 +208,28 @@ struct ModeCard: View {
 /// you looked. Swings, rounds and trends are three views of the same history,
 /// so they are three pages behind one row rather than three rectangles on the
 /// screen you start a session from. See `LibraryView`.
+///
+/// It says what it is, not how much of it there is. "3 swings recorded" was a
+/// running total on the one screen that exists to start the next session — it
+/// changed the row's meaning every time it was read, and a lifetime count is
+/// not a thing anybody comes to this screen to find out.
 struct LibraryPanel: View {
-    var swingCount: Int
     var onOpen: () -> Void
 
     var body: some View {
         Button(action: onOpen) {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(swingCount == 0
-                         ? "Swings & imports"
-                         : "\(swingCount) swing\(swingCount == 1 ? "" : "s") recorded")
-                        .font(.system(size: 16, weight: .bold, design: .rounded))
-                    // Names all three pages, because this row is now the only
-                    // thing on the screen that says they exist.
-                    Text(swingCount == 0
-                         ? "Import a clip, or look at past rounds and trends"
-                         : "Review and export, past rounds, trends")
+                    Text("Swings")
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                    // Names the three pages behind it, because this row is now
+                    // the only thing on the screen that says they exist.
+                    // "Rounds", not "sessions". The word is the one every
+                    // other screen uses — the HUD's End round, the This round
+                    // tab, the Past rounds title you land on from here — and a
+                    // row that promises sessions and opens a page labelled
+                    // rounds is a worse sin than an inelegant noun.
+                    Text("Past rounds, trends, and clips you import")
                         .font(.caption).foregroundStyle(Theme.steel)
                 }
                 Spacer(minLength: 0)
