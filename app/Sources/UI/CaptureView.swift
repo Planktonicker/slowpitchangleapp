@@ -449,9 +449,18 @@ struct CaptureScreen: View {
         if case .failed = capture.status {
             out.append(("Camera failed", "exclamationmark.octagon.fill", Theme.fail))
         }
+        // The count only accumulates while armed now, so it always describes a
+        // round — but say WHICH round. An unqualified "483 dropped" sitting on
+        // the screen before the user had armed anything was the reading that
+        // taught them to ignore this chip, and a real drop during a swing would
+        // have looked identical to it.
         if capture.droppedFrameCount > 0 {
-            out.append(("\(capture.droppedFrameCount) dropped",
-                        "exclamationmark.triangle.fill", Theme.warn))
+            let n = capture.droppedFrameCount
+            let cause = capture.dropReasons.headline.map { " · \($0)" } ?? ""
+            let text = capture.isArmed
+                ? "\(n) dropped\(cause)"
+                : "last round: \(n) dropped\(cause)"
+            out.append((text, "exclamationmark.triangle.fill", Theme.warn))
         }
         if capture.suppressedTriggerCount > 0 {
             out.append(("\(capture.suppressedTriggerCount) ignored",
@@ -791,8 +800,15 @@ struct StatusSheet: View {
                     }
                 }
                 Section {
-                    row("Dropped frames", "\(capture.droppedFrameCount)")
-                    Text("Every measurement assumes a constant frame interval. Dropped frames break that, so any swing captured while this was climbing is flagged.")
+                    row(capture.isArmed ? "Dropped this round" : "Dropped, last round",
+                        "\(capture.droppedFrameCount)")
+                    if capture.droppedFrameCount > 0 {
+                        let r = capture.dropReasons
+                        row("  too late", "\(r.late)")
+                        row("  out of buffers", "\(r.outOfBuffers)")
+                        row("  camera hiccup", "\(r.discontinuity)")
+                    }
+                    Text("Counted only while armed, and only reset when you start a round — so this is the whole round, not the time since the last swing. Frames discarded while idle are the discard policy working and are not counted. Every measurement assumes a constant frame interval, so any swing captured while this was climbing is flagged.")
                         .font(.caption).foregroundStyle(.secondary)
                 } header: { Text("Timing") }
 

@@ -92,7 +92,7 @@ enum CaptureFlag: String, Codable, CaseIterable, Sendable {
         case .importedClip:
             return "This clip was imported, not filmed by the app. Launch angle and exit velocity still hold — both come from the ball's own size in the picture, which travels with the footage. What is missing is everything the app measures at capture time: no camera distance, no level or tilt reading to correct with, and no audio trigger, so contact is taken to be the first frame the ball was tracked in rather than the crack of the bat."
         case .framesDropped:
-            return "The camera dropped frames while this clip was recorded. Every measurement here assumes a constant frame interval, so timing — and therefore exit velocity — may be off. Close other apps and let the phone cool down."
+            return "The camera dropped frames while this clip was recorded. Every measurement here assumes a constant frame interval, so timing — and therefore exit velocity — may be off. Close other apps and let the phone cool down. Frames are only counted as dropped while armed; a clip is flagged when the count moved between the previous swing and this one, and the count now runs for the whole round rather than restarting after each swing — before that it could only flag a swing that dropped more frames than the one before it, so a phone shedding a steady few per clip flagged one swing and then went quiet."
         }
     }
 

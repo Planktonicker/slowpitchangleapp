@@ -31,7 +31,38 @@ final class CaptureController: NSObject, ObservableObject {
     @Published private(set) var fieldOfViewDeg: Double = 0
     @Published private(set) var fps: Double = SLA.targetFPS
     @Published private(set) var triggerLevelDb: Double = 0
+    /// Frames dropped **while armed**, cumulative across the round.
+    ///
+    /// Not "frames dropped", which is what it used to be and could not be acted
+    /// on. Three different things were summed into it: frames discarded on
+    /// purpose while idle (the policy at `configure`), real drops from an armed
+    /// stretch, and more idle discards piled on afterwards. Nothing on screen
+    /// separated them, so a number in the hundreds meant nothing and trained
+    /// the reader to ignore the one number that would have meant something.
     @Published private(set) var droppedFrameCount = 0
+    /// Why they were dropped, when any were. Kept apart because the three
+    /// causes call for different actions: `late` is the phone not keeping up
+    /// (heat, another app); `outOfBuffers` is something holding the capture
+    /// pool, which is the one that carries into the armed case where
+    /// discarding is off and a starved pool stalls rather than sheds; and
+    /// `discontinuity` is the capture pipeline itself hiccupping.
+    @Published private(set) var dropReasons = DropReasons()
+
+    struct DropReasons: Equatable {
+        var late = 0
+        var outOfBuffers = 0
+        var discontinuity = 0
+        var other = 0
+
+        var total: Int { late + outOfBuffers + discontinuity + other }
+        /// The dominant cause, for a chip that has room for one word.
+        var headline: String? {
+            let ranked = [("late", late), ("buffers", outOfBuffers),
+                          ("camera", discontinuity), ("other", other)]
+            guard let top = ranked.max(by: { $0.1 < $1.1 }), top.1 > 0 else { return nil }
+            return top.0
+        }
+    }
     @Published private(set) var isRecordingClip = false
     @Published private(set) var exposureLocked = false
     /// A person is currently detected in frame (pose gate, ~10 Hz).
@@ -80,7 +111,11 @@ final class CaptureController: NSObject, ObservableObject {
     /// on a tripod, and a body-pose model handed a rotated human simply fails.
     @Published private(set) var visionOrientation: CGImagePropertyOrientation = .up
     @Published var isArmed = false {
-        didSet { pipelineQueue.async { [weak self] in self?.syncArmed() } }
+        didSet {
+            pipelineQueue.async { [weak self] in
+                self?.syncArmed(startingRound: true)
+            }
+        }
     }
 
     /// Set while the setup overlay is on screen. Only then does the controller
@@ -228,6 +263,16 @@ final class CaptureController: NSObject, ObservableObject {
     private var publishedDb: Double = 0
     private var pendingDrops = 0
     private var publishedDrops = 0
+    private var pendingReasons = DropReasons()
+    private var publishedReasons = DropReasons()
+    /// Whether `didDrop` counts at all.
+    ///
+    /// Guarded by `uiLock`, which the drop callback already takes — rather than
+    /// read off `pipelineIsArmed`, which is owned by `pipelineQueue` and would
+    /// be an unsynchronised cross-queue read from the video delegate. That is
+    /// the same mistake already fixed once for `fps` and the vision
+    /// orientation.
+    private var countingDrops = false
 
     override init() {
         super.init()
@@ -263,16 +308,23 @@ final class CaptureController: NSObject, ObservableObject {
             // loudest thing ever heard instead of the loudest in each tick.
             self.pendingDb = -.infinity
             let drops = self.pendingDrops
+            let reasons = self.pendingReasons
             let dbChanged = db.isFinite && abs(db - self.publishedDb) >= 0.5
             let dropsChanged = drops != self.publishedDrops
             if dbChanged { self.publishedDb = db }
-            if dropsChanged { self.publishedDrops = drops }
+            if dropsChanged {
+                self.publishedDrops = drops
+                self.publishedReasons = reasons
+            }
             self.uiLock.unlock()
 
             guard dbChanged || dropsChanged else { return }
             DispatchQueue.main.async {
                 if dbChanged { self.triggerLevelDb = db }
-                if dropsChanged { self.droppedFrameCount = drops }
+                if dropsChanged {
+                    self.droppedFrameCount = drops
+                    self.dropReasons = reasons
+                }
             }
         }
         timer.resume()
@@ -813,22 +865,47 @@ final class CaptureController: NSObject, ObservableObject {
         presenceGate.looksUnreliable(since: start)
     }
 
-    private func syncArmed() {
+    /// - Parameter startingRound: whether this begins a NEW armed stretch.
+    ///
+    /// False when re-arming after a clip, and that distinction is a measurement
+    /// bug rather than a nicety. `finishClip` calls this once the clip is
+    /// written, with `isArmed` still true — so the old unconditional reset
+    /// zeroed the counter after every swing. `AppModel.handleClip` latches its
+    /// baseline from the counter BEFORE that lands (`onClip` is called
+    /// synchronously; the re-arm is enqueued after it), so the baseline
+    /// ratcheted upward while the counter restarted at zero, and swing *k*
+    /// could only raise FRAMES_DROPPED by dropping MORE than swing *k-1*. A
+    /// phone shedding a steady handful of frames per clip therefore flagged
+    /// exactly one swing and then went quiet — and thermal drops get worse over
+    /// a session, not better, so the quiet swings were the less trustworthy
+    /// ones. The count is now cumulative for the round.
+    private func syncArmed(startingRound: Bool = false) {
         pipelineIsArmed = isArmed
         trigger.isArmed = isArmed && !recorder.isRecording
         if isArmed { trigger.reset() }
         let armed = isArmed
+        let resetting = armed && startingRound
         sessionQueue.async { [weak self] in
             guard let self else { return }
             self.videoOutput.alwaysDiscardsLateVideoFrames = !armed
-            if armed {
-                // The count that matters starts here; drops accumulated while
-                // idle say nothing about a measurement.
-                self.uiLock.lock()
+            // Counting follows arming exactly. While idle, late frames are
+            // discarded ON PURPOSE, and counting a deliberate discard as a
+            // fault is what put "483 DROPPED" on an amber chip in front of
+            // somebody who had been told to watch that number.
+            self.uiLock.lock()
+            self.countingDrops = armed
+            if resetting {
                 self.pendingDrops = 0
                 self.publishedDrops = 0
-                self.uiLock.unlock()
-                DispatchQueue.main.async { self.droppedFrameCount = 0 }
+                self.pendingReasons = DropReasons()
+                self.publishedReasons = DropReasons()
+            }
+            self.uiLock.unlock()
+            if resetting {
+                DispatchQueue.main.async {
+                    self.droppedFrameCount = 0
+                    self.dropReasons = DropReasons()
+                }
             }
         }
     }
@@ -1009,8 +1086,30 @@ extension CaptureController: AVCaptureVideoDataOutputSampleBufferDelegate,
                        didDrop sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         guard output === videoOutput else { return }
+        // The reason is an attachment on the (empty) dropped buffer. Read
+        // before taking the lock: it is a dictionary lookup, and this runs on
+        // the delegate queue that 240 fps delivery depends on.
+        let reason = CMGetAttachment(
+            sampleBuffer,
+            key: kCMSampleBufferAttachmentKey_DroppedFrameReason,
+            attachmentModeOut: nil) as? String
+
         uiLock.lock()
-        pendingDrops += 1
+        // Only while armed. Idle discards are the discard POLICY working, not
+        // a fault — see `syncArmed`.
+        if countingDrops {
+            pendingDrops += 1
+            switch reason {
+            case kCMSampleBufferDroppedFrameReason_FrameWasLate as String:
+                pendingReasons.late += 1
+            case kCMSampleBufferDroppedFrameReason_OutOfBuffers as String:
+                pendingReasons.outOfBuffers += 1
+            case kCMSampleBufferDroppedFrameReason_Discontinuity as String:
+                pendingReasons.discontinuity += 1
+            default:
+                pendingReasons.other += 1
+            }
+        }
         uiLock.unlock()
     }
 }
