@@ -234,7 +234,8 @@ struct CaptureScreen: View {
                             lastSwingCard(swing)
                                 // Shares the control block's right edge, or it
                                 // would hang past a column that now stops short.
-                                .frame(maxWidth: isLandscape ? 460 : Self.clusterWidth)
+                                .frame(maxWidth: isLandscape ? 460
+                                                : Self.bugWidth(screen: geo.size.width))
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         if model.hitterGateLooksStuck { hitterGateEscape }
@@ -243,7 +244,7 @@ struct CaptureScreen: View {
                     .padding(.bottom, 6)
                 }
 
-                bottomRow(isLandscape: isLandscape)
+                bottomRow(isLandscape: isLandscape, screen: geo.size.width)
                     .padding(.horizontal, 16)
                     // Just enough to sit off the tab bar. The TabView already
                     // insets its content for the floating bar, so the earlier
@@ -262,19 +263,41 @@ struct CaptureScreen: View {
     /// heights is how a row stops looking like a row.
     private static let controlHeight: CGFloat = 52
 
-    /// Width of the right-hand control column.
+    /// Share of the screen's width the buttons take. The controls stop on one
+    /// edge, and it is the right one: the picture the phone is filming is
+    /// worth more than the chrome sitting on it.
     ///
-    /// The three controls stop on one edge, and it is the right one: the
-    /// picture the phone is filming is worth more than the chrome sitting on
-    /// it. 300 is a floor plus headroom rather than a round number —
-    /// `ScoreBug` cannot go below 242 (a 72pt tile, a 148pt minimum readout,
-    /// 22 of padding) and a `maxWidth` on an ancestor cannot compress a stated
-    /// `minWidth`, so under that it would overhang the very edge this exists
-    /// to create. Its armed subline wraps somewhere near 268. 300 clears both.
-    private static let clusterWidth: CGFloat = 300
+    /// A fraction rather than a fixed 300, because "too big" is a judgement
+    /// about how much of the viewfinder is left, and that is a proportion —
+    /// the same 300pt slab is three quarters of a portrait phone and a third
+    /// of the same phone turned sideways.
+    private static let actionWidthFraction: CGFloat = 0.30
 
-    /// Bug, gap, action cluster. End round and the meter span the whole block.
-    private static let landscapeBlockWidth: CGFloat = 2 * clusterWidth + controlGap
+    /// The buttons: ARM (with MANUAL beside it while armed) and End round.
+    ///
+    /// The floor is what the widest state needs, not a round number. Armed,
+    /// the row is a 52pt MANUAL button, the 10pt gap, and a primary slab that
+    /// has to hold "MEASURING…"; below ~140 that slab starts shrinking its own
+    /// text, and a primary action that changes size as the state changes is
+    /// worse than one that is slightly wider than asked for.
+    private static func actionWidth(screen: CGFloat) -> CGFloat {
+        max((screen * actionWidthFraction).rounded(), 140)
+    }
+
+    /// The bug is allowed to be wider than the buttons under it, and usually
+    /// is. It carries a word, a number and the round's swing count; the
+    /// buttons carry one word each. Forcing them to the same width means
+    /// either a button with acres of empty yellow or a readout squeezed until
+    /// "3 swings this round" is unreadable from sixty feet — which is the one
+    /// thing this HUD exists to say. They share the right edge instead.
+    private static func bugWidth(screen: CGFloat) -> CGFloat {
+        max(actionWidth(screen: screen), ScoreBug.minWidth(height: controlHeight))
+    }
+
+    /// Bug, gap, action cluster.
+    private static func landscapeBlockWidth(screen: CGFloat) -> CGFloat {
+        bugWidth(screen: screen) + controlGap + actionWidth(screen: screen)
+    }
 
     /// One block in both orientations: a `controlHeight` row, then the
     /// secondary action across the full width beneath it.
@@ -288,19 +311,20 @@ struct CaptureScreen: View {
     ///
     /// Portrait keeps the action on its own row — squeezing it beside the bug
     /// is what once turned the primary button into "1 · SE…".
-    private func bottomRow(isLandscape: Bool) -> some View {
-        VStack(spacing: Self.controlGap) {
+    private func bottomRow(isLandscape: Bool, screen: CGFloat) -> some View {
+        let action = Self.actionWidth(screen: screen)
+        return VStack(alignment: .trailing, spacing: Self.controlGap) {
             if isLandscape {
                 HStack(spacing: Self.controlGap) {
                     bug
-                    actionCluster.frame(width: Self.clusterWidth)
+                    actionCluster.frame(width: action)
                 }
                 .frame(height: Self.controlHeight)
             } else {
                 bug
-                actionCluster
+                actionCluster.frame(width: action)
             }
-            endSessionButton
+            endSessionButton.frame(width: action)
             // Below the buttons rather than on the seam above them. The meter
             // is the audio trigger's readout and ARM is the audio trigger's
             // switch, so it belongs beside the control it explains.
@@ -311,11 +335,15 @@ struct CaptureScreen: View {
             // camera reached `.running`.
             SeamMeter(db: capture.triggerLevelDb,
                       thresholdDb: model.settings.triggerDb)
+                // The buttons' width, not the block's: it is ARM's readout, so
+                // it underlines ARM rather than the bug two rows up.
+                .frame(width: action)
                 .opacity(hudState == .starting ? 0 : 1)
         }
         // Cap, then pin. Two frames, because `maxWidth:alignment:` aligns the
         // CONTENT inside the frame, not the frame inside its parent.
-        .frame(maxWidth: isLandscape ? Self.landscapeBlockWidth : Self.clusterWidth)
+        .frame(maxWidth: isLandscape ? Self.landscapeBlockWidth(screen: screen)
+                                     : Self.bugWidth(screen: screen))
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 

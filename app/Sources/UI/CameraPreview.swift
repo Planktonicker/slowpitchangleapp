@@ -440,8 +440,18 @@ struct CameraPreview: UIViewRepresentable {
         /// missing shin is honest; one drawn through a guessed ankle is not.
         private func redrawSkeleton() {
             guard let skeleton, !skeleton.isEmpty, bounds.width > 1 else {
+                CATransaction.begin()
+                CATransaction.setDisableActions(true)
                 skeletonLayer.path = nil
+                // `shadowPath` is honoured independently of `path`: a shape
+                // layer with no path still renders its shadow. Clearing only
+                // the path left a black blur of the last pose hanging over the
+                // viewfinder — a person-shaped smudge that stayed put while
+                // the camera was pointed somewhere else, and outlived
+                // disarming, because nothing draws again once the joints stop.
+                skeletonLayer.shadowPath = nil
                 jointLayer.path = nil
+                CATransaction.commit()
                 return
             }
             let layerPoint = { [videoPreviewLayer] (j: PoseJoint) -> CGPoint? in

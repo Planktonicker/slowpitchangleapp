@@ -98,6 +98,24 @@ struct ScoreBug: View {
     var height: CGFloat = 60
     var onTap: () -> Void
 
+    /// Narrowest this can be drawn with the readout still legible.
+    ///
+    /// Published because the control column above it is sized as a fraction
+    /// of the screen, and a `maxWidth` on an ancestor cannot compress a
+    /// stated `minWidth` — asking for less than this does not make the bug
+    /// smaller, it makes it overhang the very edge the column exists to
+    /// create. The caller takes the larger of the two.
+    static func minWidth(height: CGFloat) -> CGFloat {
+        tileWidth(height: height) + readoutMinWidth + readoutPadding * 2
+    }
+
+    /// Wider than tall: the tile has no horizontal padding, and at a bare
+    /// square "WORKING" ran edge to edge and scaled itself down rather than
+    /// fitting at the size it asks for.
+    private static func tileWidth(height: CGFloat) -> CGFloat { max(height + 8, 64) }
+    private static let readoutMinWidth: CGFloat = 116
+    private static let readoutPadding: CGFloat = 10
+
     var body: some View {
         Button(action: onTap) {
             HStack(spacing: 0) {
@@ -111,10 +129,7 @@ struct ScoreBug: View {
                         .minimumScaleFactor(0.7)
                 }
                 .foregroundStyle(state.onTint)
-                // Wider than tall: the tile has no horizontal padding, and at
-                // a bare 60pt square "WORKING" ran edge to edge and scaled
-                // itself down rather than fitting at the size it asks for.
-                .frame(width: max(height + 12, 72), height: height)
+                .frame(width: Self.tileWidth(height: height), height: height)
                 .background(state.tint)
 
                 VStack(alignment: .leading, spacing: 0) {
@@ -147,16 +162,16 @@ struct ScoreBug: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                // Flexible, not a fixed 148. The tile sits in a row with the
-                // action buttons and, in portrait, above them — and a fixed
-                // width left it stopping two thirds of the way across while
+                // Flexible, not fixed. The tile sits in a row with the action
+                // buttons and, in portrait, above them — and a fixed width
+                // left it stopping two thirds of the way across while
                 // everything below it ran to the edge. A ragged right edge is
                 // most of what made this screen look unconsidered. The minimum
                 // keeps the readout from being squeezed to nothing when it
-                // shares a landscape row.
-                .frame(minWidth: 148, maxWidth: .infinity,
+                // shares a landscape row; see `minWidth(height:)`.
+                .frame(minWidth: Self.readoutMinWidth, maxWidth: .infinity,
                        minHeight: height, maxHeight: height, alignment: .leading)
-                .padding(.horizontal, 11)
+                .padding(.horizontal, Self.readoutPadding)
                 .background(.black.opacity(0.86))
             }
             .clipShape(RoundedRectangle(cornerRadius: 14))

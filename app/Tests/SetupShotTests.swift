@@ -182,10 +182,44 @@ final class SetupShotTests: XCTestCase {
     func testShootScoreBug() {
         for (name, state) in [("ready", HUDState.ready), ("armed", .armed),
                               ("recording", .recording), ("analysing", .analysing)] {
-            // Portrait width, where the tile has to reach the margin, and the
-            // narrower landscape share of a row.
-            shoot("bug-\(name)", width: portraitWidth, scoreBug(state))
-            shoot("bug-\(name)-narrow", width: 420, scoreBug(state))
+            // The width the bug really gets on a 393pt phone (its own floor,
+            // since 30% of the screen is under it), and its landscape share.
+            shoot("bug-\(name)", width: ScoreBug.minWidth(height: 52), scoreBug(state))
+            shoot("bug-\(name)-wide", width: 256, scoreBug(state))
+        }
+    }
+
+    /// The buttons at the width the fraction gives them, because "30% of the
+    /// screen" is a number until you see whether "MEASURING…" still fits in it.
+    func testShootControlColumn() {
+        for (name, width) in [("portrait", CGFloat(140)), ("landscape", CGFloat(256))] {
+            shoot("controls-\(name)", width: width, VStack(spacing: 10) {
+                HStack(spacing: 10) {
+                    Button {} label: {
+                        VStack(spacing: 2) {
+                            Image(systemName: "bolt.fill").font(.system(size: 17, weight: .bold))
+                            Text("MANUAL").font(Theme.label(9)).tracking(0.5)
+                        }
+                        .frame(width: 52)
+                    }
+                    .buttonStyle(OutlineButtonStyle(verticalPadding: 0, cornerRadius: 14,
+                                                    minHeight: 52))
+                    .frame(width: 52)
+                    Button {} label: { Text("Measuring…") }
+                        .buttonStyle(SlabButtonStyle(fill: Theme.surface, textColor: Theme.steel,
+                                                     size: 15, verticalPadding: 0, minHeight: 52))
+                }
+                .frame(height: 52)
+                Button {} label: { Text("Arm") }
+                    .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 0, minHeight: 52))
+                Button {} label: {
+                    Label("End round", systemImage: "flag.checkered")
+                        .font(Theme.label(12)).tracking(1)
+                }
+                .buttonStyle(OutlineButtonStyle(verticalPadding: 7, cornerRadius: 10,
+                                                hitHeight: 44))
+                SeamMeter(db: 6, thresholdDb: 20)
+            })
         }
     }
 
