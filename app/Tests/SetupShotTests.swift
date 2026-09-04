@@ -218,8 +218,10 @@ final class SetupShotTests: XCTestCase {
                 }
                 .buttonStyle(OutlineButtonStyle(verticalPadding: 7, cornerRadius: 10,
                                                 hitHeight: 44))
-                SeamMeter(db: 6, thresholdDb: 20)
             })
+            // No meter here — it spans the screen, not this column, and
+            // drawing it at the column's width would be a picture of a layout
+            // the app does not have. `meter-quiet` covers it at full width.
         }
     }
 

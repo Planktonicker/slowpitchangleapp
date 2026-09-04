@@ -314,6 +314,30 @@ struct CaptureScreen: View {
     private func bottomRow(isLandscape: Bool, screen: CGFloat) -> some View {
         let action = Self.actionWidth(screen: screen)
         return VStack(alignment: .trailing, spacing: Self.controlGap) {
+            controlColumn(isLandscape: isLandscape, screen: screen, action: action)
+            // Below the buttons rather than on the seam above them. The meter
+            // is the audio trigger's readout and ARM is the audio trigger's
+            // switch, so it belongs beside the control it explains — but at
+            // the full width of the screen, not the column's. It is a level,
+            // and a level bar reads by how far along it the fill has got;
+            // cropping it to a 140pt column throws away most of that
+            // resolution for no gain, and it is a 4pt hairline, so it costs
+            // the picture nothing.
+            //
+            // `.opacity`, never `if`: this block is bottom-anchored, so
+            // removing the meter would drop everything above it by 14pt and
+            // then shove it back up under a reaching thumb the moment the
+            // camera reached `.running`.
+            SeamMeter(db: capture.triggerLevelDb,
+                      thresholdDb: model.settings.triggerDb)
+                .opacity(hudState == .starting ? 0 : 1)
+        }
+    }
+
+    /// Bug, action, End round — the part that is a right-hand column.
+    private func controlColumn(isLandscape: Bool, screen: CGFloat,
+                               action: CGFloat) -> some View {
+        VStack(alignment: .trailing, spacing: Self.controlGap) {
             if isLandscape {
                 HStack(spacing: Self.controlGap) {
                     bug
@@ -325,20 +349,6 @@ struct CaptureScreen: View {
                 actionCluster.frame(width: action)
             }
             endSessionButton.frame(width: action)
-            // Below the buttons rather than on the seam above them. The meter
-            // is the audio trigger's readout and ARM is the audio trigger's
-            // switch, so it belongs beside the control it explains.
-            //
-            // `.opacity`, never `if`: this block is bottom-anchored, so
-            // removing the meter would drop everything above it by 14pt and
-            // then shove it back up under a reaching thumb the moment the
-            // camera reached `.running`.
-            SeamMeter(db: capture.triggerLevelDb,
-                      thresholdDb: model.settings.triggerDb)
-                // The buttons' width, not the block's: it is ARM's readout, so
-                // it underlines ARM rather than the bug two rows up.
-                .frame(width: action)
-                .opacity(hudState == .starting ? 0 : 1)
         }
         // Cap, then pin. Two frames, because `maxWidth:alignment:` aligns the
         // CONTENT inside the frame, not the frame inside its parent.
