@@ -189,57 +189,94 @@ final class SetupShotTests: XCTestCase {
         }
     }
 
-    /// The buttons at the width the fraction gives them, because "30% of the
-    /// screen" is a number until you see whether "MEASURING…" still fits in it.
-    func testShootControlColumn() {
-        for (name, width) in [("portrait", CGFloat(140)), ("landscape", CGFloat(256))] {
-            shoot("controls-\(name)", width: width, VStack(spacing: 10) {
-                // Armed: MANUAL takes 52 and the gap 10, and STOP gets what
-                // is left. This is the state that sets the floor.
-                HStack(spacing: 10) {
-                    Button {} label: {
-                        VStack(spacing: 2) {
-                            Image(systemName: "bolt.fill").font(.system(size: 17, weight: .bold))
-                            Text("MANUAL").font(Theme.label(9)).tracking(0.5)
-                        }
-                        .frame(width: 52)
-                    }
-                    .buttonStyle(OutlineButtonStyle(verticalPadding: 0, cornerRadius: 14,
-                                                    minHeight: 52))
-                    .frame(width: 52)
-                    Button {} label: { Text("Stop") }
-                        .buttonStyle(SlabButtonStyle(fill: Theme.fail, textColor: .white,
-                                                     size: 19, verticalPadding: 0, minHeight: 52))
-                }
-                .frame(height: 52)
-                // Analysing: no MANUAL — `contextAction` returns nil — so the
-                // longest word on the screen gets the whole width. Drawing the
-                // two together, as this render first did, invents a state the
-                // app cannot reach and makes the column look too narrow.
-                Button {} label: { Text("Measuring…") }
-                    .buttonStyle(SlabButtonStyle(fill: Theme.surface, textColor: Theme.steel,
-                                                 size: 15, verticalPadding: 0, minHeight: 52))
-                Button {} label: { Text("Arm") }
-                    .buttonStyle(SlabButtonStyle(size: 19, verticalPadding: 0, minHeight: 52))
-                Button {} label: {
-                    Label("End round", systemImage: "flag.checkered")
-                        .font(Theme.label(12)).tracking(1)
-                }
-                .buttonStyle(OutlineButtonStyle(verticalPadding: 7, cornerRadius: 10,
-                                                hitHeight: 44))
-            })
-            // No meter here — it spans the screen, not this column, and
-            // drawing it at the column's width would be a picture of a layout
-            // the app does not have. `meter-quiet` covers it at full width.
-        }
+    /// The whole control block, both orientations, at the widths the app
+    /// really gives it. Composition is the thing being checked here — the
+    /// version this replaced had three widths and three left edges, which
+    /// compiled, tested clean, and looked like three unrelated islands.
+    func testShootControlBlock() {
+        shoot("block-portrait", width: 204, VStack(spacing: 10) {
+            bug(.armed, subline: "field, live pitching · no swings yet")
+            armedActions
+            endRound
+        })
+
+        shoot("block-landscape", width: 426, VStack(spacing: 10) {
+            HStack(spacing: 10) {
+                bug(.armed, subline: "field, live pitching · no swings yet")
+                armedActions.frame(width: 140)
+            }
+            .frame(height: 52)
+            endRound
+        })
+
+        // Analysing: no MANUAL — `contextAction` returns nil — so the longest
+        // word on the screen gets the whole width.
+        shoot("block-analysing", width: 204, VStack(spacing: 10) {
+            bug(.analysing, subline: nil)
+            Button {} label: { Text("Measuring…") }
+                .buttonStyle(SlabButtonStyle(fill: Theme.surface, textColor: Theme.steel,
+                                             size: 15, verticalPadding: 0, minHeight: 52))
+            endRound
+        })
     }
 
-    func testShootSeamMeter() {
-        shoot("meter-quiet", width: portraitWidth, SeamMeter(db: 6, thresholdDb: 20))
-        shoot("meter-over", width: portraitWidth, SeamMeter(db: 31, thresholdDb: 20))
+    /// The ribbon at both shapes. Portrait is the one that was broken: the
+    /// controls took most of a 361pt line and left every chip reading "1…".
+    func testShootRibbon() {
+        let chips: [(text: String, symbol: String, color: Color)] = [
+            ("340 dropped · buffers", "exclamationmark.triangle.fill", Theme.warn),
+            ("2 ignored", "bolt.slash.fill", Theme.warn),
+            ("no hitter", "person.slash.fill", Theme.warn),
+        ]
+        let controls = AnyView(HStack(spacing: 8) {
+            Text("SET UP").font(Theme.label(11)).padding(.horizontal, 10).padding(.vertical, 5)
+                .background(.black.opacity(0.75), in: Capsule())
+                .foregroundStyle(Theme.yellow).frame(height: 44)
+            Text("FIELD, LIVE PITCHING ⌄").font(Theme.label(11))
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(.black.opacity(0.75), in: Capsule())
+                .foregroundStyle(Theme.yellow).frame(height: 44)
+        })
+        shoot("ribbon-portrait", width: 361,
+              ExceptionRibbon(chips: chips, onChipTap: {}, trailing: controls,
+                              isLandscape: false))
+        shoot("ribbon-landscape", width: 820,
+              ExceptionRibbon(chips: chips, onChipTap: {}, trailing: controls,
+                              isLandscape: true))
     }
 
     // MARK: - Helpers
+
+    private func bug(_ state: HUDState, subline: String?) -> some View {
+        ScoreBug(state: state, label: "Launch", value: state.isLoud ? "" : "31°",
+                 qualifier: nil, subline: subline, height: 52, onTap: {})
+    }
+
+    private var armedActions: some View {
+        HStack(spacing: 10) {
+            Button {} label: {
+                VStack(spacing: 2) {
+                    Image(systemName: "bolt.fill").font(.system(size: 17, weight: .bold))
+                    Text("MANUAL").font(Theme.label(9)).tracking(0.5)
+                }
+                .frame(width: 52)
+            }
+            .buttonStyle(OutlineButtonStyle(verticalPadding: 0, cornerRadius: 14, minHeight: 52))
+            .frame(width: 52)
+            Button {} label: { Text("Stop") }
+                .buttonStyle(SlabButtonStyle(fill: Theme.fail, textColor: .white,
+                                             size: 19, verticalPadding: 0, minHeight: 52))
+        }
+        .frame(height: 52)
+    }
+
+    private var endRound: some View {
+        Button {} label: {
+            Label("End round", systemImage: "flag.checkered")
+                .font(Theme.label(12)).tracking(1)
+        }
+        .buttonStyle(OutlineButtonStyle(verticalPadding: 7, cornerRadius: 10, hitHeight: 44))
+    }
 
     private func scoreBug(_ state: HUDState) -> some View {
         ScoreBug(state: state,

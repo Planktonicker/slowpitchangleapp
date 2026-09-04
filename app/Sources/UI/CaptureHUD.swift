@@ -200,9 +200,32 @@ struct ExceptionRibbon: View {
     /// that must never become unreachable belongs here rather than in the
     /// bottom row, which changes shape with the state.
     var trailing: AnyView
+    /// Portrait puts the controls on their own line above the chips.
+    var isLandscape: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
+        // One row when there is width for one. In portrait there is not: the
+        // controls take ~230 of a 361pt line, and the chips — which had the
+        // lower layout priority, correctly, since a control squeezed to an
+        // ellipsis has stopped being one — were left showing "⚠ 1…", three
+        // times over. A chip that cannot say its number is not a smaller
+        // warning, it is no warning at all.
+        if isLandscape {
+            HStack(alignment: .top, spacing: 6) {
+                chipRow
+                Spacer(minLength: 0)
+                trailing
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 0) { Spacer(minLength: 0); trailing }
+                chipRow
+            }
+        }
+    }
+
+    private var chipRow: some View {
+        ChipFlow {
             ForEach(Array(chips.enumerated()), id: \.offset) { _, chip in
                 Button(action: onChipTap) {
                     HStack(spacing: 4) {
@@ -222,8 +245,55 @@ struct ExceptionRibbon: View {
                 }
                 .buttonStyle(.plain)
             }
-            Spacer(minLength: 0)
-            trailing
+        }
+    }
+}
+
+/// Left-aligned chips that wrap to a new line rather than shrink.
+///
+/// An `HStack` has one answer when its children do not fit — compress them —
+/// and for a status chip that answer is wrong: the chip's whole content is a
+/// number and a cause, and the first thing compression takes is the number.
+struct ChipFlow: Layout {
+    var spacing: CGFloat = 6
+    /// Negative on purpose. Each chip carries a 44pt touch target around a
+    /// 26pt capsule, so stacking rows at their full height leaves an 18pt
+    /// canyon between two pills. Pulling the rows together sets the visual
+    /// gap instead, and the targets that then overlap belong to buttons that
+    /// all do the same thing — open the status sheet — so a tap landing in
+    /// the overlap is correct either way.
+    var lineSpacing: CGFloat = -12
+
+    private func layout(_ subviews: Subviews, width: CGFloat,
+                        place: ((LayoutSubview, CGPoint, CGSize) -> Void)?) -> CGSize {
+        var x: CGFloat = 0, y: CGFloat = 0
+        var rowHeight: CGFloat = 0, widest: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                widest = max(widest, x - spacing)
+                x = 0
+                y += rowHeight + lineSpacing
+                rowHeight = 0
+            }
+            place?(view, CGPoint(x: x, y: y), size)
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        return CGSize(width: max(widest, x - spacing), height: y + rowHeight)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews,
+                      cache: inout ()) -> CGSize {
+        guard !subviews.isEmpty else { return .zero }
+        return layout(subviews, width: proposal.width ?? .infinity, place: nil)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize,
+                       subviews: Subviews, cache: inout ()) {
+        _ = layout(subviews, width: bounds.width) { view, origin, size in
+            view.place(at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y),
+                       proposal: ProposedViewSize(size))
         }
     }
 }

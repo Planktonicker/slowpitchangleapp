@@ -211,7 +211,8 @@ struct CaptureScreen: View {
             VStack(spacing: 0) {
                 ExceptionRibbon(chips: exceptionChips,
                                 onChipTap: { showStatus = true },
-                                trailing: AnyView(persistentControls))
+                                trailing: AnyView(persistentControls),
+                                isLandscape: isLandscape)
                     .padding(.horizontal, 16)
                     .padding(.top, 4)
                     .background(
@@ -234,8 +235,8 @@ struct CaptureScreen: View {
                             lastSwingCard(swing)
                                 // Shares the control block's right edge, or it
                                 // would hang past a column that now stops short.
-                                .frame(maxWidth: isLandscape ? 460
-                                                : Self.bugWidth(screen: geo.size.width))
+                                .frame(maxWidth: Self.blockWidth(screen: geo.size.width,
+                                                                 isLandscape: isLandscape))
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         if model.hitterGateLooksStuck { hitterGateEscape }
@@ -263,42 +264,38 @@ struct CaptureScreen: View {
     /// heights is how a row stops looking like a row.
     private static let controlHeight: CGFloat = 52
 
-    /// Share of the screen's width the buttons take. The controls stop on one
-    /// edge, and it is the right one: the picture the phone is filming is
-    /// worth more than the chrome sitting on it.
+    /// Everything in the control block is this wide — the bug, the buttons,
+    /// End round. One width, or it is not a block.
+    ///
+    /// The stepped version this replaces gave the bug one width and the
+    /// buttons a narrower one, on the reasoning that the bug carries more and
+    /// deserves more. On the screen it read as three unrelated islands with
+    /// three different left edges, sharing only a right margin — which is a
+    /// coincidence, not a composition. A group of controls is legible when it
+    /// has an outline; whether one member could have been 60pt narrower is
+    /// not worth the outline.
     ///
     /// A fraction rather than a fixed 300, because "too big" is a judgement
     /// about how much of the viewfinder is left, and that is a proportion —
     /// the same 300pt slab is three quarters of a portrait phone and a third
-    /// of the same phone turned sideways.
-    private static let actionWidthFraction: CGFloat = 0.30
-
-    /// The buttons: ARM (with MANUAL beside it while armed) and End round.
-    ///
-    /// The floor is what the tightest state needs, not a round number. Two
-    /// states compete for it and neither is the obvious one: armed, the row
-    /// gives 62pt to MANUAL and its gap and the rest to STOP; analysing, the
-    /// slab is alone but has to hold "MEASURING…" at 15pt. Both clear 140 and
-    /// neither clears much less, and a primary action that shrinks its own
-    /// text as the state changes is worse than one slightly wider than asked.
-    private static func actionWidth(screen: CGFloat) -> CGFloat {
-        max((screen * actionWidthFraction).rounded(), 140)
+    /// of the same phone turned sideways. Landscape asks for a smaller share
+    /// because it packs the bug and the buttons onto one line, so the block
+    /// is two controls wide instead of one.
+    private static func blockWidth(screen: CGFloat, isLandscape: Bool) -> CGFloat {
+        let want = (screen * (isLandscape ? 0.50 : 0.52)).rounded()
+        let bugFloor = ScoreBug.minWidth(height: controlHeight)
+        let floor = isLandscape ? bugFloor + controlGap + actionFloor : bugFloor
+        return max(want, floor)
     }
 
-    /// The bug is allowed to be wider than the buttons under it, and usually
-    /// is. It carries a word, a number and the round's swing count; the
-    /// buttons carry one word each. Forcing them to the same width means
-    /// either a button with acres of empty yellow or a readout squeezed until
-    /// "3 swings this round" is unreadable from sixty feet — which is the one
-    /// thing this HUD exists to say. They share the right edge instead.
-    private static func bugWidth(screen: CGFloat) -> CGFloat {
-        max(actionWidth(screen: screen), ScoreBug.minWidth(height: controlHeight))
-    }
+    /// Narrowest the buttons may be. Two states compete for it and neither is
+    /// the obvious one: armed, the row gives 62pt to MANUAL and its gap and
+    /// the rest to STOP; analysing, the slab is alone but has to hold
+    /// "MEASURING…" at 15pt. Both clear 140 and neither clears much less, and
+    /// a primary action that shrinks its own text as the state changes is
+    /// worse than one slightly wider than asked.
+    private static let actionFloor: CGFloat = 140
 
-    /// Bug, gap, action cluster.
-    private static func landscapeBlockWidth(screen: CGFloat) -> CGFloat {
-        bugWidth(screen: screen) + controlGap + actionWidth(screen: screen)
-    }
 
     /// One block in both orientations: a `controlHeight` row, then the
     /// secondary action across the full width beneath it.
@@ -313,9 +310,8 @@ struct CaptureScreen: View {
     /// Portrait keeps the action on its own row — squeezing it beside the bug
     /// is what once turned the primary button into "1 · SE…".
     private func bottomRow(isLandscape: Bool, screen: CGFloat) -> some View {
-        let action = Self.actionWidth(screen: screen)
-        return VStack(alignment: .trailing, spacing: Self.controlGap) {
-            controlColumn(isLandscape: isLandscape, screen: screen, action: action)
+        VStack(alignment: .trailing, spacing: Self.controlGap) {
+            controlColumn(isLandscape: isLandscape, screen: screen)
             // Below the buttons rather than on the seam above them. The meter
             // is the audio trigger's readout and ARM is the audio trigger's
             // switch, so it belongs beside the control it explains — but at
@@ -335,26 +331,31 @@ struct CaptureScreen: View {
         }
     }
 
-    /// Bug, action, End round — the part that is a right-hand column.
-    private func controlColumn(isLandscape: Bool, screen: CGFloat,
-                               action: CGFloat) -> some View {
-        VStack(alignment: .trailing, spacing: Self.controlGap) {
+    /// Bug, action, End round — one rectangle in both orientations. Portrait
+    /// stacks all three; landscape puts the bug and the buttons on one line
+    /// with End round spanning underneath, because a landscape phone has the
+    /// width for it and not the height.
+    private func controlColumn(isLandscape: Bool, screen: CGFloat) -> some View {
+        VStack(spacing: Self.controlGap) {
             if isLandscape {
                 HStack(spacing: Self.controlGap) {
                     bug
-                    actionCluster.frame(width: action)
+                    // The buttons take their floor and the bug takes the
+                    // surplus, not the other way round. A wider STOP is a
+                    // wider STOP; a wider bug is the round's swing count on
+                    // one line instead of two.
+                    actionCluster.frame(width: Self.actionFloor)
                 }
                 .frame(height: Self.controlHeight)
             } else {
                 bug
-                actionCluster.frame(width: action)
+                actionCluster
             }
-            endSessionButton.frame(width: action)
+            endSessionButton
         }
         // Cap, then pin. Two frames, because `maxWidth:alignment:` aligns the
         // CONTENT inside the frame, not the frame inside its parent.
-        .frame(maxWidth: isLandscape ? Self.landscapeBlockWidth(screen: screen)
-                                     : Self.bugWidth(screen: screen))
+        .frame(maxWidth: Self.blockWidth(screen: screen, isLandscape: isLandscape))
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
