@@ -195,14 +195,14 @@ final class SetupShotTests: XCTestCase {
     /// compiled, tested clean, and looked like three unrelated islands.
     func testShootControlBlock() {
         shoot("block-portrait", width: 204, VStack(spacing: 10) {
-            bug(.armed, subline: "field, live pitching · no swings yet")
+            bug(.armed, subline: "no swings yet")
             armedActions
             endRound
         })
 
         shoot("block-landscape", width: 426, VStack(spacing: 10) {
             HStack(spacing: 10) {
-                bug(.armed, subline: "field, live pitching · no swings yet")
+                bug(.armed, subline: "no swings yet")
                 armedActions.frame(width: 140)
             }
             .frame(height: 52)
@@ -254,10 +254,8 @@ final class SetupShotTests: XCTestCase {
         for mode in SessionMode.allCases {
             shoot("start-mode-\(mode.rawValue)", width: 353, ModeCard(mode: mode))
         }
-        shoot("start-library-empty", width: 353,
-              LibraryPanel(swingCount: 0, onSwings: {}, onRounds: {}, onTrends: {}))
-        shoot("start-library", width: 353,
-              LibraryPanel(swingCount: 3, onSwings: {}, onRounds: {}, onTrends: {}))
+        shoot("start-library-empty", width: 353, LibraryPanel(swingCount: 0) {})
+        shoot("start-library", width: 353, LibraryPanel(swingCount: 3) {})
 
         // The three together, in the order and spacing the screen uses, since
         // the point of the change was the composition rather than any panel.
@@ -270,7 +268,7 @@ final class SetupShotTests: XCTestCase {
                     .font(.caption).foregroundStyle(Theme.steel)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            LibraryPanel(swingCount: 3, onSwings: {}, onRounds: {}, onTrends: {})
+            LibraryPanel(swingCount: 3) {}
         })
     }
 
@@ -312,7 +310,7 @@ final class SetupShotTests: XCTestCase {
                  label: "Launch",
                  value: state.isLoud ? "" : "31°",
                  qualifier: nil,
-                 subline: "live pitching · no swings yet",
+                 subline: "no swings yet",
                  height: 60,
                  onTap: {})
     }

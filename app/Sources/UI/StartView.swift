@@ -20,7 +20,7 @@ struct StartView: View {
     @EnvironmentObject private var model: AppModel
     @State private var mode: SessionMode = .live
     enum StartSheet: String, Identifiable {
-        case swings, settings, trends, rounds
+        case library, settings
         var id: String { rawValue }
     }
     @State private var sheet: StartSheet?
@@ -73,10 +73,8 @@ struct StartView: View {
             // own — a swipe-down was the only way out and nothing said so.
             .sheet(item: $sheet) { which in
                 switch which {
-                case .swings:     HistoryView(isModal: true)
-                case .settings:   SettingsView(isModal: true)
-                case .trends:     TrendsView(isModal: true)
-                case .rounds:     RoundsView()
+                case .library:  LibraryView()
+                case .settings: SettingsView(isModal: true)
                 }
             }
         }
@@ -131,21 +129,8 @@ struct StartView: View {
         }
     }
 
-    /// Everything that is not this session, in one panel.
-    ///
-    /// Swings, past rounds and trends were a row and two outline buttons, and
-    /// the two buttons appeared only once there were swings — so the route to
-    /// a round you had already started was invisible on precisely the screen
-    /// you would look for it from, the first time you looked. They are three
-    /// destinations of the same kind. They read as one thing now, and the
-    /// panel is the same shape on a fresh install as on a full one: each
-    /// destination has its own empty state and says so on arrival, which is
-    /// more use than not being there.
     private var library: some View {
-        LibraryPanel(swingCount: model.swings.count,
-                     onSwings: { sheet = .swings },
-                     onRounds: { sheet = .rounds },
-                     onTrends: { sheet = .trends })
+        LibraryPanel(swingCount: model.swings.count) { sheet = .library }
     }
 
     /// The standing caveat, on the screen every session starts from.
@@ -201,84 +186,42 @@ struct ModeCard: View {
     }
 }
 
-/// Everything that is not this session, in one panel.
+/// The third panel: one row, one destination.
 ///
-/// Swings, past rounds and trends were a row and two outline buttons, and the
-/// two buttons appeared only once there were swings — so the route to a round
-/// you had already started was invisible on precisely the screen you would
-/// look for it from, the first time you looked. They are three destinations of
-/// the same kind. They read as one thing now, and the panel is the same shape
-/// on a fresh install as on a full one: each destination has its own empty
-/// state and says so on arrival, which is more use than not being there.
-///
-/// Its own type so it can be rendered without an `AppModel` — see
-/// `SetupShotTests`.
+/// It used to be a row plus two outline buttons, and the buttons appeared only
+/// once there were swings — so the route to a round you had already started was
+/// invisible on precisely the screen you would look for it from, the first time
+/// you looked. Swings, rounds and trends are three views of the same history,
+/// so they are three pages behind one row rather than three rectangles on the
+/// screen you start a session from. See `LibraryView`.
 struct LibraryPanel: View {
     var swingCount: Int
-    var onSwings: () -> Void
-    var onRounds: () -> Void
-    var onTrends: () -> Void
+    var onOpen: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Button(action: onSwings) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(swingCount == 0
-                             ? "Swings & imports"
-                             : "\(swingCount) swing\(swingCount == 1 ? "" : "s") recorded")
-                            .font(.system(size: 16, weight: .bold, design: .rounded))
-                        Text(swingCount == 0
-                             ? "Import a clip you already filmed and measure it"
-                             : "Review, export, re-measure, or import a clip")
-                            .font(.caption).foregroundStyle(Theme.steel)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right").foregroundStyle(Theme.steel)
+        Button(action: onOpen) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(swingCount == 0
+                         ? "Swings & imports"
+                         : "\(swingCount) swing\(swingCount == 1 ? "" : "s") recorded")
+                        .font(.system(size: 16, weight: .bold, design: .rounded))
+                    // Names all three pages, because this row is now the only
+                    // thing on the screen that says they exist.
+                    Text(swingCount == 0
+                         ? "Import a clip, or look at past rounds and trends"
+                         : "Review and export, past rounds, trends")
+                        .font(.caption).foregroundStyle(Theme.steel)
                 }
-                .padding(14)
-                .contentShape(Rectangle())
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").foregroundStyle(Theme.steel)
             }
-            .buttonStyle(.plain)
-
-            row("Past rounds", "Pick up a round you already started",
-                "clock.arrow.circlepath", action: onRounds)
-            row("Trends", "Your own numbers over time",
-                "chart.line.uptrend.xyaxis", action: onTrends)
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+            .foregroundStyle(.white)
+            .contentShape(Rectangle())
         }
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
-        .foregroundStyle(.white)
-    }
-
-    private func row(_ title: String, _ blurb: String, _ symbol: String,
-                     action: @escaping () -> Void) -> some View {
-        VStack(spacing: 0) {
-            // Inset from the leading edge only, so the rule reads as a
-            // division inside one panel rather than the seam between two.
-            Rectangle()
-                .fill(Theme.steel.opacity(0.22))
-                .frame(height: 1)
-                .padding(.leading, 14)
-            Button(action: action) {
-                HStack(spacing: 12) {
-                    Image(systemName: symbol)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.yellow)
-                        .frame(width: 22)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(title).font(.system(size: 15, weight: .bold, design: .rounded))
-                        Text(blurb).font(.caption2).foregroundStyle(Theme.steel)
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(Theme.steel)
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
+        .buttonStyle(.plain)
     }
 }

@@ -380,7 +380,11 @@ struct CaptureScreen: View {
     private var sessionSubline: String {
         let n = model.sessionSwingCount
         guard let mode = model.session?.mode else { return "\(n) swings" }
-        if n == 0 { return mode.title.lowercased() + " · no swings yet" }
+        // No mode prefix. The mode is already named in the ribbon two rows
+        // up, and in the narrow column the pair together truncated to
+        // "field, live pitching · no swin…" — spending the only line that
+        // carries new information on a word already on the screen.
+        if n == 0 { return "no swings yet" }
         return "\(n) swing\(n == 1 ? "" : "s") this round"
     }
 
