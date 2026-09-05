@@ -1036,7 +1036,23 @@ def main():
     # Nothing near contact at all: the old at-or-after rule still applies, so a
     # late track is returned rather than nothing.
     _only_late = _seg(200, 700, 900, 660, 11, 0.920)
+    # A stationary blob linked by the builder to something fast crossing
+    # later. Its ends are far apart, so net-displacement-over-elapsed rated it
+    # faster than the real ball in the same clip — and straightness stayed at
+    # 0.96, because a stationary head walks almost no distance. This is the
+    # track shape that scoring on the median step exists to reject.
+    _stalled_then_fast = ([sla.BallObservation(frame=394 + i, t=0.302 + i / 240.0,
+                                               x=87.0, y=72.0,
+                                               diameter_px=11.0, area_px=140.0)
+                           for i in range(5)]
+                          + [sla.BallObservation(frame=399 + i, t=0.323 + i / 240.0,
+                                                 x=147.0 + 200.0 * i, y=35.0 - 8.0 * i,
+                                                 diameter_px=11.0, area_px=140.0)
+                             for i in range(3)])
+    _steady_flight = _seg(740, 509, 1027, 638, 11, 0.302)
     select_cases += [
+        ("stalled_then_fast_loses_to_steady_flight", "auto",
+         [_stalled_then_fast, _steady_flight]),
         ("short_hit_at_contact_beats_late_impostor", "auto",
          [_late_impostor, _hit_at_contact]),
         ("full_length_at_contact_beats_short", "auto",
@@ -1046,6 +1062,7 @@ def main():
 
     _with_contact = {
         "mishit_slower_than_pitch": 0.30,
+        "stalled_then_fast_loses_to_steady_flight": 0.30,
         "short_hit_at_contact_beats_late_impostor": 0.30,
         "full_length_at_contact_beats_short": 0.30,
         "nothing_near_contact_falls_back": 0.30,

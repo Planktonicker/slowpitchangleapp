@@ -1068,6 +1068,42 @@ SELECT_CONTACT_LATE_S = 0.25
 NEAR_CONTACT_MIN_FRAMES = 4
 
 
+def median_step_speed(track: list[BallObservation]) -> float | None:
+    """Median frame-to-frame speed, px/s. None when nothing can be measured.
+
+    The score selection uses, and NOT net displacement over elapsed time, which
+    is what it used to be. That measures how far apart the two ends are, which
+    is only the object's speed if the object moved coherently in between — and
+    a track is exactly the thing that might not have.
+
+    The case that forced this: a stationary blob in the corner of the frame,
+    linked by the builder to something fast crossing later, giving one "track"
+    whose steps ran 20, 305, 107, 162, 5390, 11141, 13917 px/s. Its ends are
+    far apart, so net-over-elapsed rated it 4948 px/s — faster than the real
+    ball's 4496 in the same clip, which then lost. Straightness does not catch
+    it either: a stationary head contributes almost no path length, so the
+    ratio of net displacement to distance walked stayed at 0.96.
+
+    The median of the steps is 305 px/s for that track and 4635 for the ball.
+    It is also simply the more honest reading of the docstring below, which has
+    always said the discriminator is that a hit is several times faster than
+    anything else in the clip — the median is that speed, where the endpoints
+    are a proxy for it that fails on precisely the tracks worth rejecting.
+
+    Upper median on an even count, matching the convention used elsewhere here,
+    so the Swift port reproduces it exactly.
+    """
+    steps = []
+    for a, b in zip(track, track[1:]):
+        dt = b.t - a.t
+        if dt > 0:
+            steps.append(math.hypot(b.x - a.x, b.y - a.y) / dt)
+    if not steps:
+        return None
+    steps.sort()
+    return steps[len(steps) // 2]
+
+
 def select_outbound_track(
     tracks: list[list[BallObservation]],
     fps: float,
@@ -1077,9 +1113,10 @@ def select_outbound_track(
 ) -> list[BallObservation] | None:
     """Pick the hit ball: the FASTEST coherent track going the right way.
 
-    Scored on speed alone. Length used to multiply it, and in slow-pitch that
-    is exactly backwards, because the two things in frame differ in opposite
-    directions:
+    Scored on speed alone — the MEDIAN STEP speed, see `median_step_speed`,
+    not how far apart the ends are. Length used to multiply it, and in
+    slow-pitch that is exactly backwards, because the two things in frame
+    differ in opposite directions:
 
         inbound pitch   ~470 px/s over ~430 frames   ->  speed*len ~200,000
         hit ball       ~3300 px/s over ~60 frames    ->  speed*len ~200,000
@@ -1137,9 +1174,13 @@ def select_outbound_track(
         dt = tr[-1].t - tr[0].t
         if dt <= 0:
             continue
+        # Direction is net travel; SPEED is the median step. They answer
+        # different questions and one of them was answering both.
         vx = (tr[-1].x - tr[0].x) / dt
         vy = (tr[-1].y - tr[0].y) / dt
-        speed = math.hypot(vx, vy)
+        speed = median_step_speed(tr)
+        if speed is None:
+            continue
         scored.append((speed, track_straightness(tr), vx, tr, near))
     if not scored:
         return None

@@ -522,7 +522,8 @@ final class ParityTests: XCTestCase {
     func testSelectionPrefersTheFlightAtContact() {
         for name in ["short_hit_at_contact_beats_late_impostor",
                      "full_length_at_contact_beats_short",
-                     "nothing_near_contact_falls_back"] {
+                     "nothing_near_contact_falls_back",
+                     "stalled_then_fast_loses_to_steady_flight"] {
             guard let c = Self.fixtures.select_track.first(where: { $0.name == name }) else {
                 XCTFail("fixture missing: \(name)")
                 continue
@@ -540,6 +541,51 @@ final class ParityTests: XCTestCase {
             }
             XCTAssertEqual(picked, tracks[expected], name)
         }
+    }
+
+    /// Median step speed, pinned on the numbers that exposed it.
+    ///
+    /// Both quantities are computed here so the two readings sit side by side:
+    /// on the stalled track the endpoints say 4948 px/s and the steps say 305,
+    /// and the old score was the first of those.
+    func testMedianStepSpeedRejectsAStalledTrack() {
+        func obs(_ pts: [(Double, Double, Double)]) -> [BallObservation] {
+            pts.enumerated().map { i, p in
+                BallObservation(frame: i, t: p.0, x: p.1, y: p.2,
+                                diameterPx: 11, areaPx: 140)
+            }
+        }
+        // Straight from live_39: a corner blob glued to something fast.
+        let stalled = obs([(1.641667, 87.44, 71.47), (1.655, 87.43, 71.74),
+                           (1.666667, 88.95, 74.96), (1.68, 87.66, 74.36),
+                           (1.691667, 86.16, 73.21), (1.705, 146.95, 34.87),
+                           (1.721667, 330.92, 9.62), (1.738333, 562.72, 17.87)])
+        // The ball in the same clip, which lost.
+        let ball = obs([(1.4883, 740.2, 509.0), (1.5050, 797.6, 540.7),
+                        (1.5083, 818.1, 552.9), (1.5167, 855.9, 563.1),
+                        (1.5250, 895.0, 577.9), (1.5333, 928.8, 593.6),
+                        (1.5383, 947.3, 600.2), (1.5417, 962.6, 606.2),
+                        (1.5500, 998.6, 621.6), (1.5550, 1013.8, 631.0),
+                        (1.5583, 1027.2, 638.2)])
+
+        func endpoints(_ t: [BallObservation]) -> Double {
+            let dt = t.last!.t - t.first!.t
+            let dx = t.last!.x - t.first!.x, dy = t.last!.y - t.first!.y
+            return (dx * dx + dy * dy).squareRoot() / dt
+        }
+        XCTAssertGreaterThan(endpoints(stalled), endpoints(ball),
+                             "the old score preferred the stalled track — that is the bug")
+        XCTAssertLessThan(TrackBuilder.medianStepSpeed(stalled)!,
+                          TrackBuilder.medianStepSpeed(ball)! / 10,
+                          "the median step must separate them by an order of magnitude")
+        // Straightness cannot save it: a stationary head walks no distance.
+        XCTAssertGreaterThan(TrackBuilder.straightness(stalled), 0.9,
+                             "straightness does not catch this, which is why the score had to")
+
+        let picked = TrackBuilder.selectOutboundTrack([stalled, ball],
+                                                      direction: .right,
+                                                      contactTime: 1.498717)
+        XCTAssertEqual(picked, ball)
     }
 
     func testSelectionUsesContactTime() {

@@ -482,6 +482,44 @@ enum TrackBuilder {
     ///
     ///   `.auto` does NOT infer a direction — it cannot, from one track. It
     ///   means "no direction constraint". Mirrors `select_outbound_track`.
+    /// Median frame-to-frame speed, px/s. `nil` when nothing can be measured.
+    ///
+    /// The score selection uses, and NOT net displacement over elapsed time,
+    /// which is what it used to be. That measures how far apart the two ends
+    /// are, which is only the object's speed if it moved coherently in between
+    /// — and a track is exactly the thing that might not have.
+    ///
+    /// The case that forced this: a stationary blob in the corner of the frame,
+    /// linked by the builder to something fast crossing later, giving one
+    /// "track" whose steps ran 20, 305, 107, 162, 5390, 11141, 13917 px/s. Its
+    /// ends are far apart, so net-over-elapsed rated it 4948 px/s — faster than
+    /// the real ball's 4496 in the same clip, which then lost. Straightness
+    /// does not catch it either: a stationary head contributes almost no path
+    /// length, so the ratio of net displacement to distance walked stayed at
+    /// 0.96.
+    ///
+    /// The median of those steps is 305 px/s against the ball's 4635. It is
+    /// also the more honest reading of the rule this has always stated — that
+    /// a hit is several times faster than anything else in the clip. The
+    /// median IS that speed; the endpoints are a proxy for it that fails on
+    /// precisely the tracks worth rejecting.
+    ///
+    /// Upper median on an even count, matching `sla_common.median_step_speed`
+    /// and the convention used elsewhere here.
+    static func medianStepSpeed(_ track: [BallObservation]) -> Double? {
+        var steps: [Double] = []
+        steps.reserveCapacity(max(0, track.count - 1))
+        for (a, b) in zip(track, track.dropFirst()) {
+            let dt = b.t - a.t
+            guard dt > 0 else { continue }
+            let dx = b.x - a.x, dy = b.y - a.y
+            steps.append((dx * dx + dy * dy).squareRoot() / dt)
+        }
+        guard !steps.isEmpty else { return nil }
+        steps.sort()
+        return steps[steps.count / 2]
+    }
+
     static func selectOutboundTrack(_ tracks: [[BallObservation]],
                                     direction: Direction = .auto,
                                     minLen: Int = SLA.minTrackFrames,
@@ -514,9 +552,10 @@ enum TrackBuilder {
             guard tr.count >= (near ? SLA.nearContactMinFrames : minLen) else { continue }
             let dt = last.t - first.t
             guard dt > 0 else { continue }
+            // Direction is net travel; SPEED is the median step. They answer
+            // different questions and one of them was answering both.
             let vx = (last.x - first.x) / dt
-            let vy = (last.y - first.y) / dt
-            let speed = (vx * vx + vy * vy).squareRoot()
+            guard let speed = medianStepSpeed(tr) else { continue }
             scored.append(Scored(score: speed, straightness: straightness(tr),
                                  vx: vx, index: i, track: tr, nearContact: near))
         }
