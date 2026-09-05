@@ -715,9 +715,17 @@ final class AppModel: ObservableObject {
         dto.notes = kept.isEmpty ? nil : kept
 
         guard !analysis.trace.usedBallSeed else { return }
-        guard let reason = TrackPlausibility.rejection(track: analysis.track,
-                                                       launchAngleDeg: dto.launchAngleDeg,
-                                                       flags: dto.flags) else { return }
+        guard let reason = TrackPlausibility.rejection(
+            track: analysis.track,
+            launchAngleDeg: dto.launchAngleDeg,
+            flags: dto.flags,
+            fps: analysis.fps,
+            // Only when it means something. On an import there is no audio
+            // trigger, so `contactTime` is the first frame of the track and
+            // being "late" relative to it is not a fact about the swing.
+            contactTime: dto.captureFlags.contains(.importedClip) ? nil
+                : (analysis.contactTime > 0 ? analysis.contactTime : nil))
+        else { return }
         dto.captureFlags.append(.ballUnconfirmed)
         dto.notes = [dto.notes, Self.ballNotIdentifiedPrefix + reason]
             .compactMap { $0 }.joined(separator: "\n")
