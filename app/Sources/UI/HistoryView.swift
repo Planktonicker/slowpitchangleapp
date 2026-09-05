@@ -304,13 +304,11 @@ struct HistoryView: View {
         .onChange(of: editMode) { _, mode in
             if mode == .inactive { selection.removeAll() }
         }
-        .onChange(of: model.swingsRevision) { _, _ in
-            selection = selection.intersection(visible.map(\.id))
-        }
-        .confirmationDialog("Delete \(selection.count) swing\(selection.count == 1 ? "" : "s")?",
+
+        .confirmationDialog("Delete \(chosen.count) swing\(chosen.count == 1 ? "" : "s")?",
                             isPresented: $confirmingDelete, titleVisibility: .visible) {
-            Button("Delete \(selection.count)", role: .destructive) {
-                model.delete(visible.filter { selection.contains($0.id) })
+            Button("Delete \(chosen.count)", role: .destructive) {
+                model.delete(chosen)
                 selection.removeAll()
                 editMode = .inactive
             }
@@ -319,6 +317,16 @@ struct HistoryView: View {
             Text("The clips go too. Nothing here is recoverable afterwards.")
         }
     }
+
+    /// The selected swings that still exist and are still on screen.
+    ///
+    /// Resolved at the point of use rather than pruned when the list changes.
+    /// The pruning version watched `model.swingsRevision`, which is private
+    /// AND not published — it could not compile, and would not have fired if
+    /// it had. Intersecting here is also simply more correct: an id that no
+    /// longer matches a visible row cannot be deleted or exported by accident,
+    /// and the counts on the buttons are the counts of what would actually go.
+    private var chosen: [SwingDTO] { visible.filter { selection.contains($0.id) } }
 
     /// Select / Done, and the delete that only exists while selecting.
     ///
@@ -332,16 +340,15 @@ struct HistoryView: View {
                 // evidence somewhere is the reason to select a run of swings
                 // far more often than deleting them is.
                 Button {
-                    let chosen = visible.filter { selection.contains($0.id) }
                     if let url = model.exportDiagnostics(for: chosen) { sheet = .share([url]) }
                 } label: {
                     Image(systemName: "square.and.arrow.up")
                 }
-                .disabled(selection.isEmpty)
+                .disabled(chosen.isEmpty)
                 Button(role: .destructive) { confirmingDelete = true } label: {
-                    Text("Delete\(selection.isEmpty ? "" : " \(selection.count)")")
+                    Text("Delete\(chosen.isEmpty ? "" : " \(chosen.count)")")
                 }
-                .disabled(selection.isEmpty)
+                .disabled(chosen.isEmpty)
                 Button("Done") { editMode = .inactive }.fontWeight(.bold)
             }
         } else if !visible.isEmpty {
