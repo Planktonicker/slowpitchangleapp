@@ -1127,12 +1127,22 @@ final class AppModel: ObservableObject {
 
     // MARK: - Learning the ball from a clip already filmed
 
-    /// Colour and size window learned by pointing at the ball, per round.
+    /// Colour and size window learned by pointing at the ball.
+    ///
+    /// Keyed by round where there is one and by the swing itself where there
+    /// is not. An imported clip picked up outside a round has no session id —
+    /// `finishImport` stamps `session?.id`, which is nil then — so keying on
+    /// the round alone meant pointing at the ball in a clip filmed by the
+    /// Camera app silently learned nothing and re-measured with the default
+    /// window. That is exactly the footage most likely to need it.
     ///
     /// In memory and not persisted, deliberately — the same rule as the live
     /// one. A window learned in a garage at night is worse than the default on
     /// a sunlit field, and a stale one looks no different on the screen.
     @Published private(set) var learnedBallBySession: [UUID: DetectorSettings] = [:]
+
+    /// The round if the swing is in one, otherwise the swing itself.
+    private func ballWindowKey(for swing: SwingDTO) -> UUID { swing.sessionID ?? swing.id }
 
     /// A whole round being re-measured, one swing at a time.
     struct RoundRemeasure: Equatable {
@@ -1154,7 +1164,8 @@ final class AppModel: ObservableObject {
     /// learned here and a ball learned live cannot disagree about what a ball
     /// looks like.
     func learnBall(from swing: SwingDTO, tapX: Double, tapY: Double, t: Double) async {
-        guard let sessionID = swing.sessionID, let clipName = swing.clipFilename else { return }
+        guard let clipName = swing.clipFilename else { return }
+        let key = ballWindowKey(for: swing)
         let url = ClipStore.clipURL(named: clipName)
         let fov = swing.cameraFovDeg ?? 0
         let base = settings.detector
@@ -1171,11 +1182,24 @@ final class AppModel: ObservableObject {
             }
             return nil
         } ?? nil
-        guard let learned else { return }
-        learnedBallBySession[sessionID] = learned
-        let n = swings.filter { $0.sessionID == sessionID }.count
-        banner = Banner(kind: .info,
-                        text: "Ball learned from this clip. Re-measure the round (\(n) swings) from the swing screen.")
+        guard let learned else {
+            // Silence here used to mean two different things — the frame could
+            // not be decoded, or the tap found no ball — and both looked like
+            // nothing happening. Say which, because the second is fixable by
+            // tapping more accurately and the first is not.
+            banner = Banner(kind: .warning,
+                            text: "No ball found at that tap, so nothing was learned. Try tapping the centre of the ball.")
+            return
+        }
+        learnedBallBySession[key] = learned
+        if let sessionID = swing.sessionID {
+            let n = swings.filter { $0.sessionID == sessionID }.count
+            banner = Banner(kind: .info,
+                            text: "Ball learned. Re-measure the round (\(n) swings) from the swing screen.")
+        } else {
+            banner = Banner(kind: .info,
+                            text: "Ball learned from this clip and used to re-measure it.")
+        }
     }
 
     /// Re-measure every swing in a round with the window just learned.
@@ -1241,7 +1265,7 @@ final class AppModel: ObservableObject {
         var options = settings.analyzerOptions
         // The ball pointed at in this round beats the default window, exactly
         // as the setup tap does for a live one.
-        let learned = swing.sessionID.flatMap { learnedBallBySession[$0] }
+        let learned = learnedBallBySession[ballWindowKey(for: swing)]
         if let learned { options.detector = learned }
         options.rollDeg = swing.cameraRollDeg ?? 0
         // Re-analysis has to use the optics and pose the clip was filmed with,
