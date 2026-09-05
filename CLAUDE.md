@@ -84,6 +84,8 @@ python gen_parity_fixtures.py  # after any sla_common.py change
 python audio_lab.py --selftest # trigger-feature tool, proves itself first
 python replay_corpus.py --selftest  # mirrored gates + rate estimator, proves itself first
 python replay_corpus.py        # re-run selection + publish gates on every saved clip
+python replay_trigger.py --selftest # the audio trigger's DSP, proves itself first
+python replay_trigger.py --sweep    # can the trigger tell a hit from what fools it?
 ```
 
 **Real footage lives in `spike/corpus/`, and a clip is added once.** A `.mov`
@@ -98,6 +100,12 @@ that this paragraph's neighbours describe, on four clips at once.
 Labels, not clips, are the scarce resource. Only the hitter knows whether a
 swing happened, so `label_source` is recorded and printed, and a label of
 `inferred` is exactly as fallible as the pipeline it is being used to test.
+
+The corpus carries the clips' AUDIO too (`<id>.audio.flac`, lossless, 566 KB
+for eight), because the field complaint — "I arm it, he hits it, nothing
+happens" — is upstream of anything the detector does, and a swing that was
+never recorded leaves no trace to replay. `replay_trigger.py` runs the app's
+own trigger over it.
 
 ## State of play
 

@@ -907,7 +907,11 @@ final class CaptureController: NSObject, ObservableObject {
     private func syncArmed(startingRound: Bool = false) {
         pipelineIsArmed = isArmed
         trigger.isArmed = isArmed && !recorder.isRecording
-        if isArmed { trigger.reset() }
+        // A new round forgets the venue; re-arming after a clip does not.
+        // Clearing the noise floor after every clip left the trigger unable to
+        // fire until it had refilled — 50 windows of 5 ms — and a hitter who
+        // swings again promptly lands in that hole.
+        if isArmed { startingRound ? trigger.resetForRound() : trigger.rearm() }
         let armed = isArmed
         let resetting = armed && startingRound
         sessionQueue.async { [weak self] in
@@ -961,6 +965,14 @@ final class CaptureController: NSObject, ObservableObject {
             DispatchQueue.main.async { self.suppressedTriggerCount += 1 }
             return
         }
+        // Past every refusal, and a clip is about to be written — so this
+        // impulse, and only now, buys the full refractory. Everything above
+        // returns without calling this, which is the whole point: a refused
+        // impulse used to cost two seconds of deafness for a clip that was
+        // never written, and the next real swing landed inside it.
+        if gated, contactPTS.isNumeric {
+            trigger.confirmFire(at: contactPTS.seconds)
+        }
         trigger.isArmed = false
         clipTriggerDb = triggerDb
         // Zeroed here so the peak measured over this clip is the peak DURING
@@ -1013,10 +1025,22 @@ final class CaptureController: NSObject, ObservableObject {
                 case .failure(let error):
                     self.onError?(error.localizedDescription)
                 }
-                // Re-arm only after the clip is safely written.
-                self.pipelineQueue.async { self.syncArmed() }
             }
         }
+        // Re-arm HERE, at the close of the recording window, rather than inside
+        // that completion handler.
+        //
+        // Writing the file is disk work that has nothing to do with whether the
+        // microphone can be listened to, and waiting for it added its latency
+        // plus two queue hops — a main-queue hop and then a pipeline hop — to
+        // every clip's deafness. `ClipRecorder.finish` sets `isRecording` false
+        // synchronously before returning, so by this line the recorder is free
+        // and re-arming cannot start a second clip on top of the first.
+        //
+        // A hitter takes their next pitch in a handful of seconds. The
+        // difference between re-arming now and re-arming when the file lands is
+        // the difference between hearing that swing and not.
+        pipelineQueue.async { [weak self] in self?.syncArmed() }
     }
 
     private func handleEncoded(_ sb: CMSampleBuffer) {

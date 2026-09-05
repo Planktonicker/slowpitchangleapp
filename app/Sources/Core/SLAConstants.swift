@@ -301,10 +301,17 @@ enum SLA {
     /// tighter contact time than the audio gives.
     static let preRollS = 1.50
     /// Post-roll only has to outlast the ball's time in frame. Measured on two
-    /// field clips the flight lasted 79 ms and 146 ms; two seconds is generous
-    /// margin, and every second past that is storage bought for nothing —
-    /// at 240fps it is 240 more frames of an empty field.
-    static let postRollS = 2.00
+    /// field clips the flight lasted 79 ms and 146 ms, and the longest window
+    /// anything downstream reads after contact is `gravityWindowS` at 0.35 s —
+    /// `BodyAnalyzer` stops AT contact by design, because frames after the ball
+    /// has left say nothing about the swing that hit it.
+    ///
+    /// So 1.40 s is a fourfold margin on the longest real requirement, and the
+    /// 0.60 s given back is not storage: the trigger is deaf for the whole of a
+    /// clip, and that deafness is the app's most expensive fault. A hitter
+    /// takes the next pitch in a handful of seconds, and every clip used to
+    /// spend two full seconds of that window recording an empty field.
+    static let postRollS = 1.40
     /// The pre-roll ring is sized to this, so the setting can be raised
     /// mid-session without tearing down a running capture.
     static let maxPreRollS = 3.0

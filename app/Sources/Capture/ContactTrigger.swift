@@ -64,12 +64,33 @@ final class ContactTrigger {
     }
 
     private var _refractoryS: Double = 2.0
-    /// Ignore further impulses for this long after one fires — the ball
+    /// Ignore further impulses for this long after one is CONFIRMED — the ball
     /// hitting a net or the ground would otherwise re-trigger immediately.
+    ///
+    /// Confirmed, not merely detected. See `attemptRefractoryS`.
     var refractoryS: Double {
         get { lock.lock(); defer { lock.unlock() }; return _refractoryS }
         set { lock.lock(); _refractoryS = newValue; lock.unlock() }
     }
+
+    /// How long a detected impulse suppresses the next one while the decision
+    /// to record is still being made.
+    ///
+    /// The full refractory used to be stamped here, at detection, and that is
+    /// where a great many swings went. `onContact` hops to the pipeline queue,
+    /// and `CaptureController.startClip` can then refuse the impulse on four
+    /// separate grounds — the controller is not armed, the hitter gate saw
+    /// nobody, the recorder is already busy, the video ring is empty. Every one
+    /// of those refusals still cost two full seconds of deafness for a clip
+    /// that was never written, and two seconds is most of a slow-pitch at-bat.
+    ///
+    /// So detection now buys only this, which exists for one reason: a bat
+    /// crack spans several 5 ms windows and the hop to the pipeline queue is
+    /// not instant, so without it the same impulse would be reported half a
+    /// dozen times. The full refractory is stamped by `confirmFire` once a clip
+    /// is actually being written, and a refused impulse costs nothing beyond
+    /// this quarter-second.
+    static let attemptRefractoryS = 0.25
 
     /// DISARMED until somebody arms it. This defaulted to true, and
     /// `CaptureController` only synced it when its own `isArmed` CHANGED — so
@@ -87,19 +108,54 @@ final class ContactTrigger {
     private let floorWindowS = 0.5      // rolling median span
     private var floorHistory: [Double] = []
     private var maxFloorSamples: Int { max(8, Int(floorWindowS / rmsWindowS)) }
+    /// Anchor for the full refractory. Written only by `confirmFire`.
     private var lastFireTime: Double = -.infinity
+    /// Anchor for `attemptRefractoryS`. Written when an impulse is detected,
+    /// whatever becomes of it.
+    private var lastAttemptTime: Double = -.infinity
     private var carry: [Double] = []    // leftover samples between callbacks
 
     init(thresholdDb: Double = SLA.triggerDb) {
         self._thresholdDb = thresholdDb
     }
 
-    func reset() {
+    /// A new armed stretch: forget the venue and start listening from scratch.
+    ///
+    /// Only at the START of a round. Doing it after every clip is what put a
+    /// quarter-second hole in the trigger each time it recorded one — the fire
+    /// test refuses to run until `floorHistory` is half full, which is 50
+    /// windows of 5 ms, and a hitter who swings again quickly lands in it.
+    func resetForRound() {
         lock.lock()
         floorHistory.removeAll()
         carry.removeAll()
         lastFireTime = -.infinity
+        lastAttemptTime = -.infinity
         _peakSinceArm = -.infinity
+        lock.unlock()
+    }
+
+    /// Back to listening after a clip, WITHOUT forgetting the venue.
+    ///
+    /// The noise floor measured a moment ago is the best estimate available of
+    /// the noise floor now — the field did not change while the clip was being
+    /// written. Keeping it is what removes the dead zone. `lastFireTime` is
+    /// kept too, deliberately: the refractory exists to stop the ball rattling
+    /// a fence from starting a second clip, and that is exactly the moment this
+    /// runs.
+    func rearm() {
+        lock.lock()
+        _peakSinceArm = -.infinity
+        lock.unlock()
+    }
+
+    /// The impulse at `time` became a clip. Start the full refractory.
+    ///
+    /// Called from the recording path once it has committed, so an impulse that
+    /// is refused downstream never reaches here and never costs the refractory.
+    func confirmFire(at time: Double) {
+        lock.lock()
+        lastFireTime = time
         lock.unlock()
     }
 
@@ -111,11 +167,33 @@ final class ContactTrigger {
 
         let startPTS = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         let startSeconds = startPTS.isNumeric ? startPTS.seconds : 0
-        let windowLength = max(1, Int(rmsWindowS * sampleRate))
 
-        // Impulses are collected and fired after the lock is released: the
-        // callback hops to the pipeline queue, and calling out from inside a
-        // lock that the pipeline queue also takes is how deadlocks are made.
+        for (windowTime, db) in process(samples: mono,
+                                        sampleRate: sampleRate,
+                                        startSeconds: startSeconds) {
+            onContact?(CMTime(seconds: windowTime, preferredTimescale: 44_100), db)
+        }
+    }
+
+    /// The measurement, with the buffer plumbing lifted off it.
+    ///
+    /// Split out for one reason: `CMSampleBuffer` carrying LPCM is awkward to
+    /// build in a unit test and the microphone is not available on a simulator,
+    /// so with the two welded together none of this had a test at all — and it
+    /// decides when the app records, which is upstream of every measurement the
+    /// app makes. `process(sampleBuffer:)` is now PCM extraction and nothing
+    /// else.
+    ///
+    /// Returns the impulses detected in this batch, as (time, dB over the
+    /// floor). The caller reports them; they are returned rather than called
+    /// back from inside the lock, because the callback hops to the pipeline
+    /// queue and calling out from under a lock that queue also takes is how
+    /// deadlocks are made.
+    func process(samples: [Double], sampleRate: Double,
+                 startSeconds: Double) -> [(Double, Double)] {
+        guard sampleRate > 0 else { return [] }
+        let mono = samples
+        let windowLength = max(1, Int(rmsWindowS * sampleRate))
         var fires: [(Double, Double)] = []
 
         lock.lock()
@@ -141,8 +219,9 @@ final class ContactTrigger {
             if _isArmed,
                db >= _thresholdDb,
                floorHistory.count >= maxFloorSamples / 2,
-               windowTime - lastFireTime >= _refractoryS {
-                lastFireTime = windowTime
+               windowTime - lastFireTime >= _refractoryS,
+               windowTime - lastAttemptTime >= Self.attemptRefractoryS {
+                lastAttemptTime = windowTime
                 fires.append((windowTime, db))
             }
             // Measured even when the trigger is disarmed, which is the state
@@ -166,10 +245,7 @@ final class ContactTrigger {
             carry.removeFirst(min(carry.count - Int(sampleRate), carry.count))
         }
         lock.unlock()
-
-        for (windowTime, db) in fires {
-            onContact?(CMTime(seconds: windowTime, preferredTimescale: 44_100), db)
-        }
+        return fires
     }
 
     /// The loudest window since this was last called, over the rolling floor.
