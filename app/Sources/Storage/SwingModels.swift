@@ -197,7 +197,14 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
     /// this first — a launch angle for a patch of grass is not a doubtful
     /// number, it is not a number, and printing it beside a warning chip still
     /// puts a figure in front of somebody who will read it.
-    var ballIdentified: Bool { !captureFlags.contains(.ballUnconfirmed) }
+    /// `trackedFrames == 0` is the OTHER way there is no ball: analysis
+    /// failed outright rather than measuring the wrong thing, so `confirmBall`
+    /// never ran and `.ballUnconfirmed` was never set. Those records carry the
+    /// defaults, and a round summary printed them as "0.0 mph +0°" — a
+    /// reading of zero rather than the absence of one.
+    var ballIdentified: Bool {
+        trackedFrames > 0 && !captureFlags.contains(.ballUnconfirmed)
+    }
 
     /// Written by `AppModel.confirmBall`, read back by
     /// `ballNotIdentifiedReason`. One constant, because two copies of a magic

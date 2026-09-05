@@ -887,6 +887,30 @@ final class AppModel: ObservableObject {
                 (capture.status == .running, capture.isArmed)
             }
             guard running else { throw error }
+            // NEVER while armed, and this is the most expensive line in the
+            // app to get wrong.
+            //
+            // The retry works by stopping the camera so the hardware decoder
+            // comes free, then running the analysis again — which takes about
+            // 165 seconds on a 3.5 s clip. Armed, that is 165 seconds with the
+            // camera OFF while a hitter stands in the box swinging at pitches,
+            // and it reads to them as the app simply not working: "I arm it,
+            // the person hits the ball, and nothing happens." Worse, if a clip
+            // is mid-recording when the stop lands it is finalised with
+            // whatever it has — one arrived 1.704 s long, shorter than the
+            // 2.0 s post-roll alone, and could not be analysed at all.
+            //
+            // A missed MEASUREMENT is recoverable: the clip is on disk and can
+            // be re-measured from the swing screen, or in a batch for the
+            // whole round. A missed SWING is not — the hitter cannot re-take
+            // it. So the round always wins, and the clip is kept unmeasured.
+            guard !armed else {
+                await MainActor.run {
+                    self.banner = Banner(kind: .warning,
+                                         text: "Kept the clip but could not measure it now — the camera was busy. Re-measure it after the round.")
+                }
+                throw error
+            }
             await MainActor.run { self.stopCapture() }
             await capture.quiesce()
             defer {
@@ -922,6 +946,16 @@ final class AppModel: ObservableObject {
         // would otherwise inherit this one's verdict.
         let capturedWrongSound = capture.lastClipHeardLouderImpulse
         capture.lastClipHeardLouderImpulse = false
+        // WHEN THE CLIP WAS FILMED, stamped here — this runs as the clip is
+        // written, seconds after the swing. `SwingDTO.capturedAt` defaults to
+        // `Date()`, which is evaluated when the record is BUILT, and that is
+        // when analysis finishes: about 165 seconds later, and later still for
+        // anything queued behind it. A round of eight therefore came back with
+        // eight timestamps inside two seconds of each other, minutes after the
+        // hitting, in the order the phone finished thinking rather than the
+        // order they were hit — which is also what made them look like they
+        // belonged to the following round.
+        let recordedAt = Date()
         let setting = currentSetting
         let placement = wizard.placement
         let droppedDuringClip = capture.droppedFrameCount > dropsAtClipStart
@@ -986,7 +1020,8 @@ final class AppModel: ObservableObject {
                                 autoTriggered: autoTriggered && !wasManual,
                                 sessionID: capturedSessionID,
                                 gateWasOff: capturedGateOff,
-                                triggeredOnWrongSound: capturedWrongSound)
+                                triggeredOnWrongSound: capturedWrongSound,
+                                recordedAt: recordedAt)
             }
         }
     }
@@ -1001,7 +1036,8 @@ final class AppModel: ObservableObject {
                             autoTriggered: Bool,
                             sessionID: UUID?,
                             gateWasOff: Bool,
-                            triggeredOnWrongSound: Bool) {
+                            triggeredOnWrongSound: Bool,
+                            recordedAt: Date) {
         analysisProgress = nil
 
         let clipName = settings.keepClips
@@ -1027,6 +1063,7 @@ final class AppModel: ObservableObject {
             dto.notes = failure
         }
 
+        dto.capturedAt = recordedAt
         dto.cameraDistanceM = placement.distanceM
         dto.lensHeightM = placement.heightM
         dto.cameraRollDeg = placement.rollDeg
