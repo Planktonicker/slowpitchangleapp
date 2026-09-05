@@ -507,6 +507,41 @@ final class ParityTests: XCTestCase {
     /// is straight. Only the contact instant separates them, and a port that
     /// dropped the parameter would keep returning the pitch — with a launch
     /// angle, an exit velocity and a confidence row that all look normal.
+    /// The failure three real clips shared, pinned in both languages.
+    ///
+    /// Selection kept anything starting at or after contact and scored it on
+    /// speed alone, with no upper bound — so the reading came from an object
+    /// 0.31, 0.61 and 0.74 s after the bat while the ball itself sat in the
+    /// same clip, detected and discarded for being four frames long. The
+    /// report then blamed the microphone for a gap the selector had chosen.
+    ///
+    /// Three cases, because the fix has three parts that can each break
+    /// separately: the window has to admit the short flight, it must never let
+    /// a fragment outrank a real flight beside it, and it must still fall back
+    /// rather than return nothing when there is nothing at contact at all.
+    func testSelectionPrefersTheFlightAtContact() {
+        for name in ["short_hit_at_contact_beats_late_impostor",
+                     "full_length_at_contact_beats_short",
+                     "nothing_near_contact_falls_back"] {
+            guard let c = Self.fixtures.select_track.first(where: { $0.name == name }) else {
+                XCTFail("fixture missing: \(name)")
+                continue
+            }
+            let tracks = c.tracks.map { tr in
+                tr.map { BallObservation(frame: $0.frame, t: $0.t, x: $0.x, y: $0.y,
+                                         diameterPx: $0.diameter_px, areaPx: $0.area_px) }
+            }
+            let direction = TrackBuilder.Direction(rawValue: c.direction) ?? .auto
+            let picked = TrackBuilder.selectOutboundTrack(tracks, direction: direction,
+                                                          contactTime: c.contact_time)
+            guard let expected = c.expected_index else {
+                XCTAssertNil(picked, "\(name): expected no track")
+                continue
+            }
+            XCTAssertEqual(picked, tracks[expected], name)
+        }
+    }
+
     func testSelectionUsesContactTime() {
         XCTAssertEqual(SLA.selectContactTolS,
                        Self.fixtures.constants["SELECT_CONTACT_TOL_S"]!, accuracy: 1e-12)
@@ -567,6 +602,8 @@ final class ParityTests: XCTestCase {
         assertClose(SLA.residualTolPx, c["RESIDUAL_TOL_PX"]!, "residual tol")
         assertClose(SLA.diameterProfileStepPx, c["DIAMETER_PROFILE_STEP_PX"]!, "profile step")
         XCTAssertEqual(SLA.minTrackFrames, Int(c["MIN_TRACK_FRAMES"]!))
+        XCTAssertEqual(SLA.nearContactMinFrames, Int(c["NEAR_CONTACT_MIN_FRAMES"]!))
+        assertClose(SLA.selectContactLateS, c["SELECT_CONTACT_LATE_S"]!, "contact late bound")
 
         // The bundled drag term is the one finding #1 hangs on.
         assertClose(SLA.kOverM, c["k_over_m"]!, rel: 1e-12, "k/m")

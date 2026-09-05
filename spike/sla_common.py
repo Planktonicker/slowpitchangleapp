@@ -1043,6 +1043,29 @@ def track_straightness(track: list[BallObservation]) -> float:
 # far narrower than the several hundred milliseconds a pitch spends in frame
 # before contact, which is the gap this actually has to resolve.
 SELECT_CONTACT_TOL_S = 0.05
+# How late after contact a track may still be the hit.
+#
+# There was no upper bound at all. "At or after contact" admitted anything for
+# the rest of the clip, and selection then scored on speed alone — so on three
+# real clips a fast object 0.61, 0.74 and 0.31 s after contact outranked the
+# ball at the bat, and the verdict blamed the microphone for a gap the selector
+# had chosen.
+#
+# 0.25 s is set from those clips: the latest real flight began 114 ms after the
+# audio trigger, and the impostors began at 0.31 s and beyond. It is also all
+# the room the physics needs — a hit ball is at the bat when the bat meets it,
+# and a quarter of a second later it has crossed most of the frame.
+SELECT_CONTACT_LATE_S = 0.25
+# Frames a track needs when it starts at contact.
+#
+# MIN_TRACK_FRAMES exists to keep fragments out of a field of clutter. At
+# contact that job is already done by the contact window, and the cost of the
+# stricter rule was the measurement itself: on live_42 the ball was detected in
+# four frames and dropped, and a blob three metres away was measured instead.
+# Four is the fewest a quadratic fit can use with anything left over, and
+# analyze_track already raises SHORT_TRACK below MIN_TRACK_FRAMES, so a track
+# admitted by this rule arrives flagged rather than quietly.
+NEAR_CONTACT_MIN_FRAMES = 4
 
 
 def select_outbound_track(
@@ -1081,7 +1104,16 @@ def select_outbound_track(
     `contact_time`, when the caller knows it, is the reliable one: a hit ball
     did not exist before the bat met it, so any track already in flight at
     contact is something else. This is a preference like straightness — if
-    nothing starts after contact the whole field is scored anyway.
+    nothing starts near contact the whole field is scored anyway.
+
+    It is a WINDOW, not a floor. "At or after contact" put no upper bound on
+    lateness, and speed-alone scoring then handed three real clips an object
+    that appeared a third to three quarters of a second after the bat: the
+    reading was of something else entirely, and the report blamed the trigger
+    for the gap. Inside that window the length gate relaxes to
+    NEAR_CONTACT_MIN_FRAMES, because a real flight is often detected in only a
+    handful of frames and MIN_TRACK_FRAMES was written to keep fragments out of
+    clutter — a job the window now does.
 
     `direction` is the fallback, and only when the caller states it. "auto"
     does NOT infer a direction; it cannot, from one track. It means "no
@@ -1092,7 +1124,15 @@ def select_outbound_track(
     """
     scored = []
     for tr in tracks:
-        if len(tr) < min_len:
+        near = contact_time is not None and (
+            contact_time - SELECT_CONTACT_TOL_S
+            <= tr[0].t
+            <= contact_time + SELECT_CONTACT_LATE_S
+        )
+        # The length gate runs HERE, before scoring, which is why an upper
+        # bound on lateness cannot fix this on its own: a four-frame flight at
+        # contact never reaches the pool to be preferred.
+        if len(tr) < (NEAR_CONTACT_MIN_FRAMES if near else min_len):
             continue
         dt = tr[-1].t - tr[0].t
         if dt <= 0:
@@ -1100,7 +1140,7 @@ def select_outbound_track(
         vx = (tr[-1].x - tr[0].x) / dt
         vy = (tr[-1].y - tr[0].y) / dt
         speed = math.hypot(vx, vy)
-        scored.append((speed, track_straightness(tr), vx, tr))
+        scored.append((speed, track_straightness(tr), vx, tr, near))
     if not scored:
         return None
 
@@ -1112,13 +1152,25 @@ def select_outbound_track(
     straight = [s for s in scored if s[1] >= TRACK_STRAIGHTNESS_MIN]
     pool = straight if straight else scored
 
-    # Then, when contact is known, keep only what began at or after it. Same
-    # fall-back rule: a filter that empties the pool has told us nothing, and
-    # returning nothing is worse than returning something doubtful and flagged.
+    # Then, when contact is known, prefer what began AT it — within a window,
+    # not merely after it. Same fall-back rule throughout: a filter that empties
+    # the pool has told us nothing, and returning nothing is worse than
+    # returning something doubtful and flagged.
+    #
+    # Two tiers inside the window, and the order matters. A track that clears
+    # the full length gate always beats one admitted by the relaxed rule, so
+    # the relaxation can only ever fire when there is no ordinary flight at
+    # contact — which is exactly the case it was written for. A four-frame
+    # fragment can never outrank a real flight that starts alongside it.
     if contact_time is not None:
-        after = [s for s in pool if s[3][0].t >= contact_time - SELECT_CONTACT_TOL_S]
-        if after:
-            pool = after
+        near = [s for s in pool if s[4]]
+        if near:
+            full = [s for s in near if len(s[3]) >= min_len]
+            pool = full if full else near
+        else:
+            after = [s for s in pool if s[3][0].t >= contact_time - SELECT_CONTACT_TOL_S]
+            if after:
+                pool = after
 
     pool.sort(key=lambda s: -s[0])
     scored = pool
@@ -1126,7 +1178,7 @@ def select_outbound_track(
     if direction == "auto":
         return scored[0][3]
     want_positive = direction == "right"
-    for _speed, _straightness, vx, tr in scored:
+    for _speed, _straightness, vx, tr, _near in scored:
         if (vx > 0) == want_positive:
             return tr
     return None

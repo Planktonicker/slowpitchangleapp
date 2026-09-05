@@ -169,6 +169,27 @@ enum SLA {
     /// milliseconds a pitch spends in frame beforehand, so the tolerance is
     /// wide compared to the error and narrow compared to the thing it excludes.
     static let selectContactTolS = 0.05
+    /// How late after contact a track may still be the hit.
+    ///
+    /// There was no upper bound at all. "At or after contact" admitted anything
+    /// for the rest of the clip, and selection then scored on speed alone — so
+    /// on three real clips a fast object 0.31, 0.61 and 0.74 s after contact
+    /// outranked the ball at the bat, and the verdict blamed the microphone for
+    /// a gap the selector had chosen.
+    ///
+    /// Set from those clips: the latest real flight began 114 ms after the
+    /// audio trigger, and the impostors began at 0.31 s and beyond.
+    static let selectContactLateS = 0.25
+    /// Frames a track needs when it starts at contact.
+    ///
+    /// `minTrackFrames` exists to keep fragments out of a field of clutter. At
+    /// contact the window does that job, and the stricter rule cost the
+    /// measurement itself: on one clip the ball was detected in four frames and
+    /// dropped, and a blob three metres away was measured instead. Four is the
+    /// fewest a quadratic fit can use with anything left over, and
+    /// `SwingFlag.shortTrack` still fires below `minTrackFrames`, so a track
+    /// admitted this way arrives flagged rather than quietly.
+    static let nearContactMinFrames = 4
 
     /// Association may not reverse a moving track — see `TrackBuilder`. The
     /// guard that keeps the incoming pitch out of the outgoing hit.

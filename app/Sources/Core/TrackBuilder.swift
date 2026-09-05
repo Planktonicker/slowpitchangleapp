@@ -498,18 +498,27 @@ enum TrackBuilder {
             var vx: Double
             var index: Int
             var track: [BallObservation]
+            /// Started inside the contact window.
+            var nearContact: Bool
         }
 
         var scored: [Scored] = []
         for (i, tr) in tracks.enumerated() {
-            guard tr.count >= minLen, let first = tr.first, let last = tr.last else { continue }
+            guard let first = tr.first, let last = tr.last else { continue }
+            let near = contactTime.map {
+                first.t >= $0 - SLA.selectContactTolS && first.t <= $0 + SLA.selectContactLateS
+            } ?? false
+            // The length gate runs HERE, before scoring, which is why an upper
+            // bound on lateness cannot fix this on its own: a four-frame flight
+            // at contact never reaches the pool to be preferred.
+            guard tr.count >= (near ? SLA.nearContactMinFrames : minLen) else { continue }
             let dt = last.t - first.t
             guard dt > 0 else { continue }
             let vx = (last.x - first.x) / dt
             let vy = (last.y - first.y) / dt
             let speed = (vx * vx + vy * vy).squareRoot()
             scored.append(Scored(score: speed, straightness: straightness(tr),
-                                 vx: vx, index: i, track: tr))
+                                 vx: vx, index: i, track: tr, nearContact: near))
         }
         guard !scored.isEmpty else { return nil }
 
@@ -520,13 +529,26 @@ enum TrackBuilder {
         let straight = scored.filter { $0.straightness >= SLA.trackStraightnessMin }
         scored = straight.isEmpty ? scored : straight
 
-        // Then, when contact is known, only what began at or after it. Same
-        // fall-back rule: a filter that empties the pool has told us nothing.
+        // Then, when contact is known, prefer what began AT it — within a
+        // window, not merely after it. Same fall-back rule throughout: a filter
+        // that empties the pool has told us nothing.
+        //
+        // Two tiers inside the window, and the order matters. A track that
+        // clears the full length gate always beats one admitted by the relaxed
+        // rule, so the relaxation can only fire when there is no ordinary
+        // flight at contact — exactly the case it was written for. A four-frame
+        // fragment can never outrank a real flight starting alongside it.
         if let contactTime {
-            let after = scored.filter {
-                ($0.track.first?.t ?? 0) >= contactTime - SLA.selectContactTolS
+            let near = scored.filter(\.nearContact)
+            if !near.isEmpty {
+                let full = near.filter { $0.track.count >= minLen }
+                scored = full.isEmpty ? near : full
+            } else {
+                let after = scored.filter {
+                    ($0.track.first?.t ?? 0) >= contactTime - SLA.selectContactTolS
+                }
+                if !after.isEmpty { scored = after }
             }
-            if !after.isEmpty { scored = after }
         }
 
         // Descending by score; the index tiebreak reproduces Python's stable

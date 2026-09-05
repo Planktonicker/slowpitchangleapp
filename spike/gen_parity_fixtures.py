@@ -476,6 +476,8 @@ def main():
             "VELOCITY_WINDOW_S": sla.VELOCITY_WINDOW_S,
             "GRAVITY_WINDOW_S": sla.GRAVITY_WINDOW_S,
             "MIN_TRACK_FRAMES": sla.MIN_TRACK_FRAMES,
+            "SELECT_CONTACT_LATE_S": sla.SELECT_CONTACT_LATE_S,
+            "NEAR_CONTACT_MIN_FRAMES": sla.NEAR_CONTACT_MIN_FRAMES,
             "MIN_GRAVITY_TRACK_S": sla.MIN_GRAVITY_TRACK_S,
             "SCALE_DISAGREE_TOL": sla.SCALE_DISAGREE_TOL,
             "DIAMETER_DRIFT_TOL": sla.DIAMETER_DRIFT_TOL,
@@ -1021,11 +1023,39 @@ def main():
         ("mishit_slower_than_pitch", "auto", [_mishit_pitch, _mishit_hit]),
     ]
 
+    # The failure three real clips shared. A short real flight at contact
+    # against a fast long track much later: with no upper bound on lateness the
+    # impostor wins on speed, and the reading is of something that was never
+    # hit. The flight here is four frames because that is what live_42's was.
+    _hit_at_contact = _seg(760, 500, 860, 498, 4, 0.302)
+    _late_impostor = _seg(200, 700, 900, 660, 11, 0.920)
+    # Both at contact: the one that clears the full length gate must win, so
+    # relaxing the minimum can never let a fragment outrank a real flight.
+    _short_fast_at_contact = _seg(700, 500, 900, 480, 4, 0.302)
+    _long_slower_at_contact = _seg(700, 520, 820, 505, 12, 0.305)
+    # Nothing near contact at all: the old at-or-after rule still applies, so a
+    # late track is returned rather than nothing.
+    _only_late = _seg(200, 700, 900, 660, 11, 0.920)
+    select_cases += [
+        ("short_hit_at_contact_beats_late_impostor", "auto",
+         [_late_impostor, _hit_at_contact]),
+        ("full_length_at_contact_beats_short", "auto",
+         [_short_fast_at_contact, _long_slower_at_contact]),
+        ("nothing_near_contact_falls_back", "auto", [_only_late]),
+    ]
+
+    _with_contact = {
+        "mishit_slower_than_pitch": 0.30,
+        "short_hit_at_contact_beats_late_impostor": 0.30,
+        "full_length_at_contact_beats_short": 0.30,
+        "nothing_near_contact_falls_back": 0.30,
+    }
+
     for entry in select_cases:
         name, direction, tracks = entry
-        # Contact is only supplied for the case that needs it, so the others
+        # Contact is only supplied for the cases that need it, so the others
         # keep pinning the behaviour when the caller does not know it.
-        contact = 0.30 if name == "mishit_slower_than_pitch" else None
+        contact = _with_contact.get(name)
         picked = sla.select_outbound_track(tracks, fps=240.0, direction=direction,
                                            contact_time=contact)
         out["select_track"].append({
