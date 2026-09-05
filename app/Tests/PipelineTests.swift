@@ -378,6 +378,69 @@ final class PipelineTests: XCTestCase {
         XCTAssertFalse(LevelSensor.tiltDown(gravityZ: 1.0001).isNaN)
     }
 
+    // MARK: - Learning the ball from one tap
+
+    /// The window carried into the round must never be looser than the one it
+    /// came from. The seeded windows the tap uses to FIND a ball deliberately
+    /// open up — hue ±24, saturation floored at 45% of the sample — because a
+    /// textured ball with a shaded flank is missed by anything tighter.
+    /// Adopting that for a whole session would widen a window that already
+    /// matched 15% of every frame on three real clips.
+    func testTheLearnedWindowIsNeverLooserThanTheDefault() {
+        var base = DetectorSettings()
+        base.hsvLo = HSVBounds(h: 18, s: 100, v: 120)
+        base.hsvHi = HSVBounds(h: 40, s: 255, v: 255)
+        // A washed-out ball: a naive floor at 45% of these would drop below
+        // the default and admit more of the scene, not less.
+        let w = SetupBallMeasure.sessionWindow(tap: (h: 30, s: 120, v: 140),
+                                               measuredDiameterPx: 12, base: base)
+        XCTAssertGreaterThanOrEqual(w.hsvLo.s, base.hsvLo.s)
+        XCTAssertGreaterThanOrEqual(w.hsvLo.v, base.hsvLo.v)
+    }
+
+    /// A fluorescent ball is the case this exists for: its own saturation
+    /// raises the floor well above the default, which is the one number that
+    /// separates it from dull scenery sharing its hue.
+    func testAFluorescentBallRaisesTheSaturationFloor() {
+        var base = DetectorSettings()
+        base.hsvLo = HSVBounds(h: 18, s: 100, v: 120)
+        base.hsvHi = HSVBounds(h: 40, s: 255, v: 255)
+        let w = SetupBallMeasure.sessionWindow(tap: (h: 32, s: 220, v: 230),
+                                               measuredDiameterPx: 12, base: base)
+        XCTAssertEqual(w.hsvLo.s, 121, accuracy: 1e-9)   // 220 * 0.55
+        XCTAssertEqual(w.hsvLo.h, 14, accuracy: 1e-9)    // re-centred on the ball
+        XCTAssertEqual(w.hsvHi.h, 50, accuracy: 1e-9)
+    }
+
+    /// The size band comes from the ball actually measured at the plate.
+    /// `live_37` produced blobs up to 80 px against a 12 px ball and every one
+    /// was admitted.
+    func testTheSizeBandFollowsTheMeasuredBall() {
+        var base = DetectorSettings()
+        base.minRadiusPx = 4
+        base.maxRadiusPx = 60
+        let w = SetupBallMeasure.sessionWindow(tap: (h: 30, s: 200, v: 200),
+                                               measuredDiameterPx: 12, base: base)
+        XCTAssertEqual(w.maxRadiusPx, 15, accuracy: 1e-9)   // 6 * 2.5
+        XCTAssertGreaterThanOrEqual(w.minRadiusPx, base.minRadiusPx)
+        XCTAssertLessThan(w.minRadiusPx, w.maxRadiusPx)
+    }
+
+    /// A band that inverted would reject every pixel. Keeping the colour
+    /// lesson and dropping the size one beats returning a window that cannot
+    /// match anything.
+    func testAnImpossibleSizeBandFallsBackRatherThanRejectingEverything() {
+        var base = DetectorSettings()
+        base.minRadiusPx = 20
+        base.maxRadiusPx = 60
+        // A tiny ball would put the ceiling below the floor.
+        let w = SetupBallMeasure.sessionWindow(tap: (h: 30, s: 200, v: 200),
+                                               measuredDiameterPx: 8, base: base)
+        XCTAssertEqual(w.minRadiusPx, 20, accuracy: 1e-9)
+        XCTAssertEqual(w.maxRadiusPx, 60, accuracy: 1e-9)
+        XCTAssertGreaterThan(w.hsvLo.s, 0, "the colour lesson is still kept")
+    }
+
     /// The bug this replaced: in landscape the bubble slammed into one end of
     /// the beam and stayed there, the opposite end in each landscape, while the
     /// horizon line said the camera was level. The old code subtracted a

@@ -51,6 +51,11 @@ final class ClipDiagnostics {
     /// from irregular timing and with a different fix, so it is a different
     /// number; conflating them told a hitter to re-record a clean clip.
     var frameDropFraction: Double?
+    /// True when the colour and size window came from the ball the hitter
+    /// tapped in setup rather than from the defaults. Worth a line: the two
+    /// produce very different candidate counts, and a report showing 15% frame
+    /// coverage means something different depending on which was in force.
+    var ballWindowLearned = false
     /// Set when the radius gates were rescaled for a non-1080p clip.
     var radiusScale: Double?
     /// Wall-clock seconds for the whole analysis. Reported because "it takes
@@ -171,6 +176,9 @@ final class ClipDiagnostics {
                           detector.hsvHi.h, detector.hsvHi.s, detector.hsvHi.v,
                           detector.minRadiusPx * (radiusScale ?? 1),
                           detector.maxRadiusPx * (radiusScale ?? 1)))
+        if ballWindowLearned {
+            out.append("           learned from the ball tapped in setup, not the default window")
+        }
         if let k = radiusScale {
             out.append(String(format: "           radii scaled x%.2f for a %d px wide clip", k, width))
         }

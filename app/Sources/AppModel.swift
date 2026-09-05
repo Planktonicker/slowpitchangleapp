@@ -215,6 +215,9 @@ final class AppModel: ObservableObject {
 
     func startSession(mode: SessionMode) {
         session = Session(mode: mode)
+        // A window learned last round was learned somewhere else, in some
+        // other light. Nothing about a stale one looks wrong on screen.
+        capture.learnedBall = nil
         currentSetting = mode.swingSetting
         finishedSession = nil
         hitterGateDisabledForSession = false
@@ -915,6 +918,12 @@ final class AppModel: ObservableObject {
         let droppedDuringClip = capture.droppedFrameCount > dropsAtClipStart
         dropsAtClipStart = capture.droppedFrameCount
         var options = settings.analyzerOptions
+        // The ball the hitter tapped in setup beats a constant that assumed
+        // optic yellow in daylight — it is a sample of THIS ball, in THIS
+        // light, at the distance it will be hit from. Only the live path: an
+        // imported clip was filmed by something else, somewhere else.
+        let usedLearnedBall = capture.learnedBall != nil
+        if let learned = capture.learnedBall { options.detector = learned }
         options.rollDeg = placement.rollDeg
         options.tiltDeg = placement.tiltDeg
         options.fieldOfViewDeg = placement.fovDeg
@@ -927,6 +936,7 @@ final class AppModel: ObservableObject {
         // because the moment is gone — so if the evidence is going to exist at
         // all it has to be gathered on the pass that measures it.
         let diagnostics = ClipDiagnostics()
+        diagnostics.ballWindowLearned = usedLearnedBall
 
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }

@@ -106,6 +106,18 @@ final class CaptureController: NSObject, ObservableObject {
     /// What the ball-measurement gates saw on the last tap. Shown in setup so a
     /// rejection can be understood rather than guessed at.
     @Published private(set) var lastMeasureReport: String?
+    /// Colour and size window learned from the ball the user actually tapped.
+    ///
+    /// The tap already had to find a real ball to return a diameter at all, so
+    /// by the time this is set the app has a sample of the ball in this light,
+    /// at this distance, against this background — which is strictly more than
+    /// a constant chosen for optic yellow in daylight can know. Every clip in
+    /// the round is then measured with it. See `SetupBallMeasure.sessionWindow`.
+    ///
+    /// Cleared when a round starts, never persisted: a window learned in a
+    /// garage at night is worse than the default on a sunlit field, and
+    /// nothing about it would look wrong on the screen.
+    @Published var learnedBall: DetectorSettings?
     /// Which way is up in the frames Vision receives. Derived from the
     /// device's rotation coordinator, never hardcoded: the phone lives sideways
     /// on a tripod, and a body-pose model handed a rotated human simply fails.
@@ -821,7 +833,7 @@ final class CaptureController: NSObject, ObservableObject {
                 DispatchQueue.main.async { completion(.noFrameYet) }
                 return
             }
-            let outcome: (BallMeasureResult, String) = PixelImage.withImage(snapshot) { img in
+            let outcome: (BallMeasureResult, String, DetectorSettings?) = PixelImage.withImage(snapshot) { img in
                 let px = Double(devicePoint.x) * Double(img.width)
                 let py = Double(devicePoint.y) * Double(img.height)
                 // Search windows scale with the frame, not a fixed 160 px. A
@@ -832,6 +844,7 @@ final class CaptureController: NSObject, ObservableObject {
                 let radii = [w * 0.12, w * 0.25, w * 0.45]
                 var last: SetupBallMeasure.Outcome = .nothingThere
                 var report = ""
+                var learned: DetectorSettings?
                 for r in radii {
                     let attempt = SetupBallMeasure.measure(image: img,
                                                            tapX: px, tapY: py,
@@ -840,9 +853,10 @@ final class CaptureController: NSObject, ObservableObject {
                                                            fovDeg: fov)
                     last = attempt.outcome
                     report = attempt.report
+                    learned = attempt.learned
                     switch last {
                     case .found(let m):
-                        return (.found(m), report)
+                        return (.found(m), report, learned)
                     case .needsWiderSearch:
                         continue          // only this one is worth retrying
                     default:
@@ -851,17 +865,18 @@ final class CaptureController: NSObject, ObservableObject {
                     break
                 }
                 switch last {
-                case .found(let m):          return (.found(m), report)
-                case .notAnEdge:             return (.notAnEdge, report)
-                case .mergedWithBackground:  return (.mergedWithBackground, report)
-                case .shadowed:              return (.shadowed, report)
-                case .truncatedByFrame:      return (.truncatedByFrame, report)
+                case .found(let m):          return (.found(m), report, learned)
+                case .notAnEdge:             return (.notAnEdge, report, nil)
+                case .mergedWithBackground:  return (.mergedWithBackground, report, nil)
+                case .shadowed:              return (.shadowed, report, nil)
+                case .truncatedByFrame:      return (.truncatedByFrame, report, nil)
                 case .needsWiderSearch, .nothingThere:
-                    return (.noBallNearTap(searchRadiusPx: radii.last ?? 0), report)
+                    return (.noBallNearTap(searchRadiusPx: radii.last ?? 0), report, nil)
                 }
-            } ?? (.conversionFailed, "frame could not be read as BGRA")
+            } ?? (.conversionFailed, "frame could not be read as BGRA", nil)
             DispatchQueue.main.async {
                 self.lastMeasureReport = outcome.1.isEmpty ? nil : outcome.1
+                if let learned = outcome.2 { self.learnedBall = learned }
                 completion(outcome.0)
             }
         }

@@ -114,19 +114,65 @@ enum SetupBallMeasure {
     /// rejection from an over-tight threshold, and every guess made from a
     /// screenshot so far has been wrong. It costs nothing and turns "it still
     /// cannot find the ball" into an answer.
+    /// The colour and size window to use for the REST of the session, once a
+    /// tap has actually found a ball.
+    ///
+    /// Not the window that found it. Finding is a different job from
+    /// discriminating: the seeded windows above deliberately open up — hue
+    /// ±24, saturation floored at 45% of the sample — because a ball is
+    /// textured and a window that misses its shaded flank finds nothing at
+    /// all. Adopting that for a whole session would be looser than the
+    /// default, which is the wrong direction: on three real clips the default
+    /// window already matched 15% of every frame.
+    ///
+    /// So this is built to discriminate, and it is never allowed to be looser
+    /// than the settings it came from. The hue is re-centred on the ball
+    /// actually in the picture rather than on a constant that assumed optic
+    /// yellow in daylight; the saturation and value floors come from the ball
+    /// itself, which is the one measurement that separates a fluorescent
+    /// object from the dull scenery sharing its hue.
+    ///
+    /// The size band matters as much. The setup tap is taken at the plate, at
+    /// filming distance, so the ball's diameter there is the diameter it will
+    /// have in flight give or take depth and blur. `live_37` produced blobs up
+    /// to 80 px against a 12 px ball and the radius gates admitted every one.
+    static func sessionWindow(tap c: (h: Double, s: Double, v: Double),
+                              measuredDiameterPx d: Double,
+                              base: DetectorSettings) -> DetectorSettings {
+        var out = base
+        out.hsvLo.h = max(0, c.h - 18)
+        out.hsvHi.h = min(179, c.h + 18)
+        // `max`, always: never looser than what the user already has.
+        out.hsvLo.s = max(base.hsvLo.s, c.s * 0.55)
+        out.hsvLo.v = max(base.hsvLo.v, c.v * 0.45)
+        if d > 1 {
+            let r = d / 2
+            out.minRadiusPx = max(base.minRadiusPx, r * 0.45)
+            out.maxRadiusPx = min(base.maxRadiusPx, r * 2.5)
+            // A band that inverted would reject everything. Better to keep the
+            // colour lesson and drop the size one than to return a window that
+            // cannot match a pixel.
+            if out.maxRadiusPx <= out.minRadiusPx {
+                out.minRadiusPx = base.minRadiusPx
+                out.maxRadiusPx = base.maxRadiusPx
+            }
+        }
+        return out
+    }
+
     static func measure(image: PixelImage,
                         tapX: Double,
                         tapY: Double,
                         searchRadiusPx: Double,
                         settings: DetectorSettings,
-                        fovDeg: Double) -> (outcome: Outcome, report: String) {
+                        fovDeg: Double) -> (outcome: Outcome, report: String, learned: DetectorSettings?) {
 
         _ = fovDeg   // distance sanity is the wizard's job, not the detector's
         let (minDiameter, maxDiameter) = diameterBand(imageWidth: image.width,
                                                       fovDeg: fovDeg,
                                                       searchRadiusPx: searchRadiusPx)
         guard maxDiameter > minDiameter else {
-            return (.needsWiderSearch, "window too small for any ball")
+            return (.needsWiderSearch, "window too small for any ball", nil)
         }
 
         // A ball is textured — seams, stitching, print, a specular highlight —
@@ -171,8 +217,13 @@ enum SetupBallMeasure {
         guard let (primary, shape, winning, winName) = bestFound else {
             let trace = lastFail?.trace ?? "no candidate"
             return (lastFail?.outcomeOnly ?? .nothingThere,
-                    "r\(Int(searchRadiusPx)) · \(tapDesc) · \(trace)")
+                    "r\(Int(searchRadiusPx)) · \(tapDesc) · \(trace)", nil)
         }
+
+        // Built from the tap and the diameter that was actually measured, not
+        // from the variant that won — see `sessionWindow`.
+        let learned = sessionWindow(tap: c, measuredDiameterPx: primary.diameterPx,
+                                    base: settings)
 
         let base = String(format: "%@ · d %.0fpx · fill %.2f · rays %d/16 · edge %@",
                           winName, primary.diameterPx, shape.extent, shape.goodRays,
@@ -196,8 +247,8 @@ enum SetupBallMeasure {
 
         guard case .found(let check, _) = b else {
             return unmistakable
-                ? (.found(primary), base + " · tight:none, allowed (round)")
-                : (.notAnEdge, base + " · vanished under tighter colour")
+                ? (.found(primary), base + " · tight:none, allowed (round)", learned)
+                : (.notAnEdge, base + " · vanished under tighter colour", nil)
         }
 
         let dDiff = abs(primary.diameterPx - check.diameterPx) / max(1e-6, primary.diameterPx)
@@ -206,9 +257,9 @@ enum SetupBallMeasure {
         let stable = dDiff <= stabilityDiameterTol
             && drift <= stabilityCentroidTol * primary.diameterPx
         guard stable || unmistakable else {
-            return (.notAnEdge, base + String(format: " · size moved %.0f%% under tighter colour", dDiff * 100))
+            return (.notAnEdge, base + String(format: " · size moved %.0f%% under tighter colour", dDiff * 100), nil)
         }
-        return (.found(primary), base + String(format: " · stable %.0f%%", dDiff * 100))
+        return (.found(primary), base + String(format: " · stable %.0f%%", dDiff * 100), learned)
     }
 
     // MARK: - Size band
