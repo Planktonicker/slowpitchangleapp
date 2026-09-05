@@ -20,6 +20,19 @@ struct RoundsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var viewing: SessionSummary?
+    /// Rounds a swipe has proposed deleting, held until the dialog answers.
+    @State private var doomed: [Session] = []
+
+    private var confirmingDelete: Binding<Bool> {
+        Binding(get: { !doomed.isEmpty }, set: { if !$0 { doomed = [] } })
+    }
+
+    private var doomedTitle: String {
+        guard let first = doomed.first else { return "Delete round?" }
+        if doomed.count > 1 { return "Delete \(doomed.count) rounds?" }
+        let n = model.swingCount(inRound: first.id)
+        return "Delete this round and its \(n) swing\(n == 1 ? "" : "s")?"
+    }
 
     var body: some View {
         NavigationStack {
@@ -35,9 +48,26 @@ struct RoundsView: View {
                         ForEach(model.pastRounds) { round in
                             row(round)
                         }
+                        .onDelete { offsets in
+                            // Resolve the rounds before deleting: pastRounds is
+                            // derived from the swings, so the first delete
+                            // rebuilds it and every later index points
+                            // somewhere else.
+                            doomed = offsets.map { model.pastRounds[$0] }
+                        }
                     }
                     .scrollContentBackground(.hidden)
                     .background(Theme.black)
+                    .confirmationDialog(doomedTitle, isPresented: confirmingDelete,
+                                        titleVisibility: .visible) {
+                        Button("Delete", role: .destructive) {
+                            for round in doomed { model.deleteRound(id: round.id) }
+                            doomed = []
+                        }
+                        Button("Keep", role: .cancel) { doomed = [] }
+                    } message: {
+                        Text("A round is its swings — deleting it deletes them and their clips. Nothing here is recoverable afterwards.")
+                    }
                 }
             }
             .navigationTitle("Past rounds")

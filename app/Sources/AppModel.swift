@@ -1053,19 +1053,61 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func delete(_ swing: SwingDTO) {
+    /// Every file a swing owns.
+    ///
+    /// One list, called from all three delete paths. It used to be written out
+    /// three times, and the copies had already drifted once: the report file
+    /// was added to one of them and not the others, so "Delete all swings" —
+    /// which promises to remove the measurements and the footage behind them —
+    /// left one .report.txt per swing behind forever, on a device the app
+    /// itself warns fills quickly at 240fps.
+    private func removeFiles(of swing: SwingDTO) {
         ClipStore.delete(clipNamed: swing.clipFilename)
         ClipStore.delete(trackNamed: swing.trackCSVFilename)
         ClipStore.delete(trackNamed: swing.poseFilename)
         ClipStore.delete(trackNamed: swing.traceFilename)
-        // The report too. Every one of the files above got a delete line when
-        // it was added and this one did not, so "Delete all swings" — which
-        // promises to remove the measurements and the footage behind them —
-        // left one .report.txt per swing behind forever, on a device the app
-        // itself warns fills quickly at 240fps.
         ClipStore.delete(trackNamed: swing.diagnosticsFilename)
+    }
+
+    func delete(_ swing: SwingDTO) {
+        removeFiles(of: swing)
         try? store.delete(id: swing.id)
         reload()
+    }
+
+    /// Delete several swings, reloading once at the end.
+    ///
+    /// Not a loop over `delete(_:)`: each of those re-fetches the whole store
+    /// and rebuilds every derived view of it, so clearing a selection of forty
+    /// would do forty full fetches on the main thread — the same fault
+    /// `deleteAll` was written to avoid.
+    func delete(_ doomed: [SwingDTO]) {
+        guard !doomed.isEmpty else { return }
+        for swing in doomed {
+            removeFiles(of: swing)
+            try? store.delete(id: swing.id)
+        }
+        reload()
+    }
+
+    /// Delete a whole round.
+    ///
+    /// A round IS its swings — nothing stores one separately, which is why an
+    /// empty round does not appear in the list at all (see `RoundsView`). So
+    /// deleting one is deleting them, and there is no orphan record left
+    /// behind to rebuild it from.
+    func deleteRound(id: UUID) {
+        delete(swings.filter { $0.sessionID == id })
+        // A window learned for a round that no longer exists is a leak, and a
+        // small one, but it is also the kind that outlives the reason it was
+        // stored.
+        learnedBallBySession[id] = nil
+    }
+
+    /// How many swings a round would take with it. The delete confirmation
+    /// says this, because "delete round" reads like removing a heading.
+    func swingCount(inRound id: UUID) -> Int {
+        swings.filter { $0.sessionID == id }.count
     }
 
     /// Delete every stored swing, reloading once at the end.
@@ -1077,11 +1119,7 @@ final class AppModel: ObservableObject {
     /// waiting to dismiss.
     func deleteAll() {
         for swing in swings {
-            ClipStore.delete(clipNamed: swing.clipFilename)
-            ClipStore.delete(trackNamed: swing.trackCSVFilename)
-            ClipStore.delete(trackNamed: swing.poseFilename)
-            ClipStore.delete(trackNamed: swing.traceFilename)
-            ClipStore.delete(trackNamed: swing.diagnosticsFilename)
+            removeFiles(of: swing)
             try? store.delete(id: swing.id)
         }
         reload()
@@ -1341,6 +1379,92 @@ final class AppModel: ObservableObject {
         if let u = try? CSVExport.write(CSVExport.scoreboardText(scoreboard),
                                         filename: "validation_\(stamp).txt") { urls.append(u) }
         return urls
+    }
+
+    // MARK: - Diagnostics bundle
+
+    /// Everything needed to diagnose a set of swings, in ONE small file.
+    ///
+    /// The per-swing audit bundle shares the clip too, which is right for one
+    /// swing and impossible for twenty: a 240fps clip is ~19 MB, so a round is
+    /// most of a gigabyte and cannot be sent anywhere. Nothing in the ball
+    /// analysis needs the video — it needs the candidates the detector
+    /// produced, the tracks it built, and which one it chose.
+    ///
+    /// The traces are the bulk, and almost all of a trace is candidates from
+    /// parts of the clip nothing happened in. Keeping only those within
+    /// `candidateWindowS` of contact cuts a 660 KB trace to tens of KB while
+    /// keeping the part any question is actually about — where the ball was
+    /// when it was hit. Track summaries are kept whole, because "why was that
+    /// one chosen" is answered by the losers.
+    func exportDiagnostics(for doomed: [SwingDTO],
+                           candidateWindowS: Double = 0.5) -> URL? {
+        guard !doomed.isEmpty else { return nil }
+        var out: [[String: Any]] = []
+        for swing in doomed.sorted(by: { $0.capturedAt < $1.capturedAt }) {
+            var entry: [String: Any] = [
+                "clip": swing.clipFilename ?? "(none)",
+                "setting": swing.setting.rawValue,
+                "capturedAt": ISO8601DateFormatter().string(from: swing.capturedAt),
+                "contactTime": swing.contactTime,
+                "launchAngleDeg": swing.launchAngleDeg,
+                "exitVeloMph": swing.exitVeloMph,
+                "flags": swing.flags.map(\.rawValue),
+                "captureFlags": swing.captureFlags.map(\.rawValue),
+                "cameraRollDeg": swing.cameraRollDeg as Any,
+                "cameraTiltDeg": swing.cameraTiltDeg as Any,
+                "cameraFovDeg": swing.cameraFovDeg as Any,
+            ]
+            if let id = swing.sessionID { entry["sessionID"] = id.uuidString }
+            if let name = swing.diagnosticsFilename,
+               let text = try? String(contentsOf: ClipStore.trackURL(named: name), encoding: .utf8) {
+                entry["report"] = text
+            }
+            if let name = swing.trackCSVFilename,
+               let text = try? String(contentsOf: ClipStore.trackURL(named: name), encoding: .utf8) {
+                entry["trackCSV"] = text
+            }
+            if let name = swing.traceFilename,
+               let data = try? Data(contentsOf: ClipStore.trackURL(named: name)),
+               var trace = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+                let centre = swing.contactTime > 0 ? swing.contactTime : nil
+                if let centre, let all = trace["candidates"] as? [[String: Any]] {
+                    let kept = all.filter { c in
+                        guard let t = c["t"] as? Double else { return false }
+                        return abs(t - centre) <= candidateWindowS
+                    }
+                    trace["candidates"] = kept
+                    // Say so IN the file. A trimmed trace that does not admit
+                    // it reads as "the detector found nothing out there",
+                    // which is the same shape as a real finding.
+                    trace["candidatesTrimmedToWindowS"] = candidateWindowS
+                    trace["candidatesTrimmedAround"] = centre
+                    trace["candidatesBeforeTrim"] = all.count
+                }
+                // The per-frame census is small and is the whole point of the
+                // gate instrumentation, so it is kept whole.
+                entry["trace"] = trace
+            }
+            out.append(entry)
+        }
+        let doc: [String: Any] = [
+            "swinglab_diagnostics_bundle": 1,
+            "swings": out,
+            "count": out.count,
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: doc,
+                                                     options: [.prettyPrinted, .sortedKeys])
+        else { return nil }
+        let stamp = Self.stampFormatter.string(from: Date())
+        let url = ClipStore.exportsDirectory
+            .appendingPathComponent("diagnostics_\(out.count)swings_\(stamp).json")
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            banner = Banner(kind: .error, text: "Could not write the bundle: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     private static let stampFormatter: DateFormatter = {

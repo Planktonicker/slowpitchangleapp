@@ -33,6 +33,9 @@ struct HistoryView: View {
     }
     @State private var sheet: HistorySheet?
     @State private var showImporter = false
+    @State private var selection = Set<UUID>()
+    @State private var editMode: EditMode = .inactive
+    @State private var confirmingDelete = false
 
     /// Inside a round this screen is "this round", not "everything ever".
     ///
@@ -94,6 +97,7 @@ struct HistoryView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarLeading) { filterMenu }
+                ToolbarItem(placement: .topBarTrailing) { selectButton }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         // Photos first, and it is not a preference. The
@@ -276,7 +280,9 @@ struct HistoryView: View {
     }
 
     private var list: some View {
-        List {
+        // `selection:` on the List, not on the rows. A List only offers the
+        // circles in edit mode, and only when it owns the selection set.
+        List(selection: $selection) {
             ForEach(visible) { swing in
                 NavigationLink {
                     SwingDetailView(swing: swing)
@@ -288,9 +294,58 @@ struct HistoryView: View {
                 // Resolve rows before deleting anything: `visible` is a
                 // computed filter, so deleting inside the loop shifts every
                 // later index onto the wrong swing.
-                let doomed = offsets.map { visible[$0] }
-                for swing in doomed { model.delete(swing) }
+                model.delete(offsets.map { visible[$0] })
             }
+        }
+        .environment(\.editMode, $editMode)
+        // A selection that outlives the rows it named would delete whatever
+        // took their place. Cleared whenever the visible set changes and
+        // whenever selecting stops.
+        .onChange(of: editMode) { _, mode in
+            if mode == .inactive { selection.removeAll() }
+        }
+        .onChange(of: model.swingsRevision) { _, _ in
+            selection = selection.intersection(visible.map(\.id))
+        }
+        .confirmationDialog("Delete \(selection.count) swing\(selection.count == 1 ? "" : "s")?",
+                            isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete \(selection.count)", role: .destructive) {
+                model.delete(visible.filter { selection.contains($0.id) })
+                selection.removeAll()
+                editMode = .inactive
+            }
+            Button("Keep them", role: .cancel) {}
+        } message: {
+            Text("The clips go too. Nothing here is recoverable afterwards.")
+        }
+    }
+
+    /// Select / Done, and the delete that only exists while selecting.
+    ///
+    /// Not `EditButton()`: that one is bound to the environment's edit mode and
+    /// says "Edit", which in a list of measurements reads like it will let you
+    /// change them. This screen only ever offers deleting.
+    @ViewBuilder private var selectButton: some View {
+        if editMode == .active {
+            HStack(spacing: 14) {
+                // Export before Delete, and not only for safety: sending the
+                // evidence somewhere is the reason to select a run of swings
+                // far more often than deleting them is.
+                Button {
+                    let chosen = visible.filter { selection.contains($0.id) }
+                    if let url = model.exportDiagnostics(for: chosen) { sheet = .share([url]) }
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .disabled(selection.isEmpty)
+                Button(role: .destructive) { confirmingDelete = true } label: {
+                    Text("Delete\(selection.isEmpty ? "" : " \(selection.count)")")
+                }
+                .disabled(selection.isEmpty)
+                Button("Done") { editMode = .inactive }.fontWeight(.bold)
+            }
+        } else if !visible.isEmpty {
+            Button("Select") { editMode = .active }
         }
     }
 
