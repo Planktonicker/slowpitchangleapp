@@ -115,11 +115,20 @@ They disagree, and it matters. `AVAssetWriter` gives a passthrough track
 QuickTime's default timescale of 600, which cannot express 240 fps (2.5 ticks a
 frame), so a flawless capture alternates 3333 µs and 5000 µs. The four oldest
 clips here were analysed at **200 fps** because of it — every speed on them is
-20% low. Replaying them found a second bug in the same estimator: its
-"one frame period" tolerance was 1.5, exactly the alternation's own ratio, so
-whether it worked came down to floating-point noise, and on real timestamps it
-read **300 fps**. Fixed, with a test that builds its intervals the way real
-ones arrive.
+20% low.
+
+Replaying them found a second bug in the same estimator. Its "one frame period"
+limit is a ratio of 1.5, which is *exactly* the alternation's own ratio — so the
+comparison against it is a boundary, not a threshold, and on real timestamps
+(differences of `CMTime.seconds`, noisy a few parts in 10¹⁶) it fell the wrong
+way and the clip read **300 fps**.
+
+The fix is a relative slack on the comparison, **not a wider ratio**, and that
+distinction cost a red build: 1.5 sits only 6.7% below the 1.0/1.6 alternation
+that a genuinely variable frame rate produces, so widening the ratio to 1.75
+absorbs the quantisation *and* silently averages real variable-rate footage into
+a smooth-looking 184.6 fps. Two tests now pin the pair from opposite sides;
+anything that moves the ratio to satisfy one breaks the other.
 
 ## Files
 

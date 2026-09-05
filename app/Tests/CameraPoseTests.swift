@@ -330,6 +330,13 @@ final class FrameTimingTests: XCTestCase {
     /// reports, so this is a silent 25% error on exit velocity. Found by
     /// replaying `spike/corpus/` (see `spike/replay_corpus.py`), on four real
     /// clips at once.
+    ///
+    /// The fix is a relative slack on the comparison, NOT a wider ratio. This
+    /// test and `testVariableRateIsReportedAsIrregular` are 1.5 and 1.6 apart
+    /// and they pin opposite requirements — absorb the quantisation, report
+    /// the variable rate — so anything that moves the ratio to satisfy one
+    /// breaks the other. They are only both satisfiable because the failure
+    /// here is in the floating-point comparison rather than in the threshold.
     func testTimestampRoundingCannotFlipTheBasePeriod() throws {
         // Cumulative PTS in ticks, alternating 2 and 3 — then differenced in
         // seconds, exactly as `forEachSampleBuffer` hands them over.
@@ -352,6 +359,13 @@ final class FrameTimingTests: XCTestCase {
 
     /// Variable frame rate has to be visible, not averaged away: every timing
     /// measurement downstream assumes an even interval.
+    ///
+    /// The other half of a pair, and the guard that caught a bad fix. A 1.0/1.6
+    /// alternation is only 6.7% away from the 1.0/1.5 alternation that
+    /// `testTimestampRoundingCannotFlipTheBasePeriod` requires to be absorbed,
+    /// so widening the single-period ratio to swallow the quantisation swallows
+    /// this too: at 1.75 this clip reports a smooth 184.6 fps and 0% irregular.
+    /// Whatever fixes one of these two must leave the other passing.
     func testVariableRateIsReportedAsIrregular() throws {
         var ints = intervals(fps: 240, count: 60)
         for i in stride(from: 0, to: 60, by: 2) { ints[i] *= 1.6 }

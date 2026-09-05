@@ -902,22 +902,39 @@ enum ClipAnalyzer {
     /// How much longer than the shortest interval an interval may be and
     /// still count as ONE frame period rather than a gap.
     ///
-    /// It has to clear the 2-vs-3-tick alternation a timescale-600 container
-    /// writes for 240 fps — a ratio of exactly 1.5 — and stay under a genuine
-    /// dropped frame, which is 2.0 at best and 2.5 on the same alternating
-    /// clip. 1.5 was the first choice and it sat exactly ON the alternation:
-    /// whether a 3-tick interval counted depended on whether `shortest * 1.5`
-    /// landed a few parts in 10^16 above or below it, which in turn depended
-    /// on which noisy 2-tick sample the 5th percentile happened to pick.
+    /// 1.5 is not a tuning choice with room either side. It is EXACTLY the
+    /// ratio of the 2-vs-3-tick alternation a timescale-600 container writes
+    /// for 240 fps, which has to be absorbed; it is below a genuine dropped
+    /// frame at 2.0, which has to be counted; and it is below a real variable
+    /// frame rate, which `testVariableRateIsReportedAsIrregular` pins at an
+    /// alternation of 1.0 and 1.6 and which has to stay VISIBLE. Widening it
+    /// to 1.75 was tried and is wrong in the other direction: it averages that
+    /// clip back to a smooth-looking 184.6 fps and reports 0% irregular, which
+    /// is the same silent failure pointing the other way.
+    static let maxSinglePeriodRatio = 1.5
+
+    /// Relative slack on the comparison against `maxSinglePeriodRatio` — not
+    /// on the ratio itself.
     ///
-    /// Real timestamps are noisy in precisely that range, because they arrive
-    /// as differences of `CMTime.seconds`, and the failure is silent and total:
-    /// every 3-tick interval is dropped, the base period becomes 2 ticks, and
-    /// the clip reads 300 fps instead of 240. Replaying the corpus found this
-    /// on four clips at once (`spike/replay_corpus.py`); the existing test
-    /// could not, because it built its intervals from exact `ticks / 600`
-    /// arithmetic, where the comparison lands on the safe side of the hair.
-    static let singleIntervalTolerance = 1.75
+    /// Because 1.5 is exactly the alternation's own ratio, `interval <=
+    /// shortest * 1.5` is a boundary case rather than a threshold, and a
+    /// boundary compared in floating point needs a tolerance. Real intervals
+    /// arrive as differences of `CMTime.seconds` and carry rounding of a few
+    /// parts in 10^16, so `shortest` — a 5th percentile of noisy samples — is
+    /// a hair SHORT of a true period and `shortest * 1.5` lands just BELOW the
+    /// 3-tick value. Every 3-tick interval is then discarded, the base period
+    /// becomes 2 ticks, and a flawless 240 fps clip reads 300: a silent 25%
+    /// error on every velocity the app reports.
+    ///
+    /// Found by replaying `spike/corpus/`, on four real clips at once. The
+    /// existing test could not see it, because it built its intervals from
+    /// exact `ticks / 600` arithmetic, where the comparison happens to land on
+    /// the safe side of the hair.
+    ///
+    /// 1e-6 is nine orders of magnitude above that rounding and four below the
+    /// 6.7% gap to the 1.6 alternation, so it fixes the comparison without
+    /// moving the threshold — both cases pass.
+    static let singleIntervalSlack = 1e-6
 
     /// The arithmetic, split out from the reading so it can be tested without
     /// a video file.
@@ -948,7 +965,9 @@ enum ClipAnalyzer {
         // frames onto the same tick — cannot set the scale for the whole clip.
         let shortest = sorted[max(0, sorted.count / 20)]
         guard shortest > 0 else { return nil }
-        let singles = sorted.filter { $0 <= shortest * singleIntervalTolerance }
+        let singles = sorted.filter {
+            $0 <= shortest * maxSinglePeriodRatio * (1 + singleIntervalSlack)
+        }
         guard !singles.isEmpty else { return nil }
         let base = singles.reduce(0, +) / Double(singles.count)
         guard base > 0, base.isFinite else { return nil }

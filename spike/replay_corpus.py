@@ -196,9 +196,17 @@ def rejection(track, launch_angle_deg, flags, fps, contact_time,
 # Frame timing
 # ---------------------------------------------------------------------------
 
-# How much longer than the shortest interval an interval may be and still
-# count as ONE frame period. Mirror of `ClipAnalyzer.singleIntervalTolerance`.
-SINGLE_INTERVAL_TOLERANCE = 1.75
+# How much longer than the shortest interval an interval may be and still count
+# as ONE frame period, and the slack on that comparison. Mirrors
+# `ClipAnalyzer.maxSinglePeriodRatio` and `.singleIntervalSlack`.
+#
+# 1.5 is exactly the ratio of the 2-vs-3-tick alternation a timescale-600
+# container writes for 240 fps, so the comparison against it is a boundary
+# rather than a threshold and needs a tolerance; widening the RATIO instead
+# would swallow a genuine 1.0/1.6 variable frame rate, which has to stay
+# visible.
+SINGLE_INTERVAL_RATIO = 1.5
+SINGLE_INTERVAL_SLACK = 1e-6
 
 
 def derive_fps(times_by_frame: dict[int, float]) -> tuple[float | None, dict]:
@@ -226,7 +234,8 @@ def derive_fps(times_by_frame: dict[int, float]) -> tuple[float | None, dict]:
         return None, {"reason": f"only {len(intervals)} adjacent-frame intervals"}
     s = sorted(intervals)
     shortest = s[max(0, len(s) // 20)]          # 5th percentile, not the min
-    singles = [i for i in s if i <= shortest * SINGLE_INTERVAL_TOLERANCE]
+    singles = [i for i in s
+               if i <= shortest * SINGLE_INTERVAL_RATIO * (1 + SINGLE_INTERVAL_SLACK)]
     if not singles or shortest <= 0:
         return None, {"reason": "no usable intervals"}
     base = sum(singles) / len(singles)
@@ -494,6 +503,19 @@ def selftest() -> int:
     fps, _ = derive_fps(even)
     check("a dropped frame does not move the rate",
           fps is not None and abs(fps - 240) < 0.01, f"got {fps:.4f} fps")
+
+    # The other half of the pair, and the guard that caught a bad fix: a real
+    # variable frame rate alternating 1.0 and 1.6 is only 6.7% from the 1.5
+    # quantisation above, so widening the RATIO to absorb the quantisation
+    # averages this away into a smooth-looking 184.6 fps.
+    vfr, running = {}, 0.0
+    for i in range(60):
+        vfr[i] = running
+        running += (1.6 if i % 2 == 0 else 1.0) / 240
+    fps, timing = derive_fps(vfr)
+    check("a genuinely variable rate stays visible",
+          timing.get("irregular_fraction", 0) > 0.4,
+          f"got {fps:.1f} fps, {timing.get('irregular_fraction', 0):.0%} irregular")
 
     # The gate thresholds must come from the Swift, not from the fallbacks.
     gates, provenance = load_gates()
