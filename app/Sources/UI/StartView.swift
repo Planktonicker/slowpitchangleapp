@@ -62,6 +62,20 @@ struct StartView: View {
                             footer
                         }
                         .padding(20)
+                        // Sits 5% of the screen above centre. Optical centre,
+                        // not geometric: a block of content centred exactly
+                        // reads as low, because the eye takes the middle of a
+                        // page to be a little above its middle.
+                        //
+                        // Padding rather than `.offset`. An offset is a
+                        // transform — it moves the drawing and not the layout,
+                        // so a tall stack would slide its top edge up under
+                        // the navigation bar and be clipped there with no
+                        // scroll to recover it. Ten percent added below moves
+                        // the centre five percent up, and when the content is
+                        // taller than the screen it is only slack at the
+                        // bottom of a scroll.
+                        .padding(.bottom, geo.size.height * 0.10)
                         .frame(minHeight: geo.size.height, alignment: .center)
                     }
                 }
