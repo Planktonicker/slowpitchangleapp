@@ -25,8 +25,9 @@ So: **a clip is added once and replayed for good.**
 
 ```
 cd spike
+python replay_corpus.py --selftest # the mirrored gates and rate estimator, first
 python replay_corpus.py            # re-run selection and the publish gates on everything
-python replay_corpus.py --verbose
+python replay_corpus.py --verbose  # + frame timing and the losing tracks
 ```
 
 ## Getting footage in here

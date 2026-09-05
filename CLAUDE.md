@@ -82,6 +82,7 @@ cd spike
 python synth_test.py           # end-to-end self-test of the measurement core
 python gen_parity_fixtures.py  # after any sla_common.py change
 python audio_lab.py --selftest # trigger-feature tool, proves itself first
+python replay_corpus.py --selftest  # mirrored gates + rate estimator, proves itself first
 python replay_corpus.py        # re-run selection + publish gates on every saved clip
 ```
 

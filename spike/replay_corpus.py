@@ -450,9 +450,112 @@ def fps_from_bundle_entry(swing: dict) -> float | None:
     return float(m.group(1)) if m else None
 
 
+def selftest() -> int:
+    """Prove the two things in here that are copies of something else.
+
+    A mirror with no test is exactly what `CLAUDE.md` warns about: the gates
+    below are a hand-written second copy of `TrackPlausibility.rejection`, and
+    the frame-rate estimator is a second copy of `ClipAnalyzer.frameTiming`.
+    Neither is parity-pinned, so nothing else in the project would notice them
+    drifting.
+    """
+    failures = []
+
+    def check(name, ok, detail=""):
+        print(f"  [{'PASS' if ok else 'FAIL'}] {name}{'  ' + detail if detail else ''}")
+        if not ok:
+            failures.append(name)
+
+    # The bug this harness found on its first run. A timescale-600 container
+    # cannot express 240 fps, so it alternates 2 and 3 ticks; the estimator has
+    # to average that back rather than keep one half of it.
+    ints, ticks, previous = [], 0, 0.0
+    for i in range(600):
+        ticks += 2 if i % 2 == 0 else 3
+        seconds = ticks / 600
+        ints.append(seconds - previous)
+        previous = seconds
+    times = {}
+    running = 0.0
+    for i, gap in enumerate(ints):
+        running += gap
+        times[i + 1] = running
+    times[0] = 0.0
+    fps, timing = derive_fps(times)
+    check("timescale-600 alternation averages back to 240 fps",
+          fps is not None and abs(fps - 240) < 1,
+          f"got {fps:.2f} fps; a median estimate would say "
+          f"{timing.get('median_fps_would_be', 0):.0f}")
+    check("...and is not called irregular", timing.get("irregular_fraction", 1) < 0.01)
+
+    # A dropped frame is a gap, not a different rate.
+    even = {f: f / 240 for f in range(0, 200)}
+    del even[100]
+    fps, _ = derive_fps(even)
+    check("a dropped frame does not move the rate",
+          fps is not None and abs(fps - 240) < 0.01, f"got {fps:.4f} fps")
+
+    # The gate thresholds must come from the Swift, not from the fallbacks.
+    gates, provenance = load_gates()
+    check("gate thresholds read from TrackPlausibility.swift",
+          provenance == "TrackPlausibility.swift", provenance)
+
+    def synth(n, dx, dy, diameter, t0=1.0, fps_=240.0, grow=1.0):
+        out, x, y, step = [], 0.0, 0.0, 1.0
+        for i in range(n):
+            out.append(sla.BallObservation(frame=i, t=t0 + i / fps_, x=x, y=y,
+                                           diameter_px=diameter, area_px=100.0))
+            x += dx * step
+            y += dy * step
+            step *= grow
+        return out
+
+    # Each gate, fired on purpose, in the words the phone would use.
+    drifting = synth(20, dx=0.6, dy=0.0, diameter=12.0)      # 0.05 diameters/frame
+    check("a drifting blob is refused for diameters-per-frame",
+          (rejection(drifting, 10.0, [], 240.0, 0.99, 20.0, gates) or "")
+          .startswith("moved"),
+          rejection(drifting, 10.0, [], 240.0, 0.99, 20.0, gates) or "(published!)")
+
+    ball = synth(20, dx=25.0, dy=-2.0, diameter=12.0)        # ~2 diameters/frame
+    check("a plausible flight is published",
+          rejection(ball, 10.0, [], 240.0, 0.99, 80.0, gates) is None,
+          rejection(ball, 10.0, [], 240.0, 0.99, 80.0, gates) or "")
+
+    check("an impossible speed is refused",
+          "mph" in (rejection(ball, 10.0, [], 240.0, 0.99, 999.0, gates) or ""))
+
+    check("a path that finished before contact is refused",
+          "before contact" in
+          (rejection(ball, 10.0, [], 240.0, ball[-1].t + 0.5, 80.0, gates) or ""))
+
+    check("a short track that accelerates is refused",
+          "sped up" in
+          (rejection(synth(4, dx=10.0, dy=0.0, diameter=8.0, grow=1.8),
+                     10.0, [], 240.0, 0.99, 80.0, gates) or ""))
+
+    # And the skip that makes two of those gates conditional.
+    late = synth(20, dx=25.0, dy=-2.0, diameter=12.0, t0=2.0)
+    check("a disowned contact time skips the lateness gate",
+          rejection(late, 10.0, [sla.FLAG_CONTACT_TIME_REJECTED], 240.0,
+                    1.0, 80.0, gates) is None
+          and "after contact" in
+          (rejection(late, 10.0, [], 240.0, 1.0, 80.0, gates) or ""))
+
+    print()
+    if failures:
+        print(f"FAILED: {', '.join(failures)}")
+        return 1
+    print("ALL PASS — the frame-rate estimator and the gate mirror agree with "
+          "the app they copy.")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--selftest", action="store_true",
+                    help="prove the mirrored gates and rate estimator first")
     ap.add_argument("--only", nargs="*", help="replay just these clip ids")
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
@@ -467,6 +570,9 @@ def main() -> int:
     ap.add_argument("--notes", default=None)
     ap.add_argument("--build", default=None, help="what produced it, e.g. a commit sha")
     args = ap.parse_args()
+
+    if args.selftest:
+        return selftest()
 
     index = load_index()
     gates, provenance = load_gates()
