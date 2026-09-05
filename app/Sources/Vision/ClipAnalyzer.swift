@@ -179,6 +179,7 @@ enum ClipAnalyzer {
             : (timing != nil ? .measured : .container)
         diagnostics?.containerFps = nominalFPS > 1 ? Double(nominalFPS) : nil
         diagnostics?.frameIntervalIrregularFraction = timing?.irregularFraction
+        diagnostics?.frameDropFraction = timing?.droppedFraction
 
         // Which way the buffer must turn to be the picture a person sees.
         // From the container's display matrix when it carries one; otherwise
@@ -753,13 +754,27 @@ enum ClipAnalyzer {
         var fps: Double
         /// How many intervals the answer is based on.
         var intervals: Int
-        /// Fraction of intervals more than 20% away from the median.
+        /// Fraction of intervals that are not a whole number of frame periods.
         ///
-        /// Everything downstream — exit velocity above all — assumes frames
-        /// arrive at a constant interval. Variable-rate footage breaks that
-        /// assumption silently, producing a number that looks ordinary and is
-        /// wrong, so it is measured rather than hoped for.
+        /// This is the one that means the timing cannot be trusted: everything
+        /// downstream reads frame times from the container, so an interval
+        /// that lands nowhere near a multiple of the period is a timestamp
+        /// nobody can stand behind.
+        ///
+        /// A gap of exactly four periods is NOT irregular. Four frames were
+        /// dropped; the timestamps either side are still true, and a fit
+        /// against real times does not care that some are missing. Conflating
+        /// the two is what made this warn about clean footage — see
+        /// `droppedFraction`.
         var irregularFraction: Double
+        /// Frames that never arrived, as a fraction of the frames the clip
+        /// would have had at its own rate.
+        ///
+        /// The honest reading of a gap. It costs resolution rather than
+        /// correctness — fewer points in the fit, a wider stitch to cross —
+        /// and at some level it costs the measurement, but it is a different
+        /// fault from unreliable timing and has a different fix.
+        var droppedFraction: Double
     }
 
     /// Measure the frame rate from the clip itself, rather than believing the
@@ -823,20 +838,58 @@ enum ClipAnalyzer {
     /// The arithmetic, split out from the reading so it can be tested without
     /// a video file.
     ///
-    /// The median, not the mean: one dropped frame doubles a single interval,
-    /// and a mean would quietly drag the rate down with it while a median does
-    /// not notice. That distinction is the whole reason this is a function
-    /// rather than a division.
+    /// **Not the median, and this cost a real clip.** `AVAssetWriter` gives a
+    /// passthrough video track QuickTime's default time scale of 600 unless
+    /// told otherwise, and 600 cannot express 240 fps: a frame is 2.5 ticks,
+    /// so the writer alternates 2 and 3 — 3.333 ms, 5.000 ms, 3.333 ms — for
+    /// frames that arrived perfectly evenly. The median then lands on one of
+    /// those two values (200 fps), and every interval of the other value is
+    /// more than 20% away from it, so 40% of a clean clip reads as irregular
+    /// and the report tells the hitter to throw the footage away.
+    ///
+    /// The base period is the mean of the intervals that carry no dropped
+    /// frame, which averages the alternation back to the truth — 4.183 ms,
+    /// 239 fps, on the clip that exposed this. `ClipRecorder` now sets a time
+    /// scale that can express the rate, so new clips do not alternate at all;
+    /// this still has to be right for every clip already recorded and for
+    /// anything imported.
     static func frameTiming(fromIntervals intervals: [Double]) -> FrameTiming? {
         let usable = intervals.filter { $0 > 0 && $0.isFinite }
         guard usable.count >= 4 else { return nil }
         let sorted = usable.sorted()
-        let median = sorted[sorted.count / 2]
-        guard median > 0, median.isFinite else { return nil }
-        let irregular = usable.filter { abs($0 - median) > median * 0.2 }.count
-        return FrameTiming(fps: 1 / median,
+
+        // The shortest intervals are the ones with nothing missing. Taken from
+        // the 5th percentile rather than the minimum, so a single impossibly
+        // short interval — a duplicated timestamp, a container rounding two
+        // frames onto the same tick — cannot set the scale for the whole clip.
+        let shortest = sorted[max(0, sorted.count / 20)]
+        guard shortest > 0 else { return nil }
+        let singles = sorted.filter { $0 <= shortest * 1.5 }
+        guard !singles.isEmpty else { return nil }
+        let base = singles.reduce(0, +) / Double(singles.count)
+        guard base > 0, base.isFinite else { return nil }
+
+        // Each interval is either a whole number of frame periods — one frame,
+        // or one plus however many were dropped — or it is a timestamp that
+        // means nothing. A quarter of a period is a generous tolerance and
+        // deliberately so: it has to swallow the ±0.5 tick of a container that
+        // cannot express the rate, which is a fifth of a period at 600.
+        var expected = 0.0
+        var irregular = 0
+        for i in usable {
+            let periods = (i / base).rounded()
+            if periods >= 1, abs(i - periods * base) <= base * 0.25 {
+                expected += periods
+            } else {
+                irregular += 1
+                expected += 1   // it is still one interval between two frames
+            }
+        }
+        let dropped = max(0, expected - Double(usable.count))
+        return FrameTiming(fps: 1 / base,
                            intervals: usable.count,
-                           irregularFraction: Double(irregular) / Double(usable.count))
+                           irregularFraction: Double(irregular) / Double(usable.count),
+                           droppedFraction: expected > 0 ? dropped / expected : 0)
     }
 
     /// Every pass decodes to BGRA, including the two that only hand the buffer

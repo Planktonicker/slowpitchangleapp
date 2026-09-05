@@ -127,6 +127,24 @@ final class ClipRecorder {
                 // and the analyzer needs a capture-time hint to know. With it,
                 // the file itself carries the truth, like every camera app's.
                 vIn.transform = transform
+                // The media time scale. Without it AVAssetWriter defaults a
+                // passthrough video track to QuickTime's ancient 600, and 600
+                // CANNOT EXPRESS 240 fps: one frame is 2.5 ticks, so the writer
+                // has no choice but to alternate 2 and 3 — 3.333 ms, 5.000 ms,
+                // 3.333 ms — for footage whose frames arrived perfectly evenly.
+                //
+                // That is not cosmetic. It quantises every frame time to
+                // ±0.83 ms, a fifth of a frame period; it makes the analyzer's
+                // median-interval estimate land on 5.000 ms and report 200 fps;
+                // and it makes 40% of the intervals differ from that median by
+                // more than a fifth, so the diagnostics call clean 240 fps
+                // footage variable-rate and tell the hitter to re-record it.
+                // A whole real clip was written off that way.
+                //
+                // 240,000 divides exactly by 240 (1000 ticks a frame) and by
+                // 30, 60 and 120 for the slower formats; anything it cannot
+                // express lands within 4 µs. Must be set before `add`.
+                vIn.mediaTimeScale = CMTimeScale(SLA.targetFPS * 1000)
                 vIn.expectsMediaDataInRealTime = false
                 guard writer.canAdd(vIn) else { throw RecorderError.cannotAddInput }
                 writer.add(vIn)

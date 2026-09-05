@@ -44,10 +44,13 @@ final class ClipDiagnostics {
     /// the measurement wins, because the two disagreeing is the signature of
     /// slow-motion footage and worth seeing.
     var containerFps: Double?
-    /// Fraction of frame intervals well away from the median — variable frame
-    /// rate, which breaks the constant-interval assumption every timing
-    /// measurement rests on.
+    /// Fraction of frame intervals that are not a whole number of frame
+    /// periods — timestamps nobody can stand behind.
     var frameIntervalIrregularFraction: Double?
+    /// Fraction of the clip's frames that never arrived. A different fault
+    /// from irregular timing and with a different fix, so it is a different
+    /// number; conflating them told a hitter to re-record a clean clip.
+    var frameDropFraction: Double?
     /// Set when the radius gates were rescaled for a non-1080p clip.
     var radiusScale: Double?
     /// Wall-clock seconds for the whole analysis. Reported because "it takes
@@ -128,6 +131,10 @@ final class ClipDiagnostics {
         if let irregular = frameIntervalIrregularFraction, irregular > 0.05 {
             out.append(String(format: "         %.0f%% of frame intervals are irregular — variable frame rate, timing is unreliable",
                               irregular * 100))
+        }
+        if let dropped = frameDropFraction, dropped > 0.02 {
+            out.append(String(format: "         %.0f%% of frames never arrived — the timing of the rest is still sound",
+                              dropped * 100))
         }
         if videoQuarterTurns != 0 {
             out.append("         buffer is rotated \(videoQuarterTurns * 90)° for display — angles measured after rotating")
@@ -225,8 +232,18 @@ final class ClipDiagnostics {
         }
         if let irregular = frameIntervalIrregularFraction, irregular > 0.05 {
             out.append(String(format:
-                "%.0f%% of the frame intervals differ from the typical one. Every timing measurement here — exit velocity above all — assumes frames arrive evenly, so this footage will read wrong by however uneven it is. Re-record rather than re-encode: a variable-rate file cannot be repaired after the fact.",
+                "%.0f%% of the frame intervals are not a whole number of frame periods, so the timestamps themselves cannot be trusted — and every measurement here reads frame times from the file. Re-record rather than re-encode: a variable-rate file cannot be repaired after the fact.",
                 irregular * 100))
+        }
+        // Deliberately NOT the same warning. A gap of four frame periods is
+        // four frames missing and two timestamps that are still true, so a fit
+        // against real times is unbiased by it — it just has fewer points and
+        // a wider hole to stitch across. Saying "timing is unreliable" here is
+        // what sent a hitter away to re-record footage that was fine.
+        if let dropped = frameDropFraction, dropped > 0.05 {
+            out.append(String(format:
+                "%.0f%% of the frames never reached the file. The timing of the ones that did is still sound, so the numbers are not biased by this — but the ball is being seen in fewer places, gaps have to be stitched across, and a fast ball can cross the frame inside one. This is the capture keeping up, not the footage: check the dropped-frame chip while armed, and if it says buffers, close other apps and let the phone cool.",
+                dropped * 100))
         }
         // The opposite of "nothing matched": the report would print "21.114%"
         // and leave the reader to know that a ball is about 0.05% of a frame.

@@ -273,14 +273,46 @@ final class FrameTimingTests: XCTestCase {
         XCTAssertEqual(t.fps, 198.94, accuracy: 1e-6)
     }
 
-    /// A dropped frame doubles one interval. The median must not notice; a
-    /// mean would have pulled the rate down and every speed with it.
-    func testASingleDroppedFrameDoesNotMoveTheRate() throws {
+    /// A dropped frame doubles one interval. The rate must not move — and the
+    /// gap must be reported as a frame that never arrived, not as a timestamp
+    /// that cannot be trusted. The two have different fixes: one is the phone
+    /// keeping up, the other is footage to throw away.
+    func testASingleDroppedFrameIsAGapNotBadTiming() throws {
         var ints = intervals(fps: 240, count: 60)
         ints[30] *= 2
         let t = try XCTUnwrap(ClipAnalyzer.frameTiming(fromIntervals: ints))
         XCTAssertEqual(t.fps, 240, accuracy: 1e-9)
-        XCTAssertEqual(t.irregularFraction, 1.0 / 60, accuracy: 1e-9)
+        XCTAssertEqual(t.irregularFraction, 0, accuracy: 1e-9)
+        XCTAssertEqual(t.droppedFraction, 1.0 / 61, accuracy: 1e-9)
+    }
+
+    /// The clip that exposed all of this, reproduced from its own container.
+    ///
+    /// `AVAssetWriter` gave the passthrough video track QuickTime's default
+    /// time scale of 600, and 600 cannot express 240 fps — a frame is 2.5
+    /// ticks — so 594 frames were written as an alternation of 2 and 3 ticks
+    /// with real gaps between. The old median-based estimate landed on 3 ticks
+    /// and reported 200 fps, then called every 2-tick interval irregular: 61%
+    /// of a clip whose camera had been keeping perfect time, and a report that
+    /// told the hitter the footage was unusable.
+    func testAContainerTooCoarseToExpressTheRateStillReadsAsSquare() throws {
+        let tick = 1.0 / 600
+        // Straight from the clip's `stts`: ticks, and how many frames had them.
+        let histogram: [(ticks: Int, count: Int)] = [
+            (3, 233), (2, 224), (5, 69), (7, 21), (10, 20),
+            (8, 15), (12, 4), (15, 3), (20, 2), (17, 1),
+        ]
+        var ints: [Double] = []
+        for (ticks, count) in histogram {
+            ints.append(contentsOf: Array(repeating: Double(ticks) * tick, count: count))
+        }
+        let t = try XCTUnwrap(ClipAnalyzer.frameTiming(fromIntervals: ints))
+        XCTAssertEqual(t.fps, 240, accuracy: 2, "the alternation averages back to 240")
+        XCTAssertLessThan(t.irregularFraction, 0.01,
+                          "quantisation is not variable frame rate")
+        // The real fault in that clip, and the one worth telling a hitter
+        // about: nearly a third of the frames never reached the file.
+        XCTAssertEqual(t.droppedFraction, 0.30, accuracy: 0.02)
     }
 
     /// Variable frame rate has to be visible, not averaged away: every timing
@@ -290,6 +322,20 @@ final class FrameTimingTests: XCTestCase {
         for i in stride(from: 0, to: 60, by: 2) { ints[i] *= 1.6 }
         let t = try XCTUnwrap(ClipAnalyzer.frameTiming(fromIntervals: ints))
         XCTAssertGreaterThan(t.irregularFraction, 0.4)
+    }
+
+    /// Gaps of many different sizes are still gaps. A clip that lost one frame
+    /// here and seven there has nothing wrong with its timestamps.
+    func testAssortedGapsAreAllReadAsDroppedFrames() throws {
+        var ints = intervals(fps: 240, count: 60)
+        for (i, periods) in [(10, 2.0), (20, 4.0), (30, 8.0), (40, 3.0)] {
+            ints[i] *= periods
+        }
+        let t = try XCTUnwrap(ClipAnalyzer.frameTiming(fromIntervals: ints))
+        XCTAssertEqual(t.fps, 240, accuracy: 1e-9)
+        XCTAssertEqual(t.irregularFraction, 0, accuracy: 1e-9)
+        // 56 single periods + 2 + 4 + 8 + 3 = 73 expected, 60 arrived.
+        XCTAssertEqual(t.droppedFraction, 13.0 / 73, accuracy: 1e-9)
     }
 
     func testRefusesTooFewIntervals() {
