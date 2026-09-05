@@ -50,6 +50,35 @@ enum TrackPlausibility {
     /// is wide enough that this does not need tuning.
     static let minDiametersPerFrame = 0.20
 
+    /// Above the fastest exit velocity ever recorded in softball, by a
+    /// margin. Not a performance judgement — a backstop against arithmetic
+    /// that has gone somewhere physical reality does not go. `live_48`
+    /// published 198.2 mph.
+    static let maxExitVeloMph = 130.0
+
+    /// Below this many points a quadratic residual means nothing, so
+    /// `SwingFlag.highResidual` cannot fire and the parabola test is not
+    /// available. Four points against three coefficients leaves one degree of
+    /// freedom: the fit is near-exact whatever the points are doing.
+    ///
+    /// This is the hole the relaxed near-contact minimum opened. Admitting
+    /// four-frame tracks was necessary — a real flight on `live_42` was four
+    /// frames — but it removed the one gate that would have caught `live_48`,
+    /// whose four points accelerate 3.3x and fit a parabola perfectly.
+    static let residualMeaninglessBelow = 6
+
+    /// How much a short track's speed may grow end to end before it stops
+    /// being ballistic.
+    ///
+    /// Over the few tens of milliseconds these tracks span, gravity adds well
+    /// under one percent to a struck ball's speed and drag subtracts a little,
+    /// so a real flight is near-constant: the verified four-point flight on
+    /// `live_42` ran 6100, 6494, 8364 px/s — a ratio of 1.37, and that number
+    /// is noise on a three-millisecond baseline. `live_48`'s junk ran 2454,
+    /// 5060, 8075 — a ratio of 3.3. Two is between them with room on both
+    /// sides, and it is only applied where the residual test cannot run.
+    static let maxShortTrackSpeedGrowth = 2.0
+
     /// A hit ball is at the bat when the bat meets it. Selection already
     /// prefers tracks that begin in a window around contact but falls back
     /// when the window is empty — so on a clip with no swing in it, the
@@ -68,7 +97,8 @@ enum TrackPlausibility {
                           launchAngleDeg: Double,
                           flags: [SwingFlag],
                           fps: Double = 0,
-                          contactTime: Double? = nil) -> String? {
+                          contactTime: Double? = nil,
+                          exitVeloMph: Double = 0) -> String? {
         guard let first = track.first, let last = track.last else {
             return "no ball was tracked at all"
         }
@@ -94,7 +124,40 @@ enum TrackPlausibility {
         if let contactTime, first.t - contactTime > maxStartAfterContactS {
             return String(format: "it was first seen %.2f s after contact — a hit ball is at the bat when the bat meets it, so this is something else that moved later in the clip", first.t - contactTime)
         }
+        // The other half of the same idea, and the one that caught `live_48`:
+        // a track can BEGIN inside the contact window and still be over before
+        // contact happens. A struck ball's flight is after contact by
+        // definition — there is no such thing as a hit that finished before
+        // the bat arrived. The whole track sat 39 ms to 2 ms BEFORE it.
+        if let contactTime, last.t < contactTime {
+            return String(format: "the whole path was over %.0f ms before contact — a struck ball's flight begins when the bat meets it, so this is something that crossed beforehand", (contactTime - last.t) * 1000)
+        }
+        if exitVeloMph > maxExitVeloMph {
+            return String(format: "%.0f mph is faster than any softball has been hit", exitVeloMph)
+        }
+        if track.count < residualMeaninglessBelow,
+           let growth = speedGrowth(track: track), growth > maxShortTrackSpeedGrowth {
+            return String(format: "it sped up %.1f-fold across %d frames; a ball in flight holds its speed, and a track this short cannot be checked against a parabola", growth, track.count)
+        }
         return nil
+    }
+
+    /// Last frame-to-frame speed over the first. `nil` when there are fewer
+    /// than two steps to compare.
+    ///
+    /// Deliberately end-to-end rather than a fitted acceleration: on three
+    /// steps a fit has nothing to spare, and the question being asked is
+    /// coarse — did this thing roughly double in speed while it was watched.
+    static func speedGrowth(track: [BallObservation]) -> Double? {
+        var steps: [Double] = []
+        for (a, b) in zip(track, track.dropFirst()) {
+            let dt = b.t - a.t
+            guard dt > 0 else { continue }
+            let dx = b.x - a.x, dy = b.y - a.y
+            steps.append((dx * dx + dy * dy).squareRoot() / dt)
+        }
+        guard steps.count >= 2, let f = steps.first, let l = steps.last, f > 0 else { return nil }
+        return l / f
     }
 
     /// Median frame-to-frame travel as a multiple of the tracked object's own

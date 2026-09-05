@@ -724,7 +724,8 @@ final class AppModel: ObservableObject {
             // trigger, so `contactTime` is the first frame of the track and
             // being "late" relative to it is not a fact about the swing.
             contactTime: dto.captureFlags.contains(.importedClip) ? nil
-                : (analysis.contactTime > 0 ? analysis.contactTime : nil))
+                : (analysis.contactTime > 0 ? analysis.contactTime : nil),
+            exitVeloMph: dto.exitVeloMph)
         else { return }
         dto.captureFlags.append(.ballUnconfirmed)
         dto.notes = [dto.notes, Self.ballNotIdentifiedPrefix + reason]

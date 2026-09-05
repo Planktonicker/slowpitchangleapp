@@ -220,7 +220,7 @@ final class ClipDiagnostics {
         }
         if let near = tracksNearContact {
             let short = shortTracksNearContact ?? 0
-            out.append("           \(near) track\(near == 1 ? "" : "s") began within 150 ms of contact, \(short) of them too short to be scored (needs \(SLA.minTrackFrames) frames)")
+            out.append("           \(near) track\(near == 1 ? "" : "s") began within 150 ms of contact, \(short) of them too short to be scored (needs \(SLA.nearContactMinFrames) frames at contact)")
         }
         if batTapeFrames == 0 {
             out.append("5 bat      no barrel tape seen — bat metrics not reported")
@@ -297,7 +297,7 @@ final class ClipDiagnostics {
                 "the track this measurement came from begins %.2f s after contact. Selection keeps any track starting at or after contact and then scores on speed alone, with no upper bound, so a fast object later in the clip outranks a slower one at the bat.",
                 offset)
             if let short = shortTracksNearContact, short > 0 {
-                line += " \(short) track\(short == 1 ? " was" : "s were") found at contact and dropped for being shorter than \(SLA.minTrackFrames) frames."
+                line += " \(short) track\(short == 1 ? " was" : "s were") found at contact and dropped for being shorter than \(SLA.nearContactMinFrames) frames."
             }
             line += " Treat this reading as unattributed: it may not be the ball that was hit."
             out.append(line)

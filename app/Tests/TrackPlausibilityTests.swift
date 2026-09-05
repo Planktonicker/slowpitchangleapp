@@ -87,6 +87,73 @@ final class TrackPlausibilityTests: XCTestCase {
         XCTAssertTrue(why?.contains("after contact") == true, why ?? "nil")
     }
 
+    /// `live_48`, also labelled as having no swing. It published 22.1 deg at
+    /// 198.2 mph from four points that END 1.9 ms BEFORE contact and speed up
+    /// 3.3-fold while being watched.
+    ///
+    /// It defeats every gate added for `live_49`: 2.14 diameters a frame is a
+    /// perfectly ball-like speed, and it BEGINS 39 ms before contact, inside
+    /// the window. What it cannot do is finish before the bat arrives.
+    private var preContactFragment: [BallObservation] {
+        track([(1.541800, 1123.52, 185.64, 8.89), (1.554300, 1151.18, 198.91, 13.50),
+               (1.566800, 1213.96, 191.23, 9.87), (1.579304, 1308.63, 156.13, 8.83)])
+    }
+
+    func testAPathThatEndsBeforeContactIsRejected() {
+        let why = TrackPlausibility.rejection(track: preContactFragment,
+                                              launchAngleDeg: 22.1, flags: [.shortTrack],
+                                              fps: 240, contactTime: 1.581249,
+                                              exitVeloMph: 198.2)
+        XCTAssertNotNil(why)
+        XCTAssertTrue(why?.contains("before contact") == true, why ?? "nil")
+    }
+
+    /// The gates added for the previous clip do NOT catch this one. Pinned so
+    /// nobody removes the new ones believing the old ones cover it.
+    func testTheEarlierGatesDoNotCatchIt() throws {
+        let perFrame = try XCTUnwrap(
+            TrackPlausibility.diametersPerFrame(track: preContactFragment, fps: 240))
+        XCTAssertGreaterThan(perFrame, TrackPlausibility.minDiametersPerFrame,
+                             "2.14 diameters a frame is a ball-like speed")
+        let start = preContactFragment[0].t - 1.581249
+        XCTAssertLessThan(start, TrackPlausibility.maxStartAfterContactS,
+                          "it begins inside the contact window")
+    }
+
+    /// A track too short for a quadratic residual to mean anything gets a
+    /// direct ballistic check instead. Four points against three coefficients
+    /// leaves one degree of freedom, so `highResidual` can never fire.
+    func testAShortTrackThatSpeedsUpIsRejected() {
+        XCTAssertLessThan(preContactFragment.count,
+                          TrackPlausibility.residualMeaninglessBelow)
+        let growth = TrackPlausibility.speedGrowth(track: preContactFragment)
+        XCTAssertEqual(growth ?? 0, 3.29, accuracy: 0.15)
+        // Contact deliberately omitted, to isolate the growth gate.
+        let why = TrackPlausibility.rejection(track: preContactFragment,
+                                              launchAngleDeg: 22.1, flags: [.shortTrack],
+                                              fps: 240)
+        XCTAssertTrue(why?.contains("sped up") == true, why ?? "nil")
+    }
+
+    /// The four-point flight on `live_42`, verified by geometry, must survive
+    /// the growth gate — it is the case the relaxed minimum exists for.
+    func testAVerifiedFourPointFlightSurvivesTheGrowthGate() {
+        let real = track([(1.4667, 848.8, 497.6, 10.0), (1.4717, 879.3, 496.7, 11.8),
+                          (1.4800, 933.2, 498.2, 12.6), (1.4833, 960.8, 498.2, 8.6)])
+        let growth = TrackPlausibility.speedGrowth(track: real)
+        XCTAssertEqual(growth ?? 0, 1.37, accuracy: 0.15)
+        XCTAssertLessThan(growth ?? 99, TrackPlausibility.maxShortTrackSpeedGrowth)
+        XCTAssertNil(TrackPlausibility.rejection(track: real, launchAngleDeg: -0.3,
+                                                 flags: [.shortTrack], fps: 240,
+                                                 contactTime: 1.4525, exitVeloMph: 62))
+    }
+
+    func testAnImpossibleExitVelocityIsRejected() {
+        let why = TrackPlausibility.rejection(track: realFlight, launchAngleDeg: 22.1,
+                                              flags: [], fps: 240, exitVeloMph: 198.2)
+        XCTAssertTrue(why?.contains("mph") == true, why ?? "nil")
+    }
+
     /// An import has no audio trigger, so there is no instant to be late
     /// relative to and the lateness test must not fire on one.
     func testLatenessIsSkippedWhenContactIsUnknown() {

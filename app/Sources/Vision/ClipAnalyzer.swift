@@ -405,7 +405,8 @@ enum ClipAnalyzer {
                 diagnostics?.ballSeedFoundNothing = true
                 trace.tracksBuilt = tracks.count
                 trace.trackSummaries = Self.summarise(tracks: tracks, selected: nil,
-                                                      direction: options.direction)
+                                                      direction: options.direction,
+                                                      contactTime: contactTime)
                 throw ClipAnalysisError.noBallAtSeed
             }
         }
@@ -415,7 +416,8 @@ enum ClipAnalyzer {
         // that knowledge exists.
         trace.tracksBuilt = tracks.count
         trace.trackSummaries = Self.summarise(tracks: tracks, selected: selected,
-                                              direction: options.direction)
+                                              direction: options.direction,
+                                              contactTime: contactTime)
         trace.stitchExplains = Self.explainUnjoined(chains: tracks)
         // The instant every track is being judged against. `selectOutbound`
         // keeps only what began at or after it — and imposes no upper bound,
@@ -432,9 +434,12 @@ enum ClipAnalyzer {
                 guard let f = $0.first else { return false }
                 return abs(f.t - contactTime) <= 0.15
             }.count
+            // Against the RELAXED minimum, which is the one that applies to
+            // them. Counted against eight, this said "too short to be scored"
+            // about tracks the selector had just scored.
             diagnostics?.shortTracksNearContact = tracks.filter {
                 guard let f = $0.first else { return false }
-                return abs(f.t - contactTime) <= 0.15 && $0.count < SLA.minTrackFrames
+                return abs(f.t - contactTime) <= 0.15 && $0.count < SLA.nearContactMinFrames
             }.count
         }
 
@@ -747,22 +752,37 @@ enum ClipAnalyzer {
     /// selector's own reason for passing each one over.
     static func summarise(tracks: [[BallObservation]],
                           selected: [BallObservation]?,
-                          direction: TrackBuilder.Direction) -> [DetectionTrace.TrackSummary] {
+                          direction: TrackBuilder.Direction,
+                          contactTime: Double?) -> [DetectionTrace.TrackSummary] {
         var out: [DetectionTrace.TrackSummary] = []
         for tr in tracks {
             guard let first = tr.first, let last = tr.last else { continue }
             let dt = last.t - first.t
             let dx = last.x - first.x, dy = last.y - first.y
-            let speed = dt > 0 ? (dx * dx + dy * dy).squareRoot() / dt : 0
+            // The score selection actually uses. It used to be net
+            // displacement over elapsed time, which is a different number on
+            // exactly the tracks worth reading a summary about — a stalled
+            // blob glued to something fast reads fast by that measure and
+            // slow by this one.
+            let speed = TrackBuilder.medianStepSpeed(tr) ?? 0
             let straight = TrackBuilder.straightness(tr)
+            // Near contact the length gate relaxes, so the reason a track was
+            // passed over depends on where it started. Reporting the strict
+            // minimum for a track the selector judged by the relaxed one is
+            // how a report sends somebody looking for a bug that is not there.
+            let nearContact = contactTime.map {
+                first.t >= $0 - SLA.selectContactTolS && first.t <= $0 + SLA.selectContactLateS
+            } ?? false
+            let minLen = nearContact ? SLA.nearContactMinFrames : SLA.minTrackFrames
             let isSelected = selected.map { $0.first?.frame == first.frame
                 && $0.last?.frame == last.frame && $0.count == tr.count } ?? false
 
             // The selector's gates, in the order it applies them.
             var reason = ""
             if !isSelected {
-                if tr.count < SLA.minTrackFrames {
-                    reason = "only \(tr.count) frames, needs \(SLA.minTrackFrames)"
+                if tr.count < minLen {
+                    reason = "only \(tr.count) frames, needs \(minLen)"
+                        + (nearContact ? " even at contact" : "")
                 } else if dt <= 0 {
                     reason = "no elapsed time"
                 } else if straight < SLA.trackStraightnessMin {
