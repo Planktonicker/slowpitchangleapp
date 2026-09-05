@@ -47,7 +47,10 @@ final class TrackPlausibilityTests: XCTestCase {
         let slow = try XCTUnwrap(TrackPlausibility.diametersPerFrame(track: driftingBlob, fps: 240))
         let fast = try XCTUnwrap(TrackPlausibility.diametersPerFrame(track: realFlight, fps: 240))
         XCTAssertEqual(slow, 0.075, accuracy: 0.02)
-        XCTAssertEqual(fast, 1.96, accuracy: 0.25)
+        // 1.75, not the 1.96 first quoted from a nominal 10 px ball — this
+        // track's own median diameter is 11.1 px, and the whole point of the
+        // measure is that it uses the ball's real width.
+        XCTAssertEqual(fast, 1.75, accuracy: 0.30)
         // The threshold has to sit clear of BOTH, or it is tuned to one clip.
         XCTAssertGreaterThan(TrackPlausibility.minDiametersPerFrame, slow * 2)
         XCTAssertLessThan(TrackPlausibility.minDiametersPerFrame, fast / 4)
