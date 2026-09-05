@@ -357,6 +357,15 @@ struct TrackReviewView: View {
         updated.ballSeedY = y
         model.update(updated)
         closeOnReanalysis = true
+        // Learn the ball's colour and size from the same tap, for the round
+        // this clip belongs to. The seed below fixes THIS swing; the window
+        // fixes the ones filmed either side of it, which is the difference
+        // between correcting a reading and correcting a session.
+        //
+        // Not awaited: it decodes one frame, and the re-measure of this swing
+        // should not wait on it. The window lands before the round batch,
+        // which is the only thing that reads it.
+        Task { await model.learnBall(from: updated, tapX: x, tapY: y, t: t) }
         model.reanalyze(updated)
         pickingBall = false
         // Closing happens in the `onChange` above, when the re-measured record

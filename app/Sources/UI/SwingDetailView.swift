@@ -617,6 +617,50 @@ struct SwingDetailView: View {
 
     /// Each action is its OWN row.
     ///
+    /// Re-measure the whole round with the ball pointed at in one of its clips.
+    ///
+    /// Only appears once a window has actually been learned — pointing at the
+    /// ball in Track review is what puts it there. Offering it before then
+    /// would be a button that silently re-runs the same settings on every clip
+    /// for several minutes and changes nothing.
+    ///
+    /// The estimate is honest and deliberately prominent: analysis runs at
+    /// roughly two and a half minutes a clip on the phone, so a full round is
+    /// tens of minutes. A progress row with a Stop replaces it while it runs,
+    /// and stopping lets the swing in flight finish rather than abandoning it
+    /// halfway to neither reading.
+    @ViewBuilder private var roundRemeasureRow: some View {
+        if let run = model.roundRemeasure {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Re-measuring round · \(run.done) of \(run.total)")
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                    Spacer()
+                    Button(run.cancelling ? "Stopping…" : "Stop") {
+                        model.cancelRoundRemeasure()
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(run.cancelling)
+                }
+                ProgressView(value: Double(run.done), total: Double(max(1, run.total)))
+                    .tint(Theme.yellow)
+            }
+        } else if let id = swing.sessionID, model.learnedBallBySession[id] != nil {
+            let n = model.swings.filter { $0.sessionID == id && $0.clipFilename != nil }.count
+            Button { model.reanalyzeRound(sessionID: id) } label: {
+                Label {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Re-measure this round with the ball you pointed at")
+                        Text("\(n) swing\(n == 1 ? "" : "s") · about \(max(1, n * 5 / 2)) min, screen on")
+                            .font(.caption).foregroundStyle(Theme.steel)
+                    }
+                } icon: {
+                    Image(systemName: "arrow.clockwise.circle")
+                }
+            }
+        }
+    }
+
     /// They used to sit in one VStack inside one Section, which in a List is a
     /// single row containing four buttons — and a row has one tap target, so
     /// pressing any of them ran whichever one SwiftUI decided the row meant.
@@ -631,6 +675,7 @@ struct SwingDetailView: View {
         Button { model.reanalyze(swing, forceFallback: true) } label: {
             Label("Re-analyze without Vision", systemImage: "eye.slash")
         }
+        roundRemeasureRow
         // The artefact that leaves the phone. A raw 240fps clip plays in a
         // third of a second and shows nothing; this is the version a coach can
         // actually watch.

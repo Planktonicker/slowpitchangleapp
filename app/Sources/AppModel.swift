@@ -1087,6 +1087,111 @@ final class AppModel: ObservableObject {
         reload()
     }
 
+    // MARK: - Learning the ball from a clip already filmed
+
+    /// Colour and size window learned by pointing at the ball, per round.
+    ///
+    /// In memory and not persisted, deliberately — the same rule as the live
+    /// one. A window learned in a garage at night is worse than the default on
+    /// a sunlit field, and a stale one looks no different on the screen.
+    @Published private(set) var learnedBallBySession: [UUID: DetectorSettings] = [:]
+
+    /// A whole round being re-measured, one swing at a time.
+    struct RoundRemeasure: Equatable {
+        var sessionID: UUID
+        var done: Int
+        var total: Int
+        /// Set by `cancelRoundRemeasure`; the queue drains without starting
+        /// another. The swing already running is allowed to finish, because
+        /// killing it halfway leaves neither the old reading nor a new one.
+        var cancelling: Bool
+    }
+    @Published private(set) var roundRemeasure: RoundRemeasure?
+    private var roundQueue: [SwingDTO] = []
+
+    /// Sample the ball at a tap on a stored clip and keep the window for the
+    /// round that clip belongs to.
+    ///
+    /// The same measurement the setup tap runs — one implementation, so a ball
+    /// learned here and a ball learned live cannot disagree about what a ball
+    /// looks like.
+    func learnBall(from swing: SwingDTO, tapX: Double, tapY: Double, t: Double) async {
+        guard let sessionID = swing.sessionID, let clipName = swing.clipFilename else { return }
+        let url = ClipStore.clipURL(named: clipName)
+        let fov = swing.cameraFovDeg ?? 0
+        let base = settings.detector
+        guard let pb = await ClipFrameSampler.frame(url: url, at: t) else { return }
+        let learned: DetectorSettings? = PixelImage.withImage(pb) { img in
+            let w = Double(img.width)
+            for r in [w * 0.12, w * 0.25, w * 0.45] {
+                let attempt = SetupBallMeasure.measure(image: img, tapX: tapX, tapY: tapY,
+                                                       searchRadiusPx: r,
+                                                       settings: base, fovDeg: fov)
+                if case .found = attempt.outcome { return attempt.learned }
+                if case .needsWiderSearch = attempt.outcome { continue }
+                break
+            }
+            return nil
+        } ?? nil
+        guard let learned else { return }
+        learnedBallBySession[sessionID] = learned
+        let n = swings.filter { $0.sessionID == sessionID }.count
+        banner = Banner(kind: .info,
+                        text: "Ball learned from this clip. Re-measure the round (\(n) swings) from the swing screen.")
+    }
+
+    /// Re-measure every swing in a round with the window just learned.
+    ///
+    /// A queue rather than a loop, because `reanalyze` is fire-and-forget: it
+    /// hands the work to a detached task and returns. Draining a queue as each
+    /// one lands keeps exactly one analysis in flight — which is what the
+    /// phone can do anyway — without restructuring the path that every manual
+    /// re-measure already uses and that is known to work.
+    func reanalyzeRound(sessionID: UUID) {
+        guard roundRemeasure == nil else { return }
+        let queue = swings.filter { $0.sessionID == sessionID && $0.clipFilename != nil }
+            .sorted { $0.capturedAt < $1.capturedAt }
+        guard !queue.isEmpty else {
+            banner = Banner(kind: .warning, text: "No clips in this round to re-measure.")
+            return
+        }
+        roundQueue = queue
+        roundRemeasure = RoundRemeasure(sessionID: sessionID, done: 0,
+                                        total: queue.count, cancelling: false)
+        startNextInRound()
+    }
+
+    func cancelRoundRemeasure() {
+        guard roundRemeasure != nil else { return }
+        roundRemeasure?.cancelling = true
+        roundQueue.removeAll()
+    }
+
+    private func startNextInRound() {
+        guard roundRemeasure != nil else { return }
+        guard let next = roundQueue.first else {
+            let done = roundRemeasure?.done ?? 0
+            let cancelled = roundRemeasure?.cancelling ?? false
+            roundRemeasure = nil
+            banner = Banner(kind: .info,
+                            text: cancelled ? "Stopped after \(done) swings."
+                                            : "Re-measured \(done) swings.")
+            return
+        }
+        roundQueue.removeFirst()
+        reanalyze(next)
+    }
+
+    /// Called when any re-analysis finishes, successfully or not. A failed
+    /// swing must not stall the round — it keeps its old reading and the queue
+    /// moves on, which is also why the count says how many were re-measured
+    /// rather than how many improved.
+    private func roundStepFinished() {
+        guard roundRemeasure != nil else { return }
+        roundRemeasure?.done += 1
+        startNextInRound()
+    }
+
     /// Re-run the pipeline on a stored clip — after retuning colour ranges,
     /// or with the fallback detector forced.
     func reanalyze(_ swing: SwingDTO, forceFallback: Bool = false) {
@@ -1096,6 +1201,10 @@ final class AppModel: ObservableObject {
         }
         let url = ClipStore.clipURL(named: clipName)
         var options = settings.analyzerOptions
+        // The ball pointed at in this round beats the default window, exactly
+        // as the setup tap does for a live one.
+        let learned = swing.sessionID.flatMap { learnedBallBySession[$0] }
+        if let learned { options.detector = learned }
         options.rollDeg = swing.cameraRollDeg ?? 0
         // Re-analysis has to use the optics and pose the clip was filmed with,
         // not whatever the phone is pointing at now.
@@ -1116,6 +1225,7 @@ final class AppModel: ObservableObject {
         // where it helped. Without this the button that exists to produce
         // evidence was deleting it.
         let diagnostics = ClipDiagnostics()
+        diagnostics.ballWindowLearned = learned != nil
 
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self else { return }
@@ -1187,7 +1297,10 @@ final class AppModel: ObservableObject {
                                      report: report)
                     self.analysisProgress = nil
                     self.update(updated)
-                    self.banner = AppModel.Banner(kind: .info, text: "Re-analyzed.")
+                    if self.roundRemeasure == nil {
+                        self.banner = AppModel.Banner(kind: .info, text: "Re-analyzed.")
+                    }
+                    self.roundStepFinished()
                 }
             } catch {
                 await MainActor.run {
@@ -1197,7 +1310,10 @@ final class AppModel: ObservableObject {
                     // says which end of the pipeline to look at.
                     let kind: Banner.Kind =
                         (error as? ClipAnalysisError) == .noBallAtSeed ? .warning : .error
-                    self.banner = AppModel.Banner(kind: kind, text: error.localizedDescription)
+                    if self.roundRemeasure == nil {
+                        self.banner = AppModel.Banner(kind: kind, text: error.localizedDescription)
+                    }
+                    self.roundStepFinished()
                 }
             }
         }
