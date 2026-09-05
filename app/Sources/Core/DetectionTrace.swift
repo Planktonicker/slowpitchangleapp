@@ -52,6 +52,48 @@ struct DetectionTrace: Codable, Sendable, Equatable {
     static let perFrameLimit = 24
     static let candidateLimit = 20_000
 
+    /// The contact time the analysis worked from, and where it came from.
+    ///
+    /// Recorded because selection is scored RELATIVE to it — `selectOutbound`
+    /// keeps only tracks starting at or after contact — and a report that
+    /// shows the tracks without showing the instant they are being judged
+    /// against cannot answer "why that one". On the clip that prompted this,
+    /// the winning track began 0.74 s after contact and nothing in the report
+    /// said so.
+    var contactT: Double?
+    /// "audio trigger", or a note that there was none.
+    ///
+    /// Optional, like `frameCensus` below, and not merely defaulted: Swift's
+    /// synthesised `Decodable` does not fall back to a property's default when
+    /// a key is missing, so a non-optional new field makes every trace already
+    /// stored beside a swing fail to decode.
+    var contactSource: String?
+
+    /// What the shape gates threw away, per frame.
+    ///
+    /// The candidates list says what survived; this says what did not, and the
+    /// difference is the whole question when a ball stops being seen halfway
+    /// across the frame. Four counters an frame, so it costs nothing, and it
+    /// distinguishes the cases that need completely different fixes: no blob
+    /// at all (colour or motion), a blob too small or too large (radius
+    /// gates), a blob smeared past 6:1 (exposure), or a blob whose refined
+    /// diameter fell outside the range (the sub-pixel step disagreeing with
+    /// the pixel count).
+    struct FrameCensus: Codable, Sendable, Equatable {
+        var frame: Int
+        var t: Double
+        /// Connected components the mask produced, before any shape gate.
+        var blobs: Int
+        var tooSmall: Int
+        var tooLarge: Int
+        var tooElongated: Int
+        var diameterOutOfRange: Int
+        var passed: Int
+    }
+
+    /// Optional for the same reason as `contactSource`.
+    var frameCensus: [FrameCensus]?
+
     /// Time of the last candidate that was actually stored, when truncation
     /// cut recording short. Before this instant an empty frame means nothing
     /// was found; after it, it means nothing was SAVED.

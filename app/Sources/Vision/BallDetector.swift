@@ -181,17 +181,45 @@ enum BallDetector {
         return mask
     }
 
+    /// What the shape gates rejected on one frame. Four counters; see
+    /// `DetectionTrace.FrameCensus` for why they are worth having.
+    struct GateCensus: Sendable, Equatable {
+        var blobs = 0
+        var tooSmall = 0
+        var tooLarge = 0
+        var tooElongated = 0
+        var diameterOutOfRange = 0
+        var passed = 0
+    }
+
+    /// The candidates, unchanged, and the tally of what did not become one.
+    ///
+    /// `detect` is this with the tally dropped, so there is one implementation
+    /// of the gates and no chance of a census that describes different rules
+    /// from the ones that ran.
     static func detect(image: PixelImage,
                        frame: Int,
                        t: Double,
                        settings: DetectorSettings = DetectorSettings(),
                        roi: ROI? = nil,
                        motion: [Bool]? = nil) -> [BallObservation] {
+        detectWithCensus(image: image, frame: frame, t: t, settings: settings,
+                         roi: roi, motion: motion).observations
+    }
+
+    static func detectWithCensus(image: PixelImage,
+                                 frame: Int,
+                                 t: Double,
+                                 settings: DetectorSettings = DetectorSettings(),
+                                 roi: ROI? = nil,
+                                 motion: [Bool]? = nil)
+        -> (observations: [BallObservation], census: GateCensus) {
+        var census = GateCensus()
         let r = (roi ?? ROI(x0: 0, y0: 0, x1: image.width, y1: image.height))
             .clamped(width: image.width, height: image.height)
         let w = r.x1 - r.x0
         let h = r.y1 - r.y0
-        guard w > 2, h > 2 else { return [] }
+        guard w > 2, h > 2 else { return ([], census) }
 
         let mask = maskAfterMorphology(image: image, roi: r,
                                        lo: settings.hsvLo, hi: settings.hsvHi,
@@ -205,16 +233,21 @@ enum BallDetector {
         let maxArea = Double.pi * settings.maxRadiusPx * settings.maxRadiusPx * 4.0
 
         var out: [BallObservation] = []
+        census.blobs = blobs.count
         for blob in blobs {
             let area = Double(blob.count)
-            if area < minArea || area > maxArea { continue }
+            if area < minArea { census.tooSmall += 1; continue }
+            if area > maxArea { census.tooLarge += 1; continue }
 
             let cx = Double(r.x0) + blob.meanX
             let cy = Double(r.y0) + blob.meanY
 
             var minor = blob.minorAxis
             let major = blob.majorAxis
-            if major > 0 && minor > 1e-6 && major / minor > 6.0 { continue }
+            if major > 0 && minor > 1e-6 && major / minor > 6.0 {
+                census.tooElongated += 1
+                continue
+            }
             if minor <= 1e-6 { minor = 2 * settings.minRadiusPx }
 
             // The minor axis is perpendicular to the blur smear, so it still
@@ -227,12 +260,14 @@ enum BallDetector {
             }
 
             if !(2 * settings.minRadiusPx <= minor && minor <= 2 * settings.maxRadiusPx) {
+                census.diameterOutOfRange += 1
                 continue
             }
             out.append(BallObservation(frame: frame, t: t, x: cx, y: cy,
                                        diameterPx: minor, areaPx: area))
         }
-        return out
+        census.passed = out.count
+        return (out, census)
     }
 
     /// Sub-pixel ball diameter along the minor (blur-free) axis.

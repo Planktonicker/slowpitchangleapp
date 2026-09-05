@@ -81,9 +81,32 @@ final class ClipDiagnostics {
     var totalCandidates = 0
     var candidateDiametersPx: [Double] = []
 
+    /// What the shape gates threw away, over the whole clip. The candidate
+    /// count says what survived; a ball that stops being seen halfway across
+    /// the frame is a question only these can answer, because "no blob at all"
+    /// and "a blob rejected for being 7:1 smeared" have nothing in common
+    /// except the empty result.
+    var gateBlobs = 0
+    var gateTooSmall = 0
+    var gateTooLarge = 0
+    var gateTooElongated = 0
+    var gateDiameterOutOfRange = 0
+
     // Stage 3 — tracking
     var tracksBuilt = 0
     var bestTrackFrames = 0
+    /// How long after contact the winning track begins.
+    ///
+    /// `selectOutbound` keeps tracks starting at or after contact and puts no
+    /// upper bound on that, so a track half a second later scores on speed
+    /// alone against one at contact. On the clip that prompted this the winner
+    /// began 0.74 s after contact — visible nowhere in the report, and the
+    /// verdict then blamed the trigger for a gap the selector had chosen.
+    var selectedStartsAfterContactS: Double?
+    /// Tracks that began within 150 ms of contact, and how many of those were
+    /// too short to be scored at all.
+    var tracksNearContact: Int?
+    var shortTracksNearContact: Int?
 
     // Stage 4 — bat and body
     var batTapeFrames = 0
@@ -178,7 +201,19 @@ final class ClipDiagnostics {
             out.append(String(format: "           diameter px  min %.1f  median %.1f  max %.1f",
                               d.first!, d[d.count / 2], d.last!))
         }
+        if gateBlobs > 0 {
+            out.append(String(format: "           %d blobs, %d became candidates — rejected: %d too small, %d too large, %d smeared past 6:1, %d diameter out of range",
+                              gateBlobs, totalCandidates, gateTooSmall, gateTooLarge,
+                              gateTooElongated, gateDiameterOutOfRange))
+        }
         out.append("4 track    \(tracksBuilt) tracks built, longest \(bestTrackFrames) frames")
+        if let offset = selectedStartsAfterContactS {
+            out.append(String(format: "           the chosen track begins %+.3f s from contact", offset))
+        }
+        if let near = tracksNearContact {
+            let short = shortTracksNearContact ?? 0
+            out.append("           \(near) track\(near == 1 ? "" : "s") began within 150 ms of contact, \(short) of them too short to be scored (needs \(SLA.minTrackFrames) frames)")
+        }
         if batTapeFrames == 0 {
             out.append("5 bat      no barrel tape seen — bat metrics not reported")
         } else {
@@ -244,6 +279,20 @@ final class ClipDiagnostics {
             out.append(String(format:
                 "%.0f%% of the frames never reached the file. The timing of the ones that did is still sound, so the numbers are not biased by this — but the ball is being seen in fewer places, gaps have to be stitched across, and a fast ball can cross the frame inside one. This is the capture keeping up, not the footage: check the dropped-frame chip while armed, and if it says buffers, close other apps and let the phone cool.",
                 dropped * 100))
+        }
+        // The finding the last two clips both had and neither report said.
+        // Deliberately a note rather than a verdict: whether selection SHOULD
+        // bound how late a track may start is a measurement question, and
+        // nothing here is entitled to answer it. Saying the number is.
+        if let offset = selectedStartsAfterContactS, offset > 0.25 {
+            var line = String(format:
+                "the track this measurement came from begins %.2f s after contact. Selection keeps any track starting at or after contact and then scores on speed alone, with no upper bound, so a fast object later in the clip outranks a slower one at the bat.",
+                offset)
+            if let short = shortTracksNearContact, short > 0 {
+                line += " \(short) track\(short == 1 ? " was" : "s were") found at contact and dropped for being shorter than \(SLA.minTrackFrames) frames."
+            }
+            line += " Treat this reading as unattributed: it may not be the ball that was hit."
+            out.append(line)
         }
         // The opposite of "nothing matched": the report would print "21.114%"
         // and leave the reader to know that a ball is about 0.05% of a frame.

@@ -277,14 +277,38 @@ enum ClipAnalyzer {
                 // Nothing survives track building from a single frame, but it
                 // would fill the diagnostics report with junk and hide the
                 // real story. One frame at 240fps costs nothing.
-                let cands: [BallObservation] = motion == nil
-                    ? []
-                    : BallDetector.detect(image: img,
-                                          frame: index,
-                                          t: t,
-                                          settings: options.detector,
-                                          roi: searchROI,
-                                          motion: motion)
+                var cands: [BallObservation] = []
+                if motion != nil {
+                    let found = BallDetector.detectWithCensus(image: img,
+                                                              frame: index,
+                                                              t: t,
+                                                              settings: options.detector,
+                                                              roi: searchROI,
+                                                              motion: motion)
+                    cands = found.observations
+                    // Every frame, not only the ones that produced something.
+                    // A frame with blobs and no candidates and a frame with no
+                    // blobs at all are the two different answers to "why did
+                    // the ball stop being seen here", and only this tells them
+                    // apart.
+                    let c = found.census
+                    if (trace.frameCensus?.count ?? 0) < DetectionTrace.candidateLimit {
+                        if trace.frameCensus == nil { trace.frameCensus = [] }
+                        trace.frameCensus?.append(
+                            DetectionTrace.FrameCensus(frame: index, t: t,
+                                                       blobs: c.blobs,
+                                                       tooSmall: c.tooSmall,
+                                                       tooLarge: c.tooLarge,
+                                                       tooElongated: c.tooElongated,
+                                                       diameterOutOfRange: c.diameterOutOfRange,
+                                                       passed: c.passed))
+                    }
+                    diagnostics?.gateBlobs += c.blobs
+                    diagnostics?.gateTooSmall += c.tooSmall
+                    diagnostics?.gateTooLarge += c.tooLarge
+                    diagnostics?.gateTooElongated += c.tooElongated
+                    diagnostics?.gateDiameterOutOfRange += c.diameterOutOfRange
+                }
                 // Kept before track building, so the review can show a
                 // candidate the detector genuinely found and the pipeline then
                 // discarded — without this they would be indistinguishable
@@ -393,6 +417,26 @@ enum ClipAnalyzer {
         trace.trackSummaries = Self.summarise(tracks: tracks, selected: selected,
                                               direction: options.direction)
         trace.stitchExplains = Self.explainUnjoined(chains: tracks)
+        // The instant every track is being judged against. `selectOutbound`
+        // keeps only what began at or after it — and imposes no upper bound,
+        // so a track half a second later is as eligible as one at contact.
+        // Whether that is the right rule is a measurement question; showing
+        // the reader the instant is not, and without it the summaries cannot
+        // be read at all.
+        trace.contactT = contactTime
+        trace.contactSource = contactTime == nil ? "none — taken from the first frame of flight"
+                                                 : "audio trigger"
+        if let contactTime, let selected, let first = selected.first {
+            diagnostics?.selectedStartsAfterContactS = first.t - contactTime
+            diagnostics?.tracksNearContact = tracks.filter {
+                guard let f = $0.first else { return false }
+                return abs(f.t - contactTime) <= 0.15
+            }.count
+            diagnostics?.shortTracksNearContact = tracks.filter {
+                guard let f = $0.first else { return false }
+                return abs(f.t - contactTime) <= 0.15 && $0.count < SLA.minTrackFrames
+            }.count
+        }
 
         guard let track = selected, track.count >= 3 else {
             throw ClipAnalysisError.noBallTrack
