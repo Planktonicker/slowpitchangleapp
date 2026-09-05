@@ -625,21 +625,29 @@ struct CaptureScreen: View {
 
     private func lastSwingCard(_ swing: SwingDTO) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 14) {
-                MetricTile(label: "Launch",
-                           value: String(format: "%.1f", swing.launchAngleDeg), unit: "°")
-                MetricTile(label: "Exit velo",
-                           value: model.settings.speedUnit.format(mph: swing.exitVeloMph),
-                           unit: model.settings.speedUnit.suffix)
-                if let bs = swing.batSpeedMph {
-                    MetricTile(label: "Bat",
-                               value: model.settings.speedUnit.format(mph: bs, decimals: 0),
-                               unit: model.settings.speedUnit.suffix, tint: .white)
+            // The card a hitter reads between swings, and the one place a
+            // wrong number does the most damage — it is glanced at, believed,
+            // and hit on. So it shows nothing rather than something the app
+            // has already concluded was not the ball.
+            if swing.ballIdentified {
+                HStack(alignment: .top, spacing: 14) {
+                    MetricTile(label: "Launch",
+                               value: String(format: "%.1f", swing.launchAngleDeg), unit: "°")
+                    MetricTile(label: "Exit velo",
+                               value: model.settings.speedUnit.format(mph: swing.exitVeloMph),
+                               unit: model.settings.speedUnit.suffix)
+                    if let bs = swing.batSpeedMph {
+                        MetricTile(label: "Bat",
+                                   value: model.settings.speedUnit.format(mph: bs, decimals: 0),
+                                   unit: model.settings.speedUnit.suffix, tint: .white)
+                    }
                 }
+            } else {
+                NoBallNotice(reason: swing.ballNotIdentifiedReason)
             }
             if swing.trackedFrames == 0 {
                 StatChip(text: "No ball track in that clip", color: Theme.warn)
-            } else {
+            } else if swing.ballIdentified {
                 ConfidenceRow(flags: swing.flags, captureFlags: swing.captureFlags)
             }
             if let progress = model.analysisProgress {

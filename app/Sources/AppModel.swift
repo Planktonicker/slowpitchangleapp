@@ -723,7 +723,7 @@ final class AppModel: ObservableObject {
             .compactMap { $0 }.joined(separator: "\n")
     }
 
-    private static let ballNotIdentifiedPrefix = "Ball not identified: "
+    private static let ballNotIdentifiedPrefix = SwingDTO.ballNotIdentifiedPrefix
 
     /// Write the ball track and the pose track beside the clip, and point the
     /// record at them.

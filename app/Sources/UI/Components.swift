@@ -128,6 +128,43 @@ struct CaptureFlagChip: View {
 /// pinned to the Python reference; `captureFlags` describe the conditions the
 /// camera was in. Levelling stopped blocking capture, so the second group is
 /// what keeps an off-level reading honest rather than merely absent.
+/// What stands where a reading would be when the app decided the thing it
+/// tracked was not a ball.
+///
+/// A number is not withheld to be tidy. `TrackPlausibility` answers a
+/// different question from the flags — not "how good is this reading" but "is
+/// this a ball at all" — and when the answer is no there is nothing to
+/// qualify. Printing the figure beside a warning chip still puts it in front
+/// of somebody who will read it, and a list of twenty rows of numbers from
+/// clips where nobody swung reads as twenty measurements.
+///
+/// The numbers are not deleted. They stay under Measurement detail, where
+/// somebody working out WHY the app measured a fence post needs them.
+struct NoBallNotice: View {
+    var reason: String?
+    /// Compact in a list row; full in a detail section.
+    var compact = false
+
+    var body: some View {
+        HStack(alignment: compact ? .center : .top, spacing: 8) {
+            Image(systemName: "eye.slash")
+                .font(.system(size: compact ? 12 : 15, weight: .semibold))
+                .foregroundStyle(Theme.warn)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("No ball identified")
+                    .font(.system(size: compact ? 14 : 16, weight: .bold, design: .rounded))
+                    .foregroundStyle(Theme.warn)
+                if let reason, !compact {
+                    Text(reason)
+                        .font(.caption)
+                        .foregroundStyle(Theme.steel)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+}
+
 struct ConfidenceRow: View {
     var flags: [SwingFlag]
     var captureFlags: [CaptureFlag] = []

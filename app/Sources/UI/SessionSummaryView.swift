@@ -170,10 +170,14 @@ struct SessionSummaryView: View {
     private func row(_ s: SwingDTO, dim: Bool = false) -> some View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(model.settings.speedUnit.format(mph: s.exitVeloMph)) \(model.settings.speedUnit.suffix)   " + String(format: "%+.0f°", s.launchAngleDeg))
-                    .font(.system(size: 17, weight: .bold, design: .rounded))
-                    .foregroundStyle(dim ? Theme.steel : .white)
-                    .monospacedDigit()
+                if s.ballIdentified {
+                    Text("\(model.settings.speedUnit.format(mph: s.exitVeloMph)) \(model.settings.speedUnit.suffix)   " + String(format: "%+.0f°", s.launchAngleDeg))
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundStyle(dim ? Theme.steel : .white)
+                        .monospacedDigit()
+                } else {
+                    NoBallNotice(reason: nil, compact: true)
+                }
                 HStack(spacing: 6) {
                     Text(s.capturedAt.formatted(date: .omitted, time: .standard))
                     if let smash = s.smashFactor {

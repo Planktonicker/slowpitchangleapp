@@ -189,6 +189,33 @@ struct SwingDTO: Identifiable, Codable, Equatable, Sendable {
         flags.isEmpty && captureFlags.allSatisfy { $0 == .notLevel || $0 == .tiltCorrected }
     }
 
+    /// False when the pipeline concluded the track it measured was not a ball.
+    ///
+    /// The distinction `TrackPlausibility` exists to draw, in the words of its
+    /// own comment: flags qualify a MEASUREMENT, and this is the case where
+    /// there is no measurement to qualify. Everything that shows a reading asks
+    /// this first — a launch angle for a patch of grass is not a doubtful
+    /// number, it is not a number, and printing it beside a warning chip still
+    /// puts a figure in front of somebody who will read it.
+    var ballIdentified: Bool { !captureFlags.contains(.ballUnconfirmed) }
+
+    /// Written by `AppModel.confirmBall`, read back by
+    /// `ballNotIdentifiedReason`. One constant, because two copies of a magic
+    /// prefix that must match is a bug waiting for someone to reword one.
+    static let ballNotIdentifiedPrefix = "Ball not identified: "
+
+    /// Why, in the words meant for the person who filmed it. Carried in
+    /// `notes` because that is where `AppModel.confirmBall` writes it.
+    var ballNotIdentifiedReason: String? {
+        guard !ballIdentified else { return nil }
+        let prefix = Self.ballNotIdentifiedPrefix
+        for line in (notes ?? "").split(separator: "\n", omittingEmptySubsequences: true)
+        where line.hasPrefix(prefix) {
+            return String(line.dropFirst(prefix.count))
+        }
+        return "the tracked object does not behave like a struck ball"
+    }
+
     /// G1 counts a clip as tracked at 12+ frames, matching `G1_MIN_FRAMES`.
     var meetsG1: Bool { trackedFrames >= 12 }
 

@@ -361,6 +361,8 @@ struct HistoryView: View {
             if swing.trackedFrames == 0 {
                 Label("no track", systemImage: "eye.slash")
                     .font(.caption).foregroundStyle(.orange)
+            } else if !swing.ballIdentified {
+                NoBallNotice(reason: swing.ballNotIdentifiedReason, compact: true)
             } else {
                 HStack(spacing: 16) {
                     Text(String(format: "%.1f°", swing.launchAngleDeg))

@@ -268,14 +268,25 @@ struct SwingDetailView: View {
 
     private var measured: some View {
         VStack(spacing: 12) {
-            HStack {
-                MetricTile(label: "Launch angle",
-                           value: String(format: "%.1f", swing.launchAngleDeg), unit: "°")
-                MetricTile(label: "Exit velo",
-                           value: model.settings.speedUnit.format(mph: swing.exitVeloMph),
-                           unit: model.settings.speedUnit.suffix)
+            // The numbers are not deleted when the ball was not identified —
+            // they move to Measurement detail, where somebody working out why
+            // the app measured a fence post needs them. What they stop doing
+            // is standing at the top of the screen looking like a reading.
+            if swing.ballIdentified {
+                HStack {
+                    MetricTile(label: "Launch angle",
+                               value: String(format: "%.1f", swing.launchAngleDeg), unit: "°")
+                    MetricTile(label: "Exit velo",
+                               value: model.settings.speedUnit.format(mph: swing.exitVeloMph),
+                               unit: model.settings.speedUnit.suffix)
+                }
+                ConfidenceRow(flags: swing.flags, captureFlags: swing.captureFlags)
+            } else {
+                NoBallNotice(reason: swing.ballNotIdentifiedReason)
+                Text("The numbers this clip produced are under Measurement detail below.")
+                    .font(.caption).foregroundStyle(Theme.steel)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
-            ConfidenceRow(flags: swing.flags, captureFlags: swing.captureFlags)
             if let notes = swing.notes, !notes.isEmpty {
                 Text(notes).font(.caption).foregroundStyle(.orange)
             }
@@ -288,6 +299,20 @@ struct SwingDetailView: View {
     /// entry that gate G3 needs.
     private var measurementDetail: some View {
         VStack(spacing: 14) {
+            // Where the withheld reading lives. The section above promises
+            // these are here; a promise that leads nowhere is worse than not
+            // showing them at all, and the person who opens this disclosure is
+            // exactly the person working out what the app measured instead.
+            if !swing.ballIdentified {
+                VStack(spacing: 8) {
+                    detail("Launch angle (withheld)",
+                           String(format: "%.1f°", swing.launchAngleDeg))
+                    detail("Exit velo (withheld)",
+                           "\(model.settings.speedUnit.format(mph: swing.exitVeloMph)) \(model.settings.speedUnit.suffix)")
+                }
+                ConfidenceRow(flags: swing.flags, captureFlags: swing.captureFlags)
+                Divider()
+            }
             VStack(spacing: 8) {
                 detail("Tracked frames", "\(swing.trackedFrames)")
                 detail("Flight measured", String(format: "%.0f ms", swing.trackDurationS * 1000))
