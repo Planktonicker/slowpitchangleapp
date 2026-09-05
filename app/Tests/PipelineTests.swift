@@ -378,6 +378,40 @@ final class PipelineTests: XCTestCase {
         XCTAssertFalse(LevelSensor.tiltDown(gravityZ: 1.0001).isNaN)
     }
 
+    /// The bug this replaced: in landscape the bubble slammed into one end of
+    /// the beam and stayed there, the opposite end in each landscape, while the
+    /// horizon line said the camera was level. The old code subtracted a
+    /// quarter turn chosen by `switch` on `landscapeLeft` / `landscapeRight`,
+    /// and with that sign inverted a landscape phone reads ±90 − (∓90) = ±180.
+    ///
+    /// Nothing could have caught it here: reading `interfaceOrientation` needs
+    /// a live `UIApplication`. Measuring the deviation from the nearest quarter
+    /// turn is the same quantity with no orientation API in it, so a test can
+    /// hold it — and roll is subtracted from every launch angle, so an
+    /// unpinnable roll is not an acceptable state for this to be in.
+    func testRollIsMeasuredFromTheNearestQuarterTurn() {
+        // Square in every orientation reads zero, including upside-down.
+        for square in [-180.0, -90, 0, 90, 180] {
+            XCTAssertEqual(LevelSensor.rollOffSquare(portraitDeg: square), 0,
+                           accuracy: 1e-9, "\(square)° is square")
+        }
+        // The same 2° error, in each of the four, with the same sign.
+        for square in [-90.0, 0, 90, 180] {
+            XCTAssertEqual(LevelSensor.rollOffSquare(portraitDeg: square + 2), 2,
+                           accuracy: 1e-9, "2° off \(square)°")
+            XCTAssertEqual(LevelSensor.rollOffSquare(portraitDeg: square - 2), -2,
+                           accuracy: 1e-9, "−2° off \(square)°")
+        }
+        // Wrapping: −179 is 1° the other side of upside-down, not 181° off.
+        XCTAssertEqual(LevelSensor.rollOffSquare(portraitDeg: -179), 1,
+                       accuracy: 1e-9)
+        // Never reports more than half a quarter turn, whatever it is handed.
+        for deg in stride(from: -180.0, through: 180.0, by: 0.5) {
+            XCTAssertLessThanOrEqual(abs(LevelSensor.rollOffSquare(portraitDeg: deg)),
+                                     45 + 1e-9, "\(deg)° folded past 45°")
+        }
+    }
+
     /// A short tripod aimed up at contact height is the case the correction
     /// exists for. Aiming up puts everything *lower* in the frame than a level
     /// camera would, so rectifying must lift it back up — and by exactly the

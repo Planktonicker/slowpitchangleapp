@@ -5,7 +5,6 @@
 import Combine
 import CoreMotion
 import Foundation
-import UIKit
 
 /// Bubble level for tripod setup.
 ///
@@ -91,36 +90,7 @@ final class LevelSensor: ObservableObject {
         // Called from more than one screen; starting twice runs two update
         // streams and doubles the publishing load for nothing.
         guard !motion.isDeviceMotionActive else { return }
-        DispatchQueue.main.async {
-            self.isAvailable = true
-            // Without this the notification below is never posted, so the
-            // observer was dead code and the offset kept whatever value it had
-            // at launch. Rotate the phone after starting and roll read a
-            // quarter turn out — and roll is stamped on every swing and taken
-            // back out of the launch angle, so the error was silent rather
-            // than visible. UIKit reference-counts these, so the matching
-            // `endGenerating` in `stop()` is not optional.
-            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-            self.refreshOrientation()
-        }
-        // Rotating the phone is the ONE event that changes the offset, and it
-        // is the event this used to get wrong.
-        orientationObserver = NotificationCenter.default.addObserver(
-            forName: UIDevice.orientationDidChangeNotification,
-            object: nil, queue: .main) { [weak self] _ in
-                // Twice, deliberately. This notification reports the DEVICE
-                // turning, and `refreshOrientation` reads the INTERFACE
-                // orientation, which UIKit may not have updated yet — so the
-                // first read can still return the old value. The second, a
-                // run-loop turn later, is the one that is reliably right.
-                // Reading it twice costs nothing; missing the change puts 90
-                // degrees into a measurement.
-                Task { @MainActor in
-                    self?.refreshOrientation()
-                    await Task.yield()
-                    self?.refreshOrientation()
-                }
-            }
+        DispatchQueue.main.async { self.isAvailable = true }
         motion.deviceMotionUpdateInterval = 1.0 / 30.0
         // Off the main queue: this used to publish 30 times a second onto the
         // main thread, and every one of those invalidated the whole view tree
@@ -132,12 +102,9 @@ final class LevelSensor: ObservableObject {
             // Rotation of gravity within the screen plane, zero when the
             // device is upright in portrait.
             let portraitRoll = atan2(g.x, -g.y) * 180 / .pi
-            let offset = self.orientationOffset()
 
             self.stateLock.lock()
-            // Filming is landscape, so subtract the orientation's own quarter
-            // turn to get the horizon's tilt inside the frame.
-            var roll = portraitRoll - offset - self.rollZero
+            var roll = Self.rollOffSquare(portraitDeg: portraitRoll) - self.rollZero
             while roll > 180 { roll -= 360 }
             while roll < -180 { roll += 360 }
 
@@ -184,17 +151,6 @@ final class LevelSensor: ObservableObject {
 
     func stop() {
         motion.stopDeviceMotionUpdates()
-        // Balanced against the `beginGenerating` in `start()`, and tied to the
-        // observer because that is set in the same breath: both of `start()`'s
-        // early returns bail out before either, so keying off the observer is
-        // what keeps the reference count honest.
-        if let orientationObserver {
-            NotificationCenter.default.removeObserver(orientationObserver)
-            self.orientationObserver = nil
-            DispatchQueue.main.async {
-                UIDevice.current.endGeneratingDeviceOrientationNotifications()
-            }
-        }
         stateLock.lock()
         smoothedRoll = nil
         smoothedTilt = nil
@@ -253,42 +209,35 @@ final class LevelSensor: ObservableObject {
 
     // MARK: - Which way the phone is being held
 
-    /// The quarter turn to take out of the in-frame roll, cached.
+    /// How far the horizon is from square, in degrees, given gravity's angle in
+    /// the screen plane measured from portrait-upright.
     ///
-    /// This used to call `UIApplication.shared.connectedScenes` **from the
-    /// CoreMotion queue**, which is a background thread, and those are
-    /// main-thread-only APIs. Off the main thread the lookup does not throw —
-    /// it returns nothing useful — so the `?? .portrait` fallback fired while
-    /// the phone was in landscape, the 90 degree offset was never subtracted,
-    /// and the spirit level read ninety degrees out for the whole orientation
-    /// the app is actually filmed in.
+    /// **This does not ask the system which way the phone is held, and that is
+    /// the point.** It used to: it read `interfaceOrientation` on the main
+    /// thread, cached it, and subtracted 90 for landscape — with the sign taken
+    /// from the names `landscapeLeft` and `landscapeRight`, which are among the
+    /// most reliably misremembered constants in UIKit and which no test here
+    /// could pin, because reading them needs a live `UIApplication`. Get that
+    /// sign backwards and a landscape phone reads `±90 − (∓90) = ±180`, so the
+    /// bubble slams into one end of the beam and stays there — which is
+    /// precisely what it did, and the wrong way round in each landscape.
     ///
-    /// So the orientation is sampled on the main thread, where it is legal to
-    /// ask, and the motion callback reads the answer behind a lock.
-    private var orientationObserver: NSObjectProtocol?
-    private let orientationLock = NSLock()
-    private var cachedOffset: Double = 0
-
-    private func orientationOffset() -> Double {
-        orientationLock.lock()
-        defer { orientationLock.unlock() }
-        return cachedOffset
-    }
-
-    @MainActor
-    func refreshOrientation() {
-        let orientation = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first?.interfaceOrientation ?? .portrait
-        let offset: Double
-        switch orientation {
-        case .landscapeLeft:       offset = -90
-        case .landscapeRight:      offset = 90
-        case .portraitUpsideDown:  offset = 180
-        default:                   offset = 0
-        }
-        orientationLock.lock()
-        cachedOffset = offset
-        orientationLock.unlock()
+    /// The deviation from the nearest quarter turn is the same quantity with
+    /// nothing to get wrong. A tripod is set square and then adjusted by
+    /// degrees, so the nearest multiple of 90 is the orientation the phone is
+    /// in; what is left over is the error. It is correct upside-down, it is
+    /// correct if the interface is ever locked while the device is not, and it
+    /// is a pure function of one number, so a test can hold it.
+    ///
+    /// It is the right quantity for the measurement too, not just the display:
+    /// `ClipRecorder` writes a display matrix from the same quarter turn, so
+    /// the analyzer's frames arrive already square and only the leftover tilt
+    /// remains to be taken out of the launch angle.
+    ///
+    /// Beyond 45° from square there is no "nearest" worth the name and the
+    /// answer folds — but that is a phone at 45° on a tripod, which is out of
+    /// tolerance by a factor of twenty either way it is read.
+    static func rollOffSquare(portraitDeg: Double) -> Double {
+        portraitDeg - (portraitDeg / 90).rounded() * 90
     }
 }
