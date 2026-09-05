@@ -315,6 +315,41 @@ final class FrameTimingTests: XCTestCase {
         XCTAssertEqual(t.droppedFraction, 0.30, accuracy: 0.02)
     }
 
+    /// The same clip, with its timestamps arriving the way they really do.
+    ///
+    /// The test above builds each interval as `Double(ticks) / 600`, and that
+    /// arithmetic is exact enough that `shortest * 1.5` lands a hair ABOVE the
+    /// 3-tick value and the alternation is kept. Real intervals are
+    /// differences of `CMTime.seconds` — `543/600 - 540/600` — which carry
+    /// rounding of a few parts in 10^16, so the 5th percentile picks a 2-tick
+    /// sample that is a hair SHORT and `shortest * 1.5` then lands just BELOW
+    /// 3 ticks. Every 3-tick interval is discarded, the base period becomes 2
+    /// ticks, and the clip reads 300 fps.
+    ///
+    /// Not a rounding curiosity: the frame rate scales every velocity the app
+    /// reports, so this is a silent 25% error on exit velocity. Found by
+    /// replaying `spike/corpus/` (see `spike/replay_corpus.py`), on four real
+    /// clips at once.
+    func testTimestampRoundingCannotFlipTheBasePeriod() throws {
+        // Cumulative PTS in ticks, alternating 2 and 3 — then differenced in
+        // seconds, exactly as `forEachSampleBuffer` hands them over.
+        var ints: [Double] = []
+        var ticks = 0
+        var previous = 0.0
+        for i in 0..<600 {
+            ticks += (i % 2 == 0) ? 2 : 3
+            let seconds = Double(ticks) / 600
+            ints.append(seconds - previous)
+            previous = seconds
+        }
+        let t = try XCTUnwrap(ClipAnalyzer.frameTiming(fromIntervals: ints))
+        XCTAssertEqual(t.fps, 240, accuracy: 1,
+                       "the alternation must average back to 240, not collapse to 300")
+        XCTAssertLessThan(t.irregularFraction, 0.01)
+        XCTAssertEqual(t.droppedFraction, 0, accuracy: 0.01,
+                       "nothing was dropped — every frame is there")
+    }
+
     /// Variable frame rate has to be visible, not averaged away: every timing
     /// measurement downstream assumes an even interval.
     func testVariableRateIsReportedAsIrregular() throws {

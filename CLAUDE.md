@@ -82,7 +82,21 @@ cd spike
 python synth_test.py           # end-to-end self-test of the measurement core
 python gen_parity_fixtures.py  # after any sla_common.py change
 python audio_lab.py --selftest # trigger-feature tool, proves itself first
+python replay_corpus.py        # re-run selection + publish gates on every saved clip
 ```
+
+**Real footage lives in `spike/corpus/`, and a clip is added once.** A `.mov`
+cannot be committed, but the candidate detections inside one can — all the
+clips so far come to under a megabyte. `spike/corpus/README.md` has the three
+ways in; the phone route is Swings → Select → Share, which produces one JSON
+bundle. Run the harness before and after any change to selection or to the
+publish gates: it is the only thing that will notice a fix for one clip
+breaking another. It found the frame-rate bug in `ClipAnalyzer.frameTiming`
+that this paragraph's neighbours describe, on four clips at once.
+
+Labels, not clips, are the scarce resource. Only the hitter knows whether a
+swing happened, so `label_source` is recorded and printed, and a label of
+`inferred` is exactly as fallible as the pipeline it is being used to test.
 
 ## State of play
 
@@ -106,6 +120,14 @@ Open, in rough priority order:
 2. Pose tracking on real footage is unproven. The diagnostics report per-joint
    confidence, which is the evidence.
 3. Trigger thresholds are per-venue; Settings → Trigger → Calibrate measures one.
+4. **`TrackPlausibility.maxStartAfterContactS` is a dead gate.** It fires when
+   the chosen track starts more than 0.25 s after contact, and it is skipped
+   whenever `SwingFlag.contactTimeRejected` is set — which `analyze_track`
+   sets at 0.06 s. Every track late enough to trip the gate has already
+   disabled it. Six of the eight corpus clips replay with both contact gates
+   skipped. The skip itself is right (an early trigger and a late false
+   positive look identical from the contact time alone), so the fix is not to
+   remove the skip; it needs a signal the contact time does not supply.
 
 ## Gotchas that have already cost time
 

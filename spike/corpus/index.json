@@ -1,0 +1,85 @@
+{
+  "clips": [
+    {
+      "build": "pre-timescale-fix",
+      "contact_time": 1.649281,
+      "fps": 240.0,
+      "id": "live_37",
+      "label": "hit",
+      "label_source": "inferred",
+      "notes": "Hitter: 'the bat is not tracked and the ball is identified wrongly' \u2014 a swing happened, but the hitter never labelled the clip in those words, so this is inferred from the wording. A 32-frame candidate sits at contact. Analysed at 200 fps; the frame timing says 240.",
+      "stamped_fps": 200.0
+    },
+    {
+      "build": "pre-timescale-fix",
+      "contact_time": 1.498717,
+      "fps": 240.0,
+      "id": "live_39",
+      "label": "hit",
+      "label_source": "inferred",
+      "notes": "Flight verified by me from the geometry, NOT by the hitter. Analysed at 200 fps; the frame timing says 240.",
+      "stamped_fps": 200.0
+    },
+    {
+      "build": "pre-timescale-fix",
+      "contact_time": 1.537282,
+      "fps": 240.0,
+      "id": "live_40",
+      "label": "unknown",
+      "label_source": "none",
+      "notes": "The first clip sent; nobody ever said whether a swing happened. Genuinely drops frames \u2014 60 gaps of two periods, 20 of three, and a tail beyond \u2014 on top of the timescale alternation. Analysed at 200 fps; the base period says 240.",
+      "stamped_fps": 200.0
+    },
+    {
+      "build": "pre-timescale-fix",
+      "contact_time": 1.458391,
+      "fps": 240.0,
+      "id": "live_42",
+      "label": "hit",
+      "label_source": "inferred",
+      "notes": "Four-frame flight verified by me from the geometry, NOT by the hitter. This is the clip NEAR_CONTACT_MIN_FRAMES was relaxed to four for. Analysed at 200 fps; the frame timing says 240.",
+      "stamped_fps": 200.0
+    },
+    {
+      "build": "post-timescale-fix",
+      "contact_time": 1.581249,
+      "fps": 239.98,
+      "id": "live_48",
+      "label": "no_swing",
+      "label_source": "hitter",
+      "notes": "Hitter: 'Swing 2. Session, false positive 6m away.' Published 198.2 mph off four points that accelerate 3.3x and fit a parabola perfectly \u2014 the clip maxExitVeloMph and maxShortTrackSpeedGrowth exist for.",
+      "stamped_fps": 239.9807
+    },
+    {
+      "build": "post-timescale-fix",
+      "contact_time": 1.560267,
+      "fps": 239.98,
+      "id": "live_49",
+      "label": "no_swing",
+      "label_source": "hitter",
+      "notes": "Hitter: 'Swing 1. Session, false positive, 6m away.' Published 10.1 deg at 4.8 mph from a blob drifting at 0.075 diameters a frame \u2014 the clip minDiametersPerFrame exists for.",
+      "stamped_fps": 239.9783
+    },
+    {
+      "build": "post-timescale-fix",
+      "contact_time": 1.459324,
+      "fps": 239.98,
+      "id": "live_53",
+      "label": "no_swing",
+      "label_source": "hitter",
+      "notes": "Hitter: 'Swing 4 session false positive 6m away.'",
+      "stamped_fps": 239.9799
+    },
+    {
+      "build": "",
+      "contact_time": null,
+      "fps": 239.95852568691808,
+      "id": "live_61",
+      "label": "no_swing",
+      "label_source": "hitter",
+      "notes": "Hitter: 'Swing 3 session false positive 6m away. This one did not even calculate.' Recorded with the Camera app. Detected here by the Python reference detector, not on the phone \u2014 no on-device trace was ever exported. Drops roughly a quarter of its frames. Replayed WITHOUT a contact time, because none was ever recorded for it \u2014 so this row exercises the imported-clip path, where there is no audio trigger, and not the path the phone took when it declined to calculate."
+    }
+  ],
+  "count": 8,
+  "swinglab_corpus": 1
+}

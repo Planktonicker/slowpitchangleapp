@@ -899,6 +899,26 @@ enum ClipAnalyzer {
         return frameTiming(fromIntervals: intervals)
     }
 
+    /// How much longer than the shortest interval an interval may be and
+    /// still count as ONE frame period rather than a gap.
+    ///
+    /// It has to clear the 2-vs-3-tick alternation a timescale-600 container
+    /// writes for 240 fps — a ratio of exactly 1.5 — and stay under a genuine
+    /// dropped frame, which is 2.0 at best and 2.5 on the same alternating
+    /// clip. 1.5 was the first choice and it sat exactly ON the alternation:
+    /// whether a 3-tick interval counted depended on whether `shortest * 1.5`
+    /// landed a few parts in 10^16 above or below it, which in turn depended
+    /// on which noisy 2-tick sample the 5th percentile happened to pick.
+    ///
+    /// Real timestamps are noisy in precisely that range, because they arrive
+    /// as differences of `CMTime.seconds`, and the failure is silent and total:
+    /// every 3-tick interval is dropped, the base period becomes 2 ticks, and
+    /// the clip reads 300 fps instead of 240. Replaying the corpus found this
+    /// on four clips at once (`spike/replay_corpus.py`); the existing test
+    /// could not, because it built its intervals from exact `ticks / 600`
+    /// arithmetic, where the comparison lands on the safe side of the hair.
+    static let singleIntervalTolerance = 1.75
+
     /// The arithmetic, split out from the reading so it can be tested without
     /// a video file.
     ///
@@ -928,7 +948,7 @@ enum ClipAnalyzer {
         // frames onto the same tick — cannot set the scale for the whole clip.
         let shortest = sorted[max(0, sorted.count / 20)]
         guard shortest > 0 else { return nil }
-        let singles = sorted.filter { $0 <= shortest * 1.5 }
+        let singles = sorted.filter { $0 <= shortest * singleIntervalTolerance }
         guard !singles.isEmpty else { return nil }
         let base = singles.reduce(0, +) / Double(singles.count)
         guard base > 0, base.isFinite else { return nil }
