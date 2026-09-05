@@ -154,6 +154,36 @@ final class TrackPlausibilityTests: XCTestCase {
         XCTAssertTrue(why?.contains("mph") == true, why ?? "nil")
     }
 
+    /// The regression this nearly shipped: an EARLY trigger is the most
+    /// common fault the app has — three of the first four clips examined had
+    /// one — and the analyzer already handles it by disowning the audio
+    /// instant and re-deriving contact from the first frame of the flight.
+    /// `ClipAnalysis` still reports the original audio time, so a lateness
+    /// test against it would reject the real ball for arriving late relative
+    /// to a moment nothing believes any more.
+    func testContactGatesAreSkippedWhenTheTriggerIsKnownToBeWrong() {
+        // A real flight, half a second after a trigger that fired early.
+        let contact = realFlight[0].t - 0.5
+        XCTAssertNotNil(TrackPlausibility.rejection(track: realFlight, launchAngleDeg: -0.3,
+                                                    flags: [], fps: 240,
+                                                    contactTime: contact),
+                        "without the flag, lateness rejects it")
+        XCTAssertNil(TrackPlausibility.rejection(track: realFlight, launchAngleDeg: -0.3,
+                                                 flags: [.contactTimeRejected], fps: 240,
+                                                 contactTime: contact),
+                     "with the flag, the contact time is disowned and must not be judged against")
+    }
+
+    /// live_48 keeps being caught: its flags do NOT include
+    /// contactTimeRejected, so the pre-contact gate still applies to it.
+    func testThePreContactGateStillCatchesLive48() {
+        let why = TrackPlausibility.rejection(track: preContactFragment,
+                                              launchAngleDeg: 22.1,
+                                              flags: [.shortTrack, .depthMotion],
+                                              fps: 240, contactTime: 1.581249)
+        XCTAssertNotNil(why)
+    }
+
     /// An import has no audio trigger, so there is no instant to be late
     /// relative to and the lateness test must not fire on one.
     func testLatenessIsSkippedWhenContactIsUnknown() {

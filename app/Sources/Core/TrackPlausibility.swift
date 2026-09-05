@@ -121,7 +121,21 @@ enum TrackPlausibility {
            perFrame < minDiametersPerFrame {
             return String(format: "the tracked object moved %.2f of its own width per frame; a struck ball moves about two, so this is something drifting in the scene", perFrame)
         }
-        if let contactTime, first.t - contactTime > maxStartAfterContactS {
+        // Both contact-relative tests are skipped when the analyzer has
+        // already said the contact time is wrong.
+        //
+        // `SwingFlag.contactTimeRejected` means the trigger fired far enough
+        // before the flight that `analyze` threw the audio instant away and
+        // re-derived contact from the first frame it saw. `ClipAnalysis` still
+        // carries the ORIGINAL audio time, so judging lateness against it
+        // would reject the real ball for arriving late relative to a moment
+        // the analyzer had already disowned — and an early trigger is the
+        // single most common fault this app has: three of the first four
+        // clips looked at had one. A gate that fires hardest on the case the
+        // pipeline is already handling is a gate that hides real swings.
+        let contactIsTrustworthy = !flags.contains(.contactTimeRejected)
+        if contactIsTrustworthy, let contactTime,
+           first.t - contactTime > maxStartAfterContactS {
             return String(format: "it was first seen %.2f s after contact — a hit ball is at the bat when the bat meets it, so this is something else that moved later in the clip", first.t - contactTime)
         }
         // The other half of the same idea, and the one that caught `live_48`:
@@ -129,7 +143,7 @@ enum TrackPlausibility {
         // contact happens. A struck ball's flight is after contact by
         // definition — there is no such thing as a hit that finished before
         // the bat arrived. The whole track sat 39 ms to 2 ms BEFORE it.
-        if let contactTime, last.t < contactTime {
+        if contactIsTrustworthy, let contactTime, last.t < contactTime {
             return String(format: "the whole path was over %.0f ms before contact — a struck ball's flight begins when the bat meets it, so this is something that crossed beforehand", (contactTime - last.t) * 1000)
         }
         if exitVeloMph > maxExitVeloMph {

@@ -1050,8 +1050,16 @@ final class AppModel: ObservableObject {
             dto = SwingDTO(analysis: analysis, setting: setting,
                            clipFilename: clipName, autoTriggered: autoTriggered)
             confirmBall(analysis, into: &dto)
+            // Into the report as well as onto the record. The report is what
+            // gets read when a reading looks wrong, and "no ball identified"
+            // with no reason in the evidence file is the same dead end as a
+            // number with no flag. It also means a withheld REAL swing says
+            // which gate withheld it, which is the only way to find out that
+            // one of them is too strict.
+            let withheld = dto.ballIdentified ? nil : dto.ballNotIdentifiedReason
+            let fullReport = withheld.map { "\(report ?? "")\nwithheld   \($0)" } ?? report
             writeTracks(for: analysis, clipName: clipName, setting: setting,
-                        into: &dto, report: report)
+                        into: &dto, report: fullReport)
         } else {
             // A clip where tracking failed still counts — it is a G1 miss, and
             // dropping it would flatter the trackability number.
