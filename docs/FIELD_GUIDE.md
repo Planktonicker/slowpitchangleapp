@@ -344,6 +344,33 @@ with what you saw.
 
 ## What to send Claude, and when
 
+**The one that matters most, and it is one file for a whole session:**
+
+> Swings → **Select** → tick every swing from the session → the **share icon**
+> (top right, the box with the arrow out of it) → AirDrop, Files or Mail.
+
+That writes a single `diagnostics_<n>swings_<date>.json` carrying, for every
+swing you ticked: the report, the ball track, the flags, the camera angles and
+the detector's own trace. It is tens of kilobytes. It replaces sending clips
+one at a time, and — this is the point — it goes into `spike/corpus/`, where
+it stays. Clips sent as `.mov` attachments are looked at once and gone; a
+bundle in the corpus is replayed against every future change to the pipeline,
+forever, in a second.
+
+**Say what actually happened, per swing.** A clip nobody has labelled can show
+that behaviour changed between two builds; it can never say which build was
+right, and only you know. Two words each is enough:
+
+> `live_48 no swing · live_49 no swing · live_51 hit, grounder to the left ·
+>  live_52 hit, line drive`
+
+Right now the corpus holds four sessions' worth of confirmed **no-swings** and
+not one confirmed **hit**. Everything the pipeline has learned lately is a way
+of saying "no", checked only against clips whose answer is "no". **A handful of
+swings you can vouch for as real hits is worth more than another twenty clips.**
+
+Everything else, unchanged:
+
 | Situation | Send |
 |---|---|
 | Import failed or succeeded (Part C) | The copied diagnostics report — every time |
@@ -351,5 +378,14 @@ with what you saw.
 | Tap-to-measure keeps failing (B2) | Screenshot of the card incl. the grey line |
 | Capture behaves oddly | Screenshot of the Status sheet |
 | Numbers look wrong | Screenshot of the swing card + the CSV row |
+| A clip the trigger missed entirely | The `.mov` — nothing on the phone recorded it, so the bundle has nothing to carry |
 
 One change at a time. Reports over guesses, every time.
+
+### One caveat about the bundle
+
+To keep it small the phone trims each trace to the candidates within **±0.5 s
+of contact**. That is the part any question about the ball is actually about,
+and it is enough for almost everything. It is not enough when the question is
+"what else was moving elsewhere in the clip" — for that, send the `.mov` too
+and it gets re-detected in full.
