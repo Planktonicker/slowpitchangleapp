@@ -246,7 +246,9 @@ final class ContactTrigger {
                 TriggerBiquad(highPassHz: SLA.triggerHighPassHz, sampleRate: sampleRate)
             }
         }
-        for var sample in samples {
+        carry.reserveCapacity(carry.count + samples.count)
+        for raw in samples {
+            var sample = raw
             for i in sections.indices { sample = sections[i].process(sample) }
             carry.append(sample)
         }
