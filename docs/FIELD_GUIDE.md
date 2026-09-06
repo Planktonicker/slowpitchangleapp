@@ -147,6 +147,24 @@ report or Claude said to change.** The report exists so nobody has to guess.
 
 ## Part D — Calibrate the trigger at each venue (2 min, once per venue)
 
+> ### ⚠️ Recalibrate before your next session — the old number is meaningless
+>
+> The trigger now listens **only above 6 kHz**, because bat-on-ball is a sharp
+> broadband crack while the things that were fooling it — a bat on the ground, a
+> bag dropped, a foot on a board — are all low. Measured on your own clips: the
+> hits carry 11–14% of their energy above 4 kHz, and three of the four false
+> positives you labelled carry **0.0%**.
+>
+> Every dB the app quotes is now measured in that band, so it is a different
+> scale. The same real hit that read 27 dB now reads 50. **A threshold
+> calibrated before this build will be far too low and will fire on
+> everything.** Run Calibrate at the venue before you arm for real.
+>
+> Why it was worth it: on your footage the trigger's separation between a hit
+> and a non-hit went from **−2.4 dB (unusable — the noise was louder than the
+> ball) to +20.3 dB (good)**. No threshold could have fixed that, and neither
+> could any change to the noise floor; I tried every version of it.
+
 The default (15 dB) is a test gate, not a good threshold — too high for a quiet
 garden, too low for a cage.
 

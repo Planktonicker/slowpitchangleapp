@@ -166,13 +166,13 @@ final class ContactTriggerTests: XCTestCase {
                 for i in Int(0.30 * sr)..<Int(1.50 * sr) { x[i] += next() * 3e-2 }
             }
             let i = Int(1.20 * sr)
-            for k in 0..<Int(0.001 * sr) { x[i + k] += 3e-2 }
+            for k in 0..<Int(0.001 * sr) { x[i + k] += 0.5 }
             return x
         }
 
         let quiet = armed().process(samples: clip(withChatter: false),
                                     sampleRate: sr, startSeconds: 0)
-        XCTAssertEqual(quiet.count, 1, "over a quiet field this impulse is 27 dB over the floor")
+        XCTAssertEqual(quiet.count, 1, "over a quiet field this impulse is 35 dB over the floor")
         XCTAssertEqual(quiet.first?.0 ?? 0, 1.20, accuracy: 0.02)
 
         // The whole field report, in one assertion. The chatter's ONSET fires,
@@ -188,6 +188,51 @@ final class ContactTriggerTests: XCTestCase {
                        "the only thing heard is the chatter starting")
         XCTAssertFalse(noisy.contains { abs($0.0 - 1.20) < 0.05 },
                        "the impulse inside the chatter is measured against the chatter")
+    }
+
+    // MARK: - The band, which is what actually separates a hit
+
+    /// The change that made the trigger usable at a real venue, as a test.
+    ///
+    /// Level alone does not separate a bat crack from what fools the trigger —
+    /// measured on `spike/corpus/`, the loudest thing in a clip the hitter says
+    /// had no swing in it is LOUDER than the quietest verified hit. What
+    /// separates them is where the energy sits: a crack carries 11-14% of its
+    /// energy above 4 kHz, and the things that fool it carry 0.0-0.2%.
+    ///
+    /// So: a 500 Hz thump at half full scale — a bat on the ground, a bag
+    /// dropped, a foot on a board — against a broadband click of exactly the
+    /// same peak amplitude. The old trigger heard the thump at 51 dB over its
+    /// floor and could not tell the two apart at all.
+    func testALoudLowThumpIsIgnoredButAClickOfTheSameSizeIsNot() {
+        func tone(_ hz: Double) -> [Double] {
+            var x = room(seconds: 1.2)
+            let i = Int(0.6 * sr), n = Int(0.010 * sr)
+            for k in 0..<n {
+                // Hann-windowed, so the burst's own edges are not a click.
+                let w = 0.5 - 0.5 * cos(2 * Double.pi * Double(k) / Double(n - 1))
+                x[i + k] += 0.5 * sin(2 * Double.pi * hz * Double(k) / sr) * w
+            }
+            return x
+        }
+        for hz in [250.0, 500.0, 1000.0] {
+            XCTAssertTrue(armed().process(samples: tone(hz), sampleRate: sr,
+                                          startSeconds: 0).isEmpty,
+                          "\(Int(hz)) Hz at half full scale is not a bat on a ball")
+        }
+        XCTAssertEqual(armed().process(samples: room(seconds: 1.2, impulsesAt: [0.6]),
+                                       sampleRate: sr, startSeconds: 0).count, 1,
+                       "the same peak amplitude, broadband, is")
+    }
+
+    /// The filter is built as `order / 2` cascaded biquads, so an odd order
+    /// would silently round down and halve the roll-off. Not hypothetical:
+    /// 12 dB/octave was tried, and it let a loud 500 Hz transient leak into the
+    /// near-silent high band and read as 33 dB over the floor there.
+    func testTheFilterOrderIsEvenSoNoSectionIsSilentlyDropped() {
+        XCTAssertEqual(SLA.triggerHighPassOrder % 2, 0)
+        XCTAssertGreaterThanOrEqual(SLA.triggerHighPassOrder, 4,
+                                    "12 dB/octave was measured to be not enough")
     }
 
     // MARK: - Robustness

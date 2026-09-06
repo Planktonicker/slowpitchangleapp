@@ -96,26 +96,38 @@ def load_audio(path: str) -> tuple[np.ndarray, int]:
     return d, sr
 
 
-def highpass(x: np.ndarray, sr: float, fc: float) -> np.ndarray:
-    """Second-order Butterworth high-pass, written out as a biquad.
+def highpass(x: np.ndarray, sr: float, fc: float, order: int | None = None) -> np.ndarray:
+    """Butterworth high-pass as cascaded second-order sections.
 
-    Deliberately a biquad and not a library call: the Swift has to run the SAME
-    filter sample-for-sample or this tool stops predicting the phone, and a
-    biquad is ten lines with no dependency. Direct form I, Q = 1/sqrt(2).
+    Deliberately written out and not a library call: the Swift (`TriggerBiquad`)
+    has to run the SAME filter sample-for-sample or this tool stops predicting
+    the phone, and a biquad is ten lines with no dependency. Direct form I,
+    Q = 1/sqrt(2) per section.
+
+    The order matters as much as the cutoff. At 12 dB/octave a loud 500 Hz
+    transient leaks enough into a near-silent high band to read 33 dB over the
+    floor THERE — a ratio against almost nothing rather than a signal — and
+    `live_48` is exactly that event. 24 dB/octave puts it at 30 while lifting a
+    real crack from 45 to 50.
     """
+    if order is None:
+        order = int(swift_constant(CONSTANTS_SWIFT, "triggerHighPassOrder", 4))
     w0 = 2 * math.pi * fc / sr
     c, s = math.cos(w0), math.sin(w0)
     alpha = s / (2 * (1 / math.sqrt(2)))
     b0, b1, b2 = (1 + c) / 2, -(1 + c), (1 + c) / 2
     a0, a1, a2 = 1 + alpha, -2 * c, 1 - alpha
     b0, b1, b2, a1, a2 = b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0
-    y = np.empty_like(x)
-    x1 = x2 = y1 = y2 = 0.0
-    for i, xn in enumerate(x):
-        yn = b0 * xn + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
-        y[i] = yn
-        x2, x1 = x1, xn
-        y2, y1 = y1, yn
+    y = np.asarray(x, dtype=np.float64)
+    for _ in range(max(1, order // 2)):
+        out = np.empty_like(y)
+        x1 = x2 = y1 = y2 = 0.0
+        for i, xn in enumerate(y):
+            yn = b0 * xn + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+            out[i] = yn
+            x2, x1 = x1, xn
+            y2, y1 = y1, yn
+        y = out
     return y
 
 
@@ -195,6 +207,10 @@ def audio_path(clip_id: str) -> str | None:
 # clip.
 FIRE_TOLERANCE_S = 0.040
 
+# How much of each clip's tail to ignore. `live_61` was truncated mid-write, and
+# the cut itself is the brightest transient in the file.
+CLIP_EDGE_S = 0.06
+
 # How far below the clip's loudest moment the stored contact time may sit and
 # still be believed to BE the hit. Beyond it the trigger fired on something
 # else, and the clip is excluded from the separation rather than counted as a
@@ -203,7 +219,7 @@ CONTACT_MUST_BE_LOUDEST_WITHIN_DB = 10.0
 
 
 def hit_and_noise(index: dict, band: float | None, floor_span: float,
-                  quantile: float, edge_s: float = 0.06):
+                  quantile: float, edge_s: float = CLIP_EDGE_S):
     """Loudest hit and loudest non-hit across the corpus, in dB over the floor.
 
     Positives are the bat crack in clips whose ball flight was verified, taken
@@ -327,7 +343,8 @@ def main() -> int:
     ap.add_argument("--sweep", action="store_true",
                     help="separation against the band listened in")
     ap.add_argument("--band", type=float, default=None,
-                    help="high-pass cutoff in Hz applied before the RMS")
+                    help="high-pass cutoff in Hz (default: SLA.triggerHighPassHz; "
+                         "pass 0 for the broadband signal the app used to measure)")
     ap.add_argument("--threshold", type=float, default=None,
                     help="dB over the floor (default: SLA.triggerDb)")
     ap.add_argument("--floor-span", type=float, default=FLOOR_WINDOW_S)
@@ -338,7 +355,14 @@ def main() -> int:
         return selftest()
 
     threshold = args.threshold if args.threshold is not None else \
-        swift_constant(CONSTANTS_SWIFT, "triggerDb", 20.0)
+        swift_constant(CONSTANTS_SWIFT, "triggerDb", 30.0)
+    attempt = swift_constant(TRIGGER_SWIFT, "attemptRefractoryS", 0.25)
+    band = args.band
+    if band is None:
+        band = swift_constant(CONSTANTS_SWIFT, "triggerHighPassHz", 6000.0)
+    if band <= 0:
+        band = None
+    args.band = band
     refractory = 2.0
     index = load_index()
 
@@ -387,13 +411,22 @@ def main() -> int:
             continue
         d, sr = load_audio(p)
         fires, db, t, _ = simulate(d, sr, threshold, refractory,
-                                   args.floor_span, args.quantile, args.band)
+                                   args.floor_span, args.quantile, args.band,
+                                   attempt_refractory_s=attempt)
+        # Drop the last moments, as the sweep does. `live_61` was truncated
+        # mid-write by a bug since fixed, and an abrupt cut is a broadband click
+        # — the brightest thing in the file, and not a sound anything made.
+        end = len(d) / sr - CLIP_EDGE_S
+        clipped = [f for f in fires if f[0] > end]
+        fires = [f for f in fires if f[0] <= end]
         shown = "  ".join(f"{a:.3f}s@{b:.1f}" for a, b in fires) or "— nothing fires"
         mark = ""
         if c["label"] == "no_swing" and fires:
             mark = "   <- FALSE POSITIVE"
         elif c["label"] == "hit" and not fires:
             mark = "   <- FALSE NEGATIVE"
+        if clipped:
+            shown += f"   (+{len(clipped)} in the truncated tail, ignored)"
         print(f"{c['id']:9} {c['label']:9} {c.get('label_source','none'):8} {shown}{mark}")
     print("\nA clip only exists because the trigger fired, so this cannot see the\n"
           "swings it missed. That is the one thing this corpus structurally cannot\n"

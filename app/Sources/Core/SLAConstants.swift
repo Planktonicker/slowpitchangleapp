@@ -315,26 +315,75 @@ enum SLA {
     /// The pre-roll ring is sized to this, so the setting can be raised
     /// mid-session without tearing down a running capture.
     static let maxPreRollS = 3.0
-    /// Contact impulse must stand this far above the rolling noise floor.
+    /// Contact impulse must stand this far above the rolling noise floor,
+    /// **measured in the band `triggerHighPassHz` defines** — read that one
+    /// first, because it is what makes this number mean something different
+    /// from what it used to.
     ///
-    /// NOT `PASS_DB` any more, and the split is the point. 15 dB is the G5
-    /// validation GATE — the number that decides whether a venue's contact is
-    /// loud enough for an auto-trigger to be possible at all — and
-    /// `check_audio_trigger.py` still measures against it. `sla_common.py` has
-    /// said all along that "15 is a gate, not a good working threshold", and
-    /// the app used it as one anyway because they were the same constant.
+    /// NOT `PASS_DB`, and the split is the point. 15 dB is the G5 validation
+    /// GATE — whether a venue's contact is loud enough for an auto-trigger to
+    /// be possible at all — and `check_audio_trigger.py` still measures against
+    /// it. `sla_common.py` has said all along that "15 is a gate, not a good
+    /// working threshold", and the app used it as one anyway.
     ///
-    /// Measured on IMG_6703: a 17.1 dB noise fires the trigger half a second
-    /// before contact, the two-second refractory then covers the real 37.0 dB
-    /// bat crack, and the clip is written with a contact time half a second
-    /// early. At 18 dB or above the trigger fires on the crack and on nothing
-    /// else, on both field clips. 20 leaves margin on the wrong side of that
-    /// boundary rather than sitting on it.
+    /// Raised from 20 when the trigger moved into the high band, because every
+    /// level in that band is different: on the corpus the same real hits went
+    /// from 27 dB to 50, and the loudest non-swing from 30 to 30. 20 there
+    /// would fire on everything.
+    ///
+    /// 30 rather than the 37 the venue measurement asks for, deliberately, and
+    /// the asymmetry is the reason: **a missed measurement is recoverable and a
+    /// missed swing is not.** At 30 all three of the corpus's low-frequency
+    /// false positives stop firing and both verified hits clear it by 20 dB;
+    /// the fourth false positive sits right on it. Erring low buys a clip that
+    /// can be deleted, and erring high loses a swing that cannot be got back.
+    ///
+    /// It is also only a starting point, and more so than before: the corpus
+    /// audio is AAC out of a `.mov`, which discards high frequencies, while the
+    /// live trigger sees raw PCM. The direction of that bias is known (a real
+    /// crack has MORE up there than was measured) but its size is not, so the
+    /// absolute number here should be trusted less than the separation it was
+    /// derived from. Settings → Trigger → Calibrate measures the venue in the
+    /// units the trigger actually uses, and after this change it is not
+    /// optional — a threshold calibrated against the broadband signal means
+    /// nothing here.
     ///
     /// Still a default, not an answer: the right threshold is per venue, and
     /// Settings → Trigger → Calibrate measures one. A quiet garden needs less
     /// than this, a cage needs more.
-    static let triggerDb = 20.0
+    static let triggerDb = 30.0
+
+    /// The band the contact trigger listens in, and how steeply everything
+    /// below it is discarded.
+    ///
+    /// **Level alone does not separate a hit from what fools the trigger, and
+    /// this was measured rather than argued.** `spike/replay_trigger.py --sweep`
+    /// runs the app's own trigger over the real audio in `spike/corpus/`: on the
+    /// broadband signal the loudest thing in a clip the hitter says had NO swing
+    /// in it reaches 29.6 dB over the floor, and the quietest verified hit
+    /// reaches 27.2. The noise is louder than the ball. `suggest_trigger_db`
+    /// calls that venue **unusable**, which is exactly right — no threshold can
+    /// separate two overlapping distributions, so no amount of tuning one, or of
+    /// redefining the floor underneath it, can help. Every floor span from 0.5 s
+    /// to 5 s and every quantile from the 10th to the median was tried; all of
+    /// them land within 3 dB either way.
+    ///
+    /// What separates them is WHERE the energy is. Bat on ball is a sharp
+    /// broadband transient carrying 11-14% of its energy above 4 kHz. The things
+    /// that fool the trigger at this venue carry 0.0-0.2% up there: measured per
+    /// octave, `live_49` puts 99% of its energy below 250 Hz and `live_53` puts
+    /// 98% below 500 Hz. Filtering to the high band moves the same venue from
+    /// **unusable at -2.4 dB of separation to good at +20.3**, and the pinned
+    /// `suggestTriggerDb` then offers it a threshold of 37 dB.
+    ///
+    /// Fourth order, not second, and that distinction was itself a measurement.
+    /// At 12 dB/octave a loud 500 Hz transient leaks enough into a near-silent
+    /// high band to read as 33 dB over the floor there — a ratio against almost
+    /// nothing, not a signal. 24 dB/octave puts the same event at 30 while
+    /// lifting a real crack to 50.
+    static let triggerHighPassHz = 6000.0
+    /// Cascaded second-order sections, so this must be even.
+    static let triggerHighPassOrder = 4
     /// How much louder than the triggering impulse something has to be, inside
     /// the same clip, before the trigger is judged to have heard the wrong
     /// thing.

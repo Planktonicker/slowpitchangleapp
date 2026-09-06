@@ -13,6 +13,40 @@ import Foundation
 /// impulse has to stand `SLA.triggerDb` above that floor. Running the same
 /// test the Python does means a venue that passes G5 on the Mac will trigger
 /// here.
+/// One second-order section of the trigger's high-pass, carrying its own
+/// memory across buffers.
+///
+/// Written out rather than taken from Accelerate for one reason: this filter
+/// has to run sample-for-sample identically in `spike/check_audio_trigger.py`,
+/// or the G5 gate on the Mac stops predicting what the phone will do. A
+/// Butterworth biquad in direct form I is ten lines in either language.
+struct TriggerBiquad {
+    private let b0, b1, b2, a1, a2: Double
+    private var x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0
+
+    /// Second-order Butterworth high-pass, Q = 1/sqrt(2).
+    init(highPassHz fc: Double, sampleRate: Double) {
+        let w0 = 2 * Double.pi * fc / sampleRate
+        let c = cos(w0), sn = sin(w0)
+        let alpha = sn / (2 * (1 / 2.0.squareRoot()))
+        let a0 = 1 + alpha
+        b0 = ((1 + c) / 2) / a0
+        b1 = (-(1 + c)) / a0
+        b2 = ((1 + c) / 2) / a0
+        a1 = (-2 * c) / a0
+        a2 = (1 - alpha) / a0
+    }
+
+    mutating func process(_ x: Double) -> Double {
+        let y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+        x2 = x1; x1 = x
+        y2 = y1; y1 = y
+        return y
+    }
+
+    mutating func clear() { x1 = 0; x2 = 0; y1 = 0; y2 = 0 }
+}
+
 final class ContactTrigger {
 
     /// Fired with the presentation time of the impulse and how far it stood
@@ -106,6 +140,11 @@ final class ContactTrigger {
 
     private let rmsWindowS = 0.005      // 5 ms
     private let floorWindowS = 0.5      // rolling median span
+
+    /// The high-pass, as cascaded second-order sections, and the rate they were
+    /// designed for. Rebuilt if the capture format ever changes mid-run.
+    private var sections: [TriggerBiquad] = []
+    private var sectionsSampleRate: Double = 0
     private var floorHistory: [Double] = []
     private var maxFloorSamples: Int { max(8, Int(floorWindowS / rmsWindowS)) }
     /// Anchor for the full refractory. Written only by `confirmFire`.
@@ -129,6 +168,7 @@ final class ContactTrigger {
         lock.lock()
         floorHistory.removeAll()
         carry.removeAll()
+        for i in sections.indices { sections[i].clear() }
         lastFireTime = -.infinity
         lastAttemptTime = -.infinity
         _peakSinceArm = -.infinity
@@ -192,12 +232,24 @@ final class ContactTrigger {
     func process(samples: [Double], sampleRate: Double,
                  startSeconds: Double) -> [(Double, Double)] {
         guard sampleRate > 0 else { return [] }
-        let mono = samples
         let windowLength = max(1, Int(rmsWindowS * sampleRate))
         var fires: [(Double, Double)] = []
 
         lock.lock()
-        carry.append(contentsOf: mono)
+        // Everything below measures the HIGH BAND, not the whole signal. See
+        // `SLA.triggerHighPassHz` for the measurement that put it there. The
+        // filter runs before the carry, so its memory is simply the stream's,
+        // and it is cleared by `resetForRound` along with everything else.
+        if sectionsSampleRate != sampleRate {
+            sectionsSampleRate = sampleRate
+            sections = (0..<(SLA.triggerHighPassOrder / 2)).map { _ in
+                TriggerBiquad(highPassHz: SLA.triggerHighPassHz, sampleRate: sampleRate)
+            }
+        }
+        for var sample in samples {
+            for i in sections.indices { sample = sections[i].process(sample) }
+            carry.append(sample)
+        }
         var offset = 0
         while carry.count - offset >= windowLength {
             var sumSq = 0.0

@@ -140,6 +140,24 @@ Open, in rough priority order:
 
 ## Gotchas that have already cost time
 
+- **Audio LEVEL is not a discriminator, in the same way ball colour is not.**
+  Measured on `spike/corpus/` with the app's own trigger: the loudest thing in a
+  clip the hitter says had no swing in it reached 29.6 dB over the rolling floor
+  and the quietest verified hit reached 27.2 — the noise is louder than the
+  ball, and `suggest_trigger_db` calls that venue unusable. No threshold splits
+  two overlapping distributions, and neither does redefining the floor beneath
+  them: every span from 0.5 s to 5 s and every quantile from the 10th to the
+  median lands within 3 dB. What separates them is the BAND. A crack carries
+  11–14% of its energy above 4 kHz; the things that fool it carry 0.0–0.2%.
+  Hence `SLA.triggerHighPassHz`, and hence why the trigger's dB are not
+  comparable with any number measured before it — including a calibrated
+  threshold, which must be re-measured.
+- **A ratio against near-silence is not a signal.** The first version of that
+  filter was second order, and 12 dB/octave let a loud 500 Hz transient leak
+  into a high band containing almost nothing, where it read 33 dB over "the
+  floor". Fourth order puts the same event at 30 while lifting a real crack to
+  50. Whenever a measurement is a ratio, check what the denominator is doing.
+
 - **The batter outline cannot tell you where the phone is.** It constrains two
   things — how tall the hitter is in frame and where their feet land — against
   three unknowns: distance, tilt and lens height. Distance sets the size, tilt
