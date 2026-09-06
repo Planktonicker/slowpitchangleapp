@@ -1,6 +1,7 @@
 {
   "clips": [
     {
+      "audio": "live_37.audio.flac",
       "build": "pre-timescale-fix",
       "contact_time": 1.649281,
       "fps": 240.0,
@@ -11,6 +12,7 @@
       "stamped_fps": 200.0
     },
     {
+      "audio": "live_39.audio.flac",
       "build": "pre-timescale-fix",
       "contact_time": 1.498717,
       "fps": 240.0,
@@ -21,6 +23,7 @@
       "stamped_fps": 200.0
     },
     {
+      "audio": "live_40.audio.flac",
       "build": "pre-timescale-fix",
       "contact_time": 1.537282,
       "fps": 240.0,
@@ -31,6 +34,7 @@
       "stamped_fps": 200.0
     },
     {
+      "audio": "live_42.audio.flac",
       "build": "pre-timescale-fix",
       "contact_time": 1.458391,
       "fps": 240.0,
@@ -41,16 +45,18 @@
       "stamped_fps": 200.0
     },
     {
+      "audio": "live_48.audio.flac",
       "build": "post-timescale-fix",
       "contact_time": 1.581249,
       "fps": 239.98,
       "id": "live_48",
       "label": "no_swing",
       "label_source": "hitter",
-      "notes": "Hitter: 'Swing 2. Session, false positive 6m away.' Published 198.2 mph off four points that accelerate 3.3x and fit a parabola perfectly \u2014 the clip maxExitVeloMph and maxShortTrackSpeedGrowth exist for.",
+      "notes": "Hitter: 'Swing 2. Session, false positive 6m away.' Published 198.2 mph off four points that accelerate 3.3x and fit a parabola perfectly \u2014 the clip maxExitVeloMph and maxShortTrackSpeedGrowth exist for. Hitter confirms nobody else was hitting nearby during this session, so the impulse is NOT another player's bat. Measured per octave it carries 86% of its energy between 250 Hz and 2 kHz and 0.2% above 4 kHz, against 11-14% above 4 kHz for a verified crack \u2014 a loud, sharp, band-limited thump (bat on the ground, a bag, a foot on a board). It is the one clip that still fires at the shipped 6 kHz / 30 dB setting, at exactly 30.0 dB.",
       "stamped_fps": 239.9807
     },
     {
+      "audio": "live_49.audio.flac",
       "build": "post-timescale-fix",
       "contact_time": 1.560267,
       "fps": 239.98,
@@ -61,6 +67,7 @@
       "stamped_fps": 239.9783
     },
     {
+      "audio": "live_53.audio.flac",
       "build": "post-timescale-fix",
       "contact_time": 1.459324,
       "fps": 239.98,
@@ -71,6 +78,7 @@
       "stamped_fps": 239.9799
     },
     {
+      "audio": "live_61.audio.flac",
       "build": "",
       "contact_time": null,
       "fps": 239.95852568691808,

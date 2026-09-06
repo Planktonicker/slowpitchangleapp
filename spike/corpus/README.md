@@ -136,7 +136,27 @@ anything that moves the ratio to satisfy one breaks the other.
 |---|---|
 | `index.json` | one row per clip: label, provenance, contact time, notes |
 | `<id>.trace.json.gz` | candidate detections with timestamps; the replay input |
+| `<id>.audio.flac` | the clip's audio, lossless mono 48 kHz — what the trigger heard |
 | `<id>.selected.csv` | the track the build at the time chose — the record of what the app did then, not ground truth |
+
+## The audio, and what it settled
+
+`replay_corpus.py` replays what the detector saw. `replay_trigger.py` replays
+what the **microphone** heard, because the field complaint — "I arm it, he hits
+it, nothing happens" — is upstream of anything the detector does, and a swing
+that was never recorded leaves no trace at all.
+
+That distinction paid for itself immediately. Running the app's own trigger over
+this audio showed that at this venue the loudest thing in a no-swing clip was
+**louder than the quietest verified hit** — a separation of −2.4 dB, which
+`suggest_trigger_db` calls unusable. No threshold can split two overlapping
+distributions, and no redefinition of the noise floor helped either; every span
+from 0.5 s to 5 s and every quantile from the 10th to the median landed within
+3 dB. What separated them was the **band**, and that is why the trigger now
+listens above 6 kHz.
+
+Eight clips of lossless audio come to 566 KB. Keep sending it — `--sweep` gets
+sharper with every labelled clip, and it currently rests on two verified hits.
 
 ## Adding to it
 
