@@ -1492,7 +1492,21 @@ final class AppModel: ObservableObject {
                 "cameraRollDeg": swing.cameraRollDeg as Any,
                 "cameraTiltDeg": swing.cameraTiltDeg as Any,
                 "cameraFovDeg": swing.cameraFovDeg as Any,
+                // Why a clip has no reading, and how much of one it has.
+                //
+                // These were missing, and their absence cost a whole session.
+                // Thirteen of nineteen clips came back with no track, no
+                // report and no trace — every field the bundle carries was
+                // zero, which is the same shape as "measured, and the answer
+                // was nothing". The app knew perfectly well what went wrong
+                // and had written it into `notes` on the failure path; the
+                // export listed eleven fields and that was not one of them.
+                // The single question the bundle existed to answer was the
+                // one it threw away.
+                "trackedFrames": swing.trackedFrames,
+                "ballIdentified": swing.ballIdentified,
             ]
+            if let notes = swing.notes, !notes.isEmpty { entry["notes"] = notes }
             if let id = swing.sessionID { entry["sessionID"] = id.uuidString }
             if let name = swing.diagnosticsFilename,
                let text = try? String(contentsOf: ClipStore.trackURL(named: name), encoding: .utf8) {

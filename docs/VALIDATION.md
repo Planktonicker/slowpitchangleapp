@@ -152,6 +152,70 @@ reading rather than reporting a swing.
 
 - Date: 2026-08-30  Disagreement: 14% (37 px ball) / 43% (26 px ball) -> Pass? **NO**
 
+### G0 third run — 2026-09-07, eleven arcs: FOUND AND FIXED
+
+Eleven ballistic arcs at one venue, all filmed at about 6 m: three balls
+dropped, four tossed, and — this is the part that mattered — the **incoming
+pitch of four hitter-confirmed swings**. A slow-pitch lob is a long ballistic
+arc of the same ball at the same distance as the hit that follows it, so it
+carries a scale for the very clip a struck ball is measured in.
+
+Gravity gives the scale with nothing measured off the ball. Against it:
+
+| | ball must be | detector read | error |
+|---|---|---|---|
+| three drops | 21.7–22.4 px | 16.0–16.3 px | −26 to −28% |
+| four tosses | 20.0–26.0 px | 12.8–17.1 px | −28 to −36% |
+| four pitch arcs | 18.9–24.7 px | 15.2–16.6 px | −20 to −33% |
+| four struck balls, 17–32 px/frame | 18.9–24.7 px | 15.4–19.1 px | −18 to −31% |
+
+Two independent corroborations that the gravity number is the sound one: the
+implied camera distances came out **4.7–6.1 m** against the owner's "all at
+6 m", stated after the measurement; and the bat crack reached the microphone
+12–16 ms after the video's own contact instant, which is 4–6 m of sound travel.
+
+**The error is flat.** Not size-dependent as the tee_06 run concluded, and not
+speed-dependent either — it is the same −29% at 1.5 px/frame and at 32. The
+earlier "it changes, and by a lot" rests on a clip whose own entry records that
+the tracked object was the hitter's leg, so its 14.99 px was never a
+measurement of a ball.
+
+**Cause.** The diameter was probed along ONE line, whose direction came from an
+ellipse fitted to the colour mask — and that mask is ragged: holed by the
+motion gate where a slow ball's middle does not change between frames, and cut
+by the saturation floor where a sunlit ball desaturates towards white. On the
+four struck balls the fitted minor axis ran from 24% OVER to 44% under. Worse,
+the probe placed its background window at 1.3–1.8 × the radius that same mask
+gave it, so a radius 29% short sampled "background" from **inside the ball**,
+dragging the core→background colour line towards the ball and moving the 50%
+crossing inwards — a small mask measured smaller than it was.
+
+**Fix.** Probe radially in sixteen directions and take the median crossing, with
+the background annulus moved out of reach of that loop. The mask now says only
+where the ball is; the size comes from the pixels. Measured on the same eleven
+arcs: **−28.2% → −7.5%**, and on the struck balls −25.1% → −10.8%.
+
+A second thing had to be repaired to see this at all. `synth_test.py` drew its
+motion-blurred ball as one solid ellipse at full ball colour out to the tip of
+the smear. Real blur is a convolution — the swept ends are dim — so that render
+rewarded the single-line minor-axis probe and punished the radial one, exactly
+backwards from every real ball. The render now accumulates the ball across the
+smear the way an exposure does, and with it the radial probe passes at +2.9%
+diameter error with the scale cross-check disagreement down from 19.4% to 2.3%.
+
+Reported speed was therefore **~39% high** before this, and the residual is now
+about 8–11% low. Launch angle was never affected — it is an angle and needs no
+scale.
+
+- Date: 2026-09-07  Disagreement: 7.5% (arcs) / 10.8% (struck) -> Pass? **NOT YET**,
+  but from a factor of four closer, and the residual is now smaller than the
+  spread between clips.
+
+Evidence kept: `spike/corpus/` (traces, audio, `index.json` with the
+gravity-derived truth per clip). The `diameter_probe` block of `parity.json`
+pins the estimator so the Swift port cannot drift from it — it never was
+pinned, which is how a scale went 28% wrong without a test noticing.
+
 ### G0b — The two-distance check (no truth needed at all)
 
 Film the same tee, same ball, same swing intent from **4.5 m and from 6 m**.

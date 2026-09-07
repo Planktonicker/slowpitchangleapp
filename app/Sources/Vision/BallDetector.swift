@@ -250,12 +250,12 @@ enum BallDetector {
             }
             if minor <= 1e-6 { minor = 2 * settings.minRadiusPx }
 
-            // The minor axis is perpendicular to the blur smear, so it still
-            // reads true ball diameter. Refine it sub-pixel.
-            if let refined = subpixelMinorDiameter(image: image,
-                                                   cx: cx, cy: cy,
-                                                   minorAxisDeg: blob.minorAxisDeg,
-                                                   r0: minor / 2.0) {
+            // The blob's own axes only place the probe; the diameter comes
+            // from the pixels. See `subpixelDiameter` for why the mask's minor
+            // axis cannot be trusted to be the ball's.
+            if let refined = subpixelDiameter(image: image,
+                                              cx: cx, cy: cy,
+                                              r0: minor / 2.0) {
                 minor = refined
             }
 
@@ -270,95 +270,126 @@ enum BallDetector {
         return (out, census)
     }
 
-    /// Sub-pixel ball diameter along the minor (blur-free) axis.
+    /// Sub-pixel ball diameter, probed radially in every direction.
     ///
-    /// This is finding #2 from the spike. A colour-threshold contour reads
-    /// into the compression/edge-blend halo around the ball — measured at +6%
-    /// on encoded synthetic video, which is a direct +6% bias in exit
-    /// velocity. So the reference measurement is threshold-free:
+    /// Mirror of `_subpixel_diameter`; pinned by the `diameter_probe` block of
+    /// `parity.json`.
     ///
-    /// sample the image bilinearly along the minor-axis line, estimate the
-    /// ball colour from the blob core and the background colour just outside
-    /// it (independently per side), project each sample onto the
-    /// core->background colour line to get a mixing fraction `alpha` in
-    /// [0, 1], and locate the `alpha = 0.5` crossing on each side by linear
-    /// interpolation. The 50% crossing sits at the geometric edge regardless
-    /// of venue colours or how far a threshold bleeds into the halo.
+    /// Threshold-free matte fraction: sample the image bilinearly outward from
+    /// the centre along `SLA.diameterProbeDirections` rays, take the ball
+    /// colour from the blob core and the background from an annulus well
+    /// outside it, project each sample onto the core->background colour line
+    /// to get a mixing fraction `alpha` in [0, 1], and find the `alpha = 0.5`
+    /// crossing on each ray. The diameter is twice the MEDIAN of those.
     ///
-    /// `r0` is a rough radius used only to place the core/background sampling
+    /// **This used to probe one line, along the mask ellipse's minor axis,
+    /// and that is what G0 was failing on.** Measured against gravity on
+    /// eleven real ballistic arcs — three dropped balls, four tosses and the
+    /// incoming pitch of four confirmed swings, none of which needs the ball's
+    /// size to know the scale — the single-line probe read 28% short, flat
+    /// across apparent size and across speeds from 1.5 to 32 px per frame. It
+    /// therefore inflated every exit velocity by about 39%. The radial probe
+    /// reads 8% short on those arcs and 11% short on the struck balls.
+    ///
+    /// Two things were wrong with one line:
+    ///
+    /// 1. Its direction came from an ellipse fitted to the colour mask, and
+    ///    that mask is ragged — holed by the motion gate, cut by the
+    ///    saturation floor where a sunlit ball desaturates towards white. On
+    ///    four confirmed struck balls the fitted minor axis ran from 24% OVER
+    ///    to 44% under. A median over sixteen rays needs no direction at all.
+    /// 2. The background was sampled at 1.3-1.8 r0 with r0 from that same
+    ///    mask. A radius 29% short puts the "background" window INSIDE the
+    ///    ball, dragging the core->background line towards the ball, moving
+    ///    the crossing inwards, shortening the radius further. The annulus now
+    ///    starts at `SLA.diameterBgInner` x r0, out of reach of that loop.
+    ///
+    /// The median rather than a low quantile, even though blur elongates the
+    /// ball along its travel, because it was measured: on four struck balls at
+    /// 17-32 px per frame the median still reads SHORT, and the 25th
+    /// percentile reads 28-33% short, no better than the line it replaced.
+    ///
+    /// `r0` is a rough radius from the mask, used only to place the sampling
     /// windows.
-    static func subpixelMinorDiameter(image: PixelImage,
-                                      cx: Double,
-                                      cy: Double,
-                                      minorAxisDeg: Double,
-                                      r0: Double) -> Double? {
+    static func subpixelDiameter(image: PixelImage,
+                                 cx: Double,
+                                 cy: Double,
+                                 r0: Double) -> Double? {
         let step = SLA.diameterProfileStepPx
-        let reach = r0 * 1.8 + 4.0
-        let n = max(8, Int(reach / step))
-        let count = 2 * n + 1
+        let reach = r0 * SLA.diameterBgOuter + SLA.diameterBgPadPx + 2.0
+        let n = max(10, Int(reach / step))
+        let count = n + 1
+        let dirs = SLA.diameterProbeDirections
 
         var rs = [Double](repeating: 0, count: count)
-        for i in 0..<count { rs[i] = Double(i - n) * step }
+        for i in 0..<count { rs[i] = Double(i) * step }
 
-        let a = minorAxisDeg * Double.pi / 180
-        let ca = cos(a), sa = sin(a)
-        var sb = [Double](repeating: 0, count: count)
-        var sg = [Double](repeating: 0, count: count)
-        var sr = [Double](repeating: 0, count: count)
-        for i in 0..<count {
-            let p = image.sampleBilinear(x: cx + rs[i] * ca, y: cy + rs[i] * sa)
-            sb[i] = p.b; sg[i] = p.g; sr[i] = p.r
-        }
-
-        let c = n
-        let coreLimit = max(0.4 * r0, step)
-        var coreB = 0.0, coreG = 0.0, coreR = 0.0, coreN = 0
-        for i in 0..<count where abs(rs[i]) <= coreLimit {
-            coreB += sb[i]; coreG += sg[i]; coreR += sr[i]; coreN += 1
-        }
-        guard coreN > 0 else { return nil }
-        coreB /= Double(coreN); coreG /= Double(coreN); coreR /= Double(coreN)
-
-        func edgeRadius(_ direction: Int) -> Double? {
-            let d = Double(direction)
-            var bgB = 0.0, bgG = 0.0, bgR = 0.0, bgN = 0
-            let lo = 1.3 * r0
-            let hi = 1.8 * r0 + 4.0
+        var pb = [Double](repeating: 0, count: dirs * count)
+        var pg = [Double](repeating: 0, count: dirs * count)
+        var pr = [Double](repeating: 0, count: dirs * count)
+        for d in 0..<dirs {
+            let a = 2.0 * Double.pi * Double(d) / Double(dirs)
+            let ca = cos(a), sa = sin(a)
             for i in 0..<count {
-                let rd = rs[i] * d
-                if rd >= lo && rd <= hi {
-                    bgB += sb[i]; bgG += sg[i]; bgR += sr[i]; bgN += 1
-                }
+                let p = image.sampleBilinear(x: cx + rs[i] * ca, y: cy + rs[i] * sa)
+                pb[d * count + i] = p.b
+                pg[d * count + i] = p.g
+                pr[d * count + i] = p.r
             }
-            guard bgN > 0 else { return nil }
-            bgB /= Double(bgN); bgG /= Double(bgN); bgR /= Double(bgN)
-
-            let dB = coreB - bgB, dG = coreG - bgG, dR = coreR - bgR
-            let denom = dB * dB + dG * dG + dR * dR
-            // Under ~30/255 of colour contrast the matte fraction is noise.
-            guard denom >= 900.0 else { return nil }
-
-            @inline(__always) func alpha(_ i: Int) -> Double {
-                ((sb[i] - bgB) * dB + (sg[i] - bgG) * dG + (sr[i] - bgR) * dR) / denom
-            }
-
-            var prevI = c
-            var i = c + direction
-            while i + direction >= 0 && i + direction < count {
-                if alpha(i) < 0.5 && alpha(i + direction) < 0.5 {
-                    let a1 = alpha(i)
-                    let a0 = alpha(prevI)
-                    let frac = a0 > a1 ? (a0 - 0.5) / (a0 - a1) : 0.5
-                    return abs(rs[prevI]) + frac * step
-                }
-                prevI = i
-                i += direction
-            }
-            return nil
         }
 
-        guard let rPos = edgeRadius(1), let rNeg = edgeRadius(-1) else { return nil }
-        return rPos + rNeg
+        let coreLimit = max(0.4 * r0, step)
+        let bgLo = SLA.diameterBgInner * r0
+        let bgHi = SLA.diameterBgOuter * r0 + SLA.diameterBgPadPx
+        var coreB = 0.0, coreG = 0.0, coreR = 0.0, coreN = 0
+        var bgB = 0.0, bgG = 0.0, bgR = 0.0, bgN = 0
+        for d in 0..<dirs {
+            for i in 0..<count {
+                let k = d * count + i
+                if rs[i] <= coreLimit {
+                    coreB += pb[k]; coreG += pg[k]; coreR += pr[k]; coreN += 1
+                }
+                if rs[i] >= bgLo && rs[i] <= bgHi {
+                    bgB += pb[k]; bgG += pg[k]; bgR += pr[k]; bgN += 1
+                }
+            }
+        }
+        guard coreN > 0, bgN > 0 else { return nil }
+        coreB /= Double(coreN); coreG /= Double(coreN); coreR /= Double(coreN)
+        bgB /= Double(bgN); bgG /= Double(bgN); bgR /= Double(bgN)
+
+        let dB = coreB - bgB, dG = coreG - bgG, dR = coreR - bgR
+        let denom = dB * dB + dG * dG + dR * dR
+        // Under ~30/255 of colour contrast the matte fraction is noise.
+        guard denom >= 900.0 else { return nil }
+
+        var edges: [Double] = []
+        edges.reserveCapacity(dirs)
+        for d in 0..<dirs {
+            let base = d * count
+            @inline(__always) func alpha(_ i: Int) -> Double {
+                let k = base + i
+                return ((pb[k] - bgB) * dB + (pg[k] - bgG) * dG + (pr[k] - bgR) * dR) / denom
+            }
+            var i = 1
+            while i < count - 1 {
+                // Two consecutive samples under half: past the edge, not noise.
+                if alpha(i) < 0.5 && alpha(i + 1) < 0.5 {
+                    let a0 = alpha(i - 1), a1 = alpha(i)
+                    let frac = a0 > a1 ? (a0 - 0.5) / (a0 - a1) : 0.5
+                    edges.append(rs[i - 1] + frac * step)
+                    break
+                }
+                i += 1
+            }
+        }
+
+        // Half the rays may legitimately find nothing — the ball can sit
+        // against a background of its own colour on one side. Fewer than half
+        // is not a measurement.
+        guard edges.count >= dirs / 2 else { return nil }
+        edges.sort()
+        return 2.0 * edges[edges.count / 2]
     }
 }
 

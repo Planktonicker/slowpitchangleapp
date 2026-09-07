@@ -140,6 +140,26 @@ Open, in rough priority order:
 
 ## Gotchas that have already cost time
 
+- **A mask contour is not a measurement of the ball, and the mask's fitted
+  minor axis is not the ball's.** The colour mask is ragged — holed by the
+  motion gate on a slow ball, cut by the saturation floor where a sunlit ball
+  desaturates towards white — and an ellipse fitted to it ran from 24% over to
+  44% under on four real struck balls. The diameter is a SCALE, so that error
+  went straight into every exit velocity: 28% short, hence 39% fast. Probe the
+  pixels (`_subpixel_diameter`, sixteen rays, median crossing); use the mask
+  only to say where the ball is. See `docs/VALIDATION.md` G0 third run.
+- **Watch what a probe's own seed does to its background window.** The old
+  probe sampled "background" at 1.3-1.8x the radius the mask gave it, so a
+  radius 29% short sampled from inside the ball, which biased the answer
+  shorter still. Any measurement that places its reference window using its own
+  rough answer needs that window far enough out to survive being badly seeded.
+- **A synthetic fixture can endorse a broken measurement.** `synth_test.py`
+  drew motion blur as one solid ellipse at full ball colour to the tip of the
+  smear; real blur is a convolution and its ends are dim. That render rewarded
+  the single-line probe that was 28% wrong on every real ball and punished the
+  radial one that was right. When a fixture and the field disagree, suspect the
+  fixture.
+
 - **Audio LEVEL is not a discriminator, in the same way ball colour is not.**
   Measured on `spike/corpus/` with the app's own trigger: the loudest thing in a
   clip the hitter says had no swing in it reached 29.6 dB over the rolling floor

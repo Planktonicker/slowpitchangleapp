@@ -55,13 +55,27 @@ HSV_HI_DEFAULT = (40, 255, 255)
 MIN_RADIUS_PX_DEFAULT = 4.0
 MAX_RADIUS_PX_DEFAULT = 60.0
 
-# Diameter measurement: mask contours over-include the compression/edge-blend
-# halo around the ball (measured +6% on encoded synthetic video — a direct EV
-# bias). The reference measurement is therefore sub-pixel: sample the HSV
-# in-range profile along the blur-free MINOR axis and take the half-in/half-out
-# crossings. The gravity-vs-diameter scale disagreement (G2) is immune to this
-# and cross-checks it on real footage.
+# Diameter measurement: a mask contour is not a measurement of the ball. On
+# encoded synthetic video it over-includes the compression halo by +6%; on real
+# footage it does the opposite and far worse, reading 28% SHORT, because the
+# saturation floor cuts the sunlit side of the ball where it desaturates toward
+# white and the motion gate holes the middle of a slow one. The reference
+# measurement is therefore taken from the PIXELS, sub-pixel, with the mask used
+# only to say where the ball is — see _subpixel_diameter.
 DIAMETER_PROFILE_STEP_PX = 0.25
+# Rays cast outward from the blob centre when measuring its diameter.
+#
+# Sixteen is where the median stops moving: eight leaves it jumpy on a ball
+# whose edge is partly against grass of its own colour, and thirty-two costs
+# twice the sampling to change the answer by under a tenth of a pixel.
+DIAMETER_PROBE_DIRECTIONS = 16
+# The background annulus, as multiples of the seed radius, plus a pixel pad so
+# a very small seed still reaches clear of the blur halo. It has to start
+# outside any plausible ball edge even when the seed radius is badly short —
+# see _subpixel_diameter for the feedback loop that requires it.
+DIAMETER_BG_INNER = 2.2
+DIAMETER_BG_OUTER = 3.2
+DIAMETER_BG_PAD_PX = 5.0
 
 # Analysis defaults
 VELOCITY_WINDOW_S = 0.12      # fit window for LA/EV at contact (~29 frames @240)
@@ -231,64 +245,102 @@ def yellow_mask(frame_bgr: np.ndarray, hsv_lo=HSV_LO_DEFAULT, hsv_hi=HSV_HI_DEFA
     return mask
 
 
-def _subpixel_minor_diameter(
+def _subpixel_diameter(
     frame_bgr: np.ndarray,
     cx: float,
     cy: float,
-    minor_axis_deg: float,
     r0_px: float,
 ) -> float | None:
-    """Sub-pixel ball diameter along the minor (blur-free) axis.
+    """Sub-pixel ball diameter, probed radially in every direction.
 
-    Threshold-free matte-fraction method: sample the image bilinearly along
-    the minor-axis line, estimate the ball color from the blob core and the
-    background color just outside it (independently per side), project each
-    sample onto the core->background color line to get a mixing fraction
-    alpha in [0,1], and locate the alpha = 0.5 crossing on each side by
-    linear interpolation. The 50% crossing sits at the geometric edge
-    regardless of venue colors or how far an HSV threshold reads into the
-    blur/compression halo. r0_px is a rough radius from the mask contour,
-    used only to place the core/background sampling windows.
+    Threshold-free matte-fraction method: sample the image bilinearly outward
+    from the centre along DIAMETER_PROBE_DIRECTIONS rays, estimate the ball
+    colour from the blob core and the background from an annulus well outside
+    it, project each sample onto the core->background colour line to get a
+    mixing fraction alpha in [0,1], and locate the alpha = 0.5 crossing on each
+    ray. The 50% crossing sits at the geometric edge regardless of venue
+    colours or how far an HSV threshold read into the blur halo. The diameter
+    is twice the MEDIAN of those crossings.
+
+    **This used to probe ONE line, along the mask ellipse's minor axis, and
+    that is what G0 was failing on.** Measured against gravity on eleven
+    ballistic arcs — three dropped balls, four tosses and the incoming pitch of
+    four confirmed swings, none of which needs the ball's size to know the
+    scale — the single-line probe read 28.2% small, and the error was flat
+    across everything: apparent size, and speed from 1.5 to 32 px per frame.
+    Probing radially reads 7.5% small on the same arcs and 10.8% small on the
+    struck balls. See docs/VALIDATION.md.
+
+    Two things were wrong with one line, and the second is the subtler:
+
+    1. Its direction came from `fitEllipse` on the colour mask, and the mask is
+       ragged — holed by the motion gate, cut by the saturation floor where a
+       sunlit ball desaturates towards white. A minor axis fitted to that is
+       not the ball's minor axis; measured on the struck balls it ran from 24%
+       OVER to 44% under, clip to clip. A median over sixteen rays does not
+       care which direction is which.
+    2. The background was sampled at 1.3-1.8 r0, and r0 came from that same
+       too-small mask. A radius 29% short puts the "background" window INSIDE
+       the ball, which drags the core->background colour line towards the ball,
+       which moves the 50% crossing inwards, which makes the radius shorter
+       still. A small mask measured smaller than it was. The annulus now starts
+       at DIAMETER_BG_INNER x r0, far enough out that a seed this wrong cannot
+       reach it.
+
+    Why the MEDIAN and not the minimum, when motion blur elongates the ball
+    along its travel: because the median over many rays is dominated by the
+    rays that are not the blur axis, and it was measured rather than assumed.
+    On four struck balls at 17-32 px per frame the median does not over-read —
+    it still reads 11% SHORT. A lower quantile, chosen to chase the minor axis,
+    is worse in both regimes: the 25th percentile reads 28-33% small, which is
+    no better than the line it replaced.
+
+    r0_px is a rough radius from the mask contour, used only to place the core
+    and background sampling windows.
     """
     step = DIAMETER_PROFILE_STEP_PX
-    reach = r0_px * 1.8 + 4.0
-    n = max(8, int(reach / step))
-    rs = (np.arange(-n, n + 1) * step).astype(np.float32)
-    a = math.radians(minor_axis_deg)
-    mapx = (cx + rs * math.cos(a)).reshape(-1, 1)
-    mapy = (cy + rs * math.sin(a)).reshape(-1, 1)
-    samples = cv2.remap(frame_bgr, mapx, mapy, cv2.INTER_LINEAR,
-                        borderMode=cv2.BORDER_REPLICATE).reshape(-1, 3).astype(np.float32)
-    c = n
-    core_sel = np.abs(rs) <= max(0.4 * r0_px, step)
-    core = samples[core_sel].mean(axis=0)
+    reach = r0_px * DIAMETER_BG_OUTER + DIAMETER_BG_PAD_PX + 2.0
+    n = max(10, int(reach / step))
+    rs = (np.arange(0, n + 1) * step).astype(np.float32)
 
-    def edge_radius(direction: int) -> float | None:
-        bg_sel = (rs * direction >= 1.3 * r0_px) & (rs * direction <= 1.8 * r0_px + 4.0)
-        if not bg_sel.any():
-            return None
-        bg = samples[bg_sel].mean(axis=0)
-        diff = core - bg
-        denom = float(np.dot(diff, diff))
-        if denom < 900.0:                 # <30/255 color contrast: unusable
-            return None
-        alpha = (samples - bg) @ diff / denom
-        prev_i = c
-        i = c + direction
-        while 0 <= i + direction < len(alpha):
-            if alpha[i] < 0.5 and alpha[i + direction] < 0.5:
-                a1, a0 = float(alpha[i]), float(alpha[prev_i])
+    angles = np.linspace(0.0, 2.0 * math.pi, DIAMETER_PROBE_DIRECTIONS, endpoint=False)
+    profile = np.empty((DIAMETER_PROBE_DIRECTIONS, len(rs), 3), np.float32)
+    for i, a in enumerate(angles):
+        mapx = (cx + rs * math.cos(a)).reshape(-1, 1)
+        mapy = (cy + rs * math.sin(a)).reshape(-1, 1)
+        profile[i] = cv2.remap(frame_bgr, mapx, mapy, cv2.INTER_LINEAR,
+                               borderMode=cv2.BORDER_REPLICATE).reshape(-1, 3)
+
+    core_sel = rs <= max(0.4 * r0_px, step)
+    bg_sel = (rs >= DIAMETER_BG_INNER * r0_px) & \
+             (rs <= DIAMETER_BG_OUTER * r0_px + DIAMETER_BG_PAD_PX)
+    if not core_sel.any() or not bg_sel.any():
+        return None
+    core = profile[:, core_sel].reshape(-1, 3).mean(axis=0)
+    bg = profile[:, bg_sel].reshape(-1, 3).mean(axis=0)
+    diff = core - bg
+    denom = float(np.dot(diff, diff))
+    if denom < 900.0:                     # <30/255 colour contrast: unusable
+        return None
+
+    edges: list[float] = []
+    for i in range(DIAMETER_PROBE_DIRECTIONS):
+        alpha = (profile[i] - bg) @ diff / denom
+        for j in range(1, len(alpha) - 1):
+            # Two consecutive samples under half: past the edge, not noise.
+            if alpha[j] < 0.5 and alpha[j + 1] < 0.5:
+                a0, a1 = float(alpha[j - 1]), float(alpha[j])
                 frac = (a0 - 0.5) / (a0 - a1) if a0 > a1 else 0.5
-                return abs(float(rs[prev_i])) + frac * step
-            prev_i = i
-            i += direction
-        return None
+                edges.append(float(rs[j - 1]) + frac * step)
+                break
 
-    r_pos = edge_radius(+1)
-    r_neg = edge_radius(-1)
-    if r_pos is None or r_neg is None:
+    # Half the rays may legitimately find nothing — the ball can be against a
+    # background of its own colour on one side. Fewer than half is not a
+    # measurement.
+    if len(edges) < DIAMETER_PROBE_DIRECTIONS // 2:
         return None
-    return r_pos + r_neg
+    edges.sort()
+    return 2.0 * edges[len(edges) // 2]
 
 
 def detect_ball_candidates(
@@ -305,7 +357,7 @@ def detect_ball_candidates(
 
     Motion blur elongates the ball along its velocity vector, so the blob is
     an ellipse. The MINOR axis is perpendicular to motion and stays equal to
-    the true ball diameter — measured sub-pixel via _subpixel_minor_diameter
+    the true ball diameter — measured sub-pixel via _subpixel_diameter
     (mask contours alone over-read the edge-blend halo).
     """
     hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
@@ -327,21 +379,19 @@ def detect_ball_candidates(
         if area < min_area or area > max_area:
             continue
         if len(c) >= 5:
-            (cx, cy), (ax1, ax2), ang = cv2.fitEllipse(c)
+            (cx, cy), (ax1, ax2), _ = cv2.fitEllipse(c)
             minor = min(ax1, ax2)
             major = max(ax1, ax2)
             if major > 0 and major / max(minor, 1e-6) > 6.0:
                 continue                      # too elongated even for blur
-            # fitEllipse's angle is the major axis of ellipse rotation from
-            # vertical of ax1... derive the minor-axis direction explicitly:
-            # ang is the rotation of ax1 (width) from horizontal; the minor
-            # axis lies along whichever of (ang, ang+90) matches min(ax1,ax2).
-            minor_dir = ang + (0.0 if ax1 <= ax2 else 90.0)
+            # The ellipse's ORIENTATION is no longer used: the diameter probe
+            # is radial and does not need to be told which way the minor axis
+            # points, which is just as well — fitted to a ragged mask it was
+            # wrong by 24% over to 44% under on four real struck balls.
         else:
             (cx, cy), r = cv2.minEnclosingCircle(c)
             minor = 2.0 * r
-            minor_dir = 90.0
-        refined = _subpixel_minor_diameter(frame_bgr, cx, cy, minor_dir, minor / 2.0)
+        refined = _subpixel_diameter(frame_bgr, cx, cy, minor / 2.0)
         if refined is not None:
             minor = refined
         if not (2 * min_radius_px <= minor <= 2 * max_radius_px):

@@ -43,6 +43,7 @@ final class ParityTests: XCTestCase {
         var stitch_tracks: [StitchCase]
         var seed_track: [SeedCase]
         var motion_mask: [MotionCase]
+        var diameter_probe: [DiameterCase]
         var contact_from_audio: [ContactAudioCase]
     }
 
@@ -62,6 +63,20 @@ final class ParityTests: XCTestCase {
         var prev: [[Int]]?
         var cur: [[Int]]
         var expected: [[Int]]?
+    }
+
+    struct DiameterCase: Decodable {
+        var name: String
+        var width: Int
+        var height: Int
+        var cx: Double
+        var cy: Double
+        var r0_px: Double
+        var true_diameter_px: Double
+        /// Row-major BGR, three bytes a pixel.
+        var bgr: [Int]
+        /// `nil` is "refused" — too little colour contrast to measure.
+        var expected: Double?
     }
 
     struct SeedCase: Decodable {
@@ -748,6 +763,61 @@ final class ParityTests: XCTestCase {
             XCTAssertEqual(mask, want, "mask pixels \(c.name)")
             XCTAssertEqual(mask.filter { $0 }.count, want.filter { $0 }.count,
                            "moved pixel count \(c.name)")
+        }
+    }
+
+    /// The ball-diameter probe, which is a SCALE.
+    ///
+    /// Every exit velocity the app reports is a pixel speed multiplied by the
+    /// metres-per-pixel this decides, so a port that drifts here moves every
+    /// number without moving a flag. It was measured against gravity on eleven
+    /// real ballistic arcs and found 28% short — and nothing noticed, because
+    /// nothing pinned it. This pins it.
+    ///
+    /// The `notched` case is the one that matters most: it bites a wedge out of
+    /// the ball the way the saturation floor and the motion gate bite one out
+    /// of a real mask, and the probe has to be unmoved by it.
+    func testSubpixelDiameterMatchesReference() {
+        assertClose(Double(SLA.diameterProbeDirections),
+                    Self.fixtures.constants["DIAMETER_PROBE_DIRECTIONS"]!, "probe directions")
+        assertClose(SLA.diameterBgInner,
+                    Self.fixtures.constants["DIAMETER_BG_INNER"]!, "bg inner")
+        assertClose(SLA.diameterBgOuter,
+                    Self.fixtures.constants["DIAMETER_BG_OUTER"]!, "bg outer")
+        assertClose(SLA.diameterBgPadPx,
+                    Self.fixtures.constants["DIAMETER_BG_PAD_PX"]!, "bg pad")
+
+        let cases = Self.fixtures.diameter_probe
+        XCTAssertFalse(cases.isEmpty)
+        for c in cases {
+            // The fixture stores BGR; PixelImage reads the BGRA the capture
+            // path delivers, so widen it here rather than teach either side
+            // about the other's packing.
+            var bgra = [UInt8](repeating: 255, count: c.width * c.height * 4)
+            for i in 0..<(c.width * c.height) {
+                bgra[i * 4 + 0] = UInt8(clamping: c.bgr[i * 3 + 0])
+                bgra[i * 4 + 1] = UInt8(clamping: c.bgr[i * 3 + 1])
+                bgra[i * 4 + 2] = UInt8(clamping: c.bgr[i * 3 + 2])
+            }
+            bgra.withUnsafeBufferPointer { buf in
+                let image = PixelImage(base: buf.baseAddress!,
+                                       width: c.width, height: c.height,
+                                       bytesPerRow: c.width * 4)
+                let got = BallDetector.subpixelDiameter(image: image,
+                                                        cx: c.cx, cy: c.cy, r0: c.r0_px)
+                guard let want = c.expected else {
+                    XCTAssertNil(got, "\(c.name): too little contrast to measure")
+                    return
+                }
+                guard let got else {
+                    XCTFail("\(c.name): expected \(want) px, got no measurement")
+                    return
+                }
+                // A hundredth of a pixel: the probe steps in quarter pixels and
+                // interpolates, so anything looser would let a real divergence
+                // in the interpolation hide.
+                assertClose(got, want, rel: 1e-6, abs: 0.01, "\(c.name) diameter")
+            }
         }
     }
 

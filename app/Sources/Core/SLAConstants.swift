@@ -60,6 +60,21 @@ enum SLA {
     /// lands directly in exit velocity, so the reference measurement samples
     /// the intensity profile instead of trusting the threshold.
     static let diameterProfileStepPx = 0.25
+    /// Rays cast outward from the blob centre when measuring its diameter.
+    /// Mirrors `DIAMETER_PROBE_DIRECTIONS`.
+    ///
+    /// Sixteen is where the median stops moving: eight leaves it jumpy on a
+    /// ball whose edge is partly against grass of its own colour, and
+    /// thirty-two costs twice the sampling to change the answer by under a
+    /// tenth of a pixel.
+    static let diameterProbeDirections = 16
+    /// The background annulus, as multiples of the seed radius, plus a pixel
+    /// pad. It has to start outside any plausible ball edge even when the seed
+    /// is badly short — see `BallDetector.subpixelDiameter` for the feedback
+    /// loop that requires it. Mirrors `DIAMETER_BG_INNER` / `_OUTER` / `_PAD_PX`.
+    static let diameterBgInner = 2.2
+    static let diameterBgOuter = 3.2
+    static let diameterBgPadPx = 5.0
 
     // MARK: - Analysis defaults
 

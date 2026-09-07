@@ -86,8 +86,60 @@
       "label": "no_swing",
       "label_source": "hitter",
       "notes": "Hitter: 'Swing 3 session false positive 6m away. This one did not even calculate.' Recorded with the Camera app. Detected here by the Python reference detector, not on the phone \u2014 no on-device trace was ever exported. Drops roughly a quarter of its frames. Replayed WITHOUT a contact time, because none was ever recorded for it \u2014 so this row exercises the imported-clip path, where there is no audio trigger, and not the path the phone took when it declined to calculate."
+    },
+    {
+      "audio": "swing_1.audio.flac",
+      "build": "Camera app, not SwingLab",
+      "contact_source": "video: the pitch track and the hit track crossing",
+      "contact_time": 0.59,
+      "fps": 240.0,
+      "gravity_ball_px": 21.96,
+      "gravity_distance_m": 5.57,
+      "id": "swing_1",
+      "label": "hit",
+      "label_source": "hitter",
+      "notes": "Hitter-confirmed HIT, filmed at 6 m with the Camera app. The clip carries its own scale: the incoming pitch is a long ballistic arc of the same ball at the same distance, and its vertical acceleration gives metres-per-pixel without measuring the ball's size at all. Gravity says the ball is 21.96 px across (camera 5.57 m); this is the ground truth the diameter probe is scored against. These are the FIRST hitter-confirmed positives in the corpus \u2014 every gate and threshold before them was tuned only against clips whose right answer was 'no'."
+    },
+    {
+      "audio": "swing_2.audio.flac",
+      "build": "Camera app, not SwingLab",
+      "contact_source": "video: the pitch track and the hit track crossing",
+      "contact_time": 0.523,
+      "fps": 240.0,
+      "gravity_ball_px": 18.91,
+      "gravity_distance_m": 6.46,
+      "id": "swing_2",
+      "label": "hit",
+      "label_source": "hitter",
+      "notes": "Hitter-confirmed HIT, filmed at 6 m with the Camera app. The clip carries its own scale: the incoming pitch is a long ballistic arc of the same ball at the same distance, and its vertical acceleration gives metres-per-pixel without measuring the ball's size at all. Gravity says the ball is 18.91 px across (camera 6.46 m); this is the ground truth the diameter probe is scored against. These are the FIRST hitter-confirmed positives in the corpus \u2014 every gate and threshold before them was tuned only against clips whose right answer was 'no'."
+    },
+    {
+      "audio": "swing_3.audio.flac",
+      "build": "Camera app, not SwingLab",
+      "contact_source": "video: the pitch track and the hit track crossing",
+      "contact_time": 0.6125,
+      "fps": 240.0,
+      "gravity_ball_px": 24.74,
+      "gravity_distance_m": 4.94,
+      "id": "swing_3",
+      "label": "hit",
+      "label_source": "hitter",
+      "notes": "Hitter-confirmed HIT, filmed at 6 m with the Camera app. The clip carries its own scale: the incoming pitch is a long ballistic arc of the same ball at the same distance, and its vertical acceleration gives metres-per-pixel without measuring the ball's size at all. Gravity says the ball is 24.74 px across (camera 4.94 m); this is the ground truth the diameter probe is scored against. These are the FIRST hitter-confirmed positives in the corpus \u2014 every gate and threshold before them was tuned only against clips whose right answer was 'no'."
+    },
+    {
+      "audio": "swing_4.audio.flac",
+      "build": "Camera app, not SwingLab",
+      "contact_source": "video: the pitch track and the hit track crossing",
+      "contact_time": 0.5771,
+      "fps": 240.0,
+      "gravity_ball_px": 22.38,
+      "gravity_distance_m": 5.46,
+      "id": "swing_4",
+      "label": "hit",
+      "label_source": "hitter",
+      "notes": "Hitter-confirmed HIT, filmed at 6 m with the Camera app. The clip carries its own scale: the incoming pitch is a long ballistic arc of the same ball at the same distance, and its vertical acceleration gives metres-per-pixel without measuring the ball's size at all. Gravity says the ball is 22.38 px across (camera 5.46 m); this is the ground truth the diameter probe is scored against. These are the FIRST hitter-confirmed positives in the corpus \u2014 every gate and threshold before them was tuned only against clips whose right answer was 'no'."
     }
   ],
-  "count": 8,
+  "count": 12,
   "swinglab_corpus": 1
 }

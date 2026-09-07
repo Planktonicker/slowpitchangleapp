@@ -477,9 +477,8 @@ enum SetupBallMeasure {
             // marked so the UI can say the number is rough.
             var diameter: Double
             var refinedOK = true
-            if let refined = BallDetector.subpixelMinorDiameter(
-                    image: image, cx: cx, cy: cy,
-                    minorAxisDeg: blob.minorAxisDeg, r0: max(2, rays.median)) {
+            if let refined = BallDetector.subpixelDiameter(
+                    image: image, cx: cx, cy: cy, r0: max(2, rays.median)) {
                 // The image-derived diameter must broadly agree with the mask.
                 guard abs(refined - dEq) / max(1e-6, refined) <= subpixelVsMaskTol else {
                     diagnosis = .notAnEdge

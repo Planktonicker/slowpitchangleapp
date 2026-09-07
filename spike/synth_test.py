@@ -99,9 +99,39 @@ def render_clip(path: str) -> int:
                 break
             speed_px = math.hypot(vx_px, vy_px)
             smear = speed_px * SHUTTER_S
-            ang = math.degrees(math.atan2(vy_px, vx_px))
-            axes = (int(round((d_px + smear) / 2)), int(round(d_px / 2)))
-            cv2.ellipse(frame, (int(round(x)), int(round(y))), axes, ang, 0, 360, BALL_BGR, -1)
+            # Motion blur is a CONVOLUTION, not a longer ellipse.
+            #
+            # This used to draw one solid ellipse with axes (d+smear)/2 by d/2,
+            # at full ball colour right out to the tip of the smear. A real
+            # exposure has the ball at each point along its path for only part
+            # of the shutter, so the swept ends are DIM — and where they are
+            # dim, an edge-finder that looks for a half-way crossing stops well
+            # short of the tip.
+            #
+            # That difference is not cosmetic; it decided a measurement. The
+            # solid ellipse rewarded any estimator that reads the minor axis of
+            # a perfect ellipse and punished one that probes radially, which is
+            # exactly backwards from real footage: on eleven ballistic arcs the
+            # single-line minor-axis probe this render endorsed read 28% short,
+            # while the radial probe it penalised read 8% short. A test fixture
+            # that disagrees with every real ball is testing the fixture.
+            #
+            # So the ball is now accumulated at sub-positions across the smear,
+            # which is what the sensor does.
+            n_sub = max(1, int(round(smear / 1.5)) + 1)
+            acc = np.zeros((H, W), np.float32)
+            ux = vx_px / speed_px if speed_px > 0 else 0.0
+            uy = vy_px / speed_px if speed_px > 0 else 0.0
+            for k in range(n_sub):
+                off = (k / max(1, n_sub - 1) - 0.5) * smear if n_sub > 1 else 0.0
+                stamp = np.zeros((H, W), np.uint8)
+                cv2.circle(stamp, (int(round(x + ux * off)), int(round(y + uy * off))),
+                           max(1, int(round(d_px / 2))), 255, -1)
+                acc += stamp
+            acc /= (255.0 * n_sub)                    # coverage fraction in [0,1]
+            a3 = acc[:, :, None]
+            frame = (frame.astype(np.float32) * (1 - a3)
+                     + np.array(BALL_BGR, np.float32) * a3).astype(np.uint8)
             ball_frames += 1
         vw.write(frame)
         total += 1

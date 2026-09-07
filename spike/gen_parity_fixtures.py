@@ -32,6 +32,7 @@ import json
 import math
 import os
 
+import cv2
 import numpy as np
 
 import sla_common as sla
@@ -526,6 +527,10 @@ def main():
         "SEED_SEARCH_RADIUS_PX": float(sla.SEED_SEARCH_RADIUS_PX),
         "SEED_SEARCH_RADIUS_FRAC": float(sla.SEED_SEARCH_RADIUS_FRAC),
         "MOTION_DIFF_THRESHOLD": float(sla.MOTION_DIFF_THRESHOLD),
+        "DIAMETER_PROBE_DIRECTIONS": float(sla.DIAMETER_PROBE_DIRECTIONS),
+        "DIAMETER_BG_INNER": float(sla.DIAMETER_BG_INNER),
+        "DIAMETER_BG_OUTER": float(sla.DIAMETER_BG_OUTER),
+        "DIAMETER_BG_PAD_PX": float(sla.DIAMETER_BG_PAD_PX),
         "MOTION_DILATE_PX": float(sla.MOTION_DILATE_PX),
             "MAX_RADIUS_PX_DEFAULT": sla.MAX_RADIUS_PX_DEFAULT,
             "BAT_BARREL_DIAMETER_M": sla.BAT_BARREL_DIAMETER_M,
@@ -560,6 +565,7 @@ def main():
         "stitch_tracks": [],
         "seed_track": [],
         "motion_mask": [],
+        "diameter_probe": [],
         "contact_from_audio": [],
     }
 
@@ -670,6 +676,55 @@ def main():
             "prev": None if prev is None else [[int(v) for v in row] for row in prev],
             "cur": [[int(v) for v in row] for row in cur],
             "expected": None if m is None else [[int(v) for v in row] for row in m],
+        })
+
+    # The ball-diameter probe, pinned on small hand-built images.
+    #
+    # This is a SCALE: every exit velocity the app reports is a speed in pixels
+    # multiplied by the metres-per-pixel this function decides. It was measured
+    # against gravity on eleven real ballistic arcs and found 28% short, which
+    # inflated every speed by 39%, and nothing in the fixtures noticed because
+    # nothing in the fixtures covered it. It does now.
+    def _ball_image(size, cx, cy, r, smear=0.0, notch=False, contrast=200):
+        """A ball on a contrasting ground. `smear` convolves it along x, the
+        way an exposure does; `notch` bites a wedge out, the way a saturation
+        floor and a motion gate bite one out of a real mask."""
+        img = np.full((size, size, 3), 20, np.float32)
+        acc = np.zeros((size, size), np.float32)
+        n_sub = max(1, int(round(smear / 1.5)) + 1)
+        for k in range(n_sub):
+            off = (k / max(1, n_sub - 1) - 0.5) * smear if n_sub > 1 else 0.0
+            stamp = np.zeros((size, size), np.uint8)
+            cv2.circle(stamp, (int(round(cx + off)), int(round(cy))), int(round(r)), 255, -1)
+            acc += stamp
+        acc /= (255.0 * n_sub)
+        if notch:
+            cut = np.zeros((size, size), np.uint8)
+            cv2.circle(cut, (int(round(cx + r * 0.8)), int(round(cy - r * 0.8))),
+                       max(1, int(round(r * 0.6))), 255, -1)
+            acc[cut > 0] = 0.0
+        col = np.array([20.0, float(20 + contrast), float(20 + contrast)], np.float32)
+        img = img * (1 - acc[:, :, None]) + col * acc[:, :, None]
+        return np.clip(img, 0, 255).astype(np.uint8)
+
+    for name, size, r, smear, notch, contrast in [
+        ("clean_11px",      41, 5.5,  0.0, False, 200),
+        ("clean_21px",      61, 10.5, 0.0, False, 200),
+        ("blurred_21px",    61, 10.5, 14.0, False, 200),
+        ("notched_21px",    61, 10.5, 0.0, True,  200),
+        ("low_contrast",    41, 5.5,  0.0, False, 12),
+    ]:
+        c = (size - 1) / 2.0
+        img = _ball_image(size, c, c, r, smear, notch, contrast)
+        # Seed deliberately SHORT, as a real ragged mask always is.
+        got = sla._subpixel_diameter(img, c, c, r * 0.71)
+        out["diameter_probe"].append({
+            "name": name,
+            "width": size, "height": size,
+            "cx": c, "cy": c, "r0_px": r * 0.71,
+            "true_diameter_px": 2 * r,
+            "bgr": [int(v) for v in img.reshape(-1)],
+            "expected": None if got is None else float(got),
         })
 
     # Contact time from the audio trigger. The middle case is the real one: on
@@ -1144,7 +1199,8 @@ def main():
           f"{len(out['build_tracks'])} track-building cases, "
           f"{len(out['stitch_tracks'])} stitch cases, "
           f"{len(out['seed_track'])} seeded-track cases, "
-          f"{len(out['motion_mask'])} motion-mask cases")
+          f"{len(out['motion_mask'])} motion-mask cases, "
+          f"{len(out['diameter_probe'])} diameter-probe cases")
 
 
 if __name__ == "__main__":
