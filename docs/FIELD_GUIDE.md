@@ -149,6 +149,13 @@ report or Claude said to change.** The report exists so nobody has to guess.
 
 > ### ⚠️ Recalibrate before your next session — the old number is meaningless
 >
+> **This now lives in setup, as step 3 of 4: Set up → SOUND.** It is where it
+> belongs, because the threshold is a property of the VENUE and setup is the one
+> thing that happens once per venue. The app also knows which band a threshold
+> was measured in, so a calibration from before this change is retired
+> automatically and the setup screen asks for a new one rather than running on a
+> number that means nothing here.
+>
 > The trigger now listens **only above 6 kHz**, because bat-on-ball is a sharp
 > broadband crack while the things that were fooling it — a bat on the ground, a
 > bag dropped, a foot on a board — are all low. Measured on your own clips: the

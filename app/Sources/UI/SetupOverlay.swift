@@ -56,6 +56,17 @@ struct SetupOverlay: View {
             content(in: geo.size)
         }
         .sheet(isPresented: $showTips) { PlacementTipsView() }
+        .sheet(isPresented: $showTriggerCalibration) {
+            TriggerCalibrationView(capture: capture).environmentObject(model)
+        }
+        // Mirrored so `advisories` can say the trigger is uncalibrated without
+        // PlacementWizard having to know where settings live. Kept in step on
+        // appearance and on every change, because the calibration sheet writes
+        // it and the wizard has to hear about that.
+        .onAppear { wizard.triggerIsCalibrated = model.settings.triggerIsCalibrated }
+        .onChange(of: model.settings.triggerCalibratedBandHz) { _, _ in
+            wizard.triggerIsCalibrated = model.settings.triggerIsCalibrated
+        }
         .onPreferenceChange(PanelHeightKey.self) { height in
             panelHeight = height
         }
@@ -140,7 +151,9 @@ struct SetupOverlay: View {
         switch wizard.stage {
         case .level:  return true
         case .hitter: return !wizard.level.isTiltOK
-        case .ready:  return false
+        // Sound is about the microphone, not the aim, and the summary has
+        // nothing to point a horizon at.
+        case .sound, .ready: return false
         }
     }
 
@@ -310,6 +323,11 @@ struct SetupOverlay: View {
         }
     }
 
+    /// Presented over the setup overlay rather than pushed, because the
+    /// calibration needs the SAME live audio the trigger uses and there is only
+    /// ever one capture session — see `CaptureController`.
+    @State private var showTriggerCalibration = false
+
     @ViewBuilder private var stageContent: some View {
         switch wizard.stage {
         case .level:
@@ -325,6 +343,12 @@ struct SetupOverlay: View {
                              onTypeDistance: { showDistanceEntry = true },
                              onBack: { wizard.back() },
                              onNext: { wizard.advance() })
+        case .sound:
+            SoundStagePanel(isCalibrated: model.settings.triggerIsCalibrated,
+                            thresholdDb: model.settings.triggerDb,
+                            onCalibrate: { showTriggerCalibration = true },
+                            onBack: { wizard.back() },
+                            onNext: { wizard.advance() })
         case .ready:
             ReadyStagePanel(wizard: wizard,
                             hitterPresent: capture.hitterPresent,

@@ -519,6 +519,52 @@ final class PipelineTests: XCTestCase {
         let decoded = try! JSONDecoder().decode(AppSettings.self, from: data)
         XCTAssertEqual(decoded, settings)
     }
+
+    // MARK: - A threshold only means something in the band it was measured in
+
+    /// A calibration from the band now in force is kept.
+    func testACalibrationInTheCurrentBandSurvives() {
+        var settings = AppSettings()
+        settings.triggerDb = 37
+        settings.triggerCalibratedBandHz = SLA.triggerHighPassHz
+        let data = try! JSONEncoder().encode(settings)
+        let decoded = try! JSONDecoder().decode(AppSettings.self, from: data)
+        XCTAssertEqual(decoded.triggerDb, 37)
+        XCTAssertTrue(decoded.triggerIsCalibrated)
+    }
+
+    /// A calibration from ANOTHER band is retired, not carried.
+    ///
+    /// This is the failure it exists to stop. Every dB the trigger quotes is a
+    /// ratio against the noise floor of its band, and the app has changed that
+    /// band once: the same real hits read 27-34 dB broadband and 49-63 dB above
+    /// 6 kHz. A threshold carried across that is not stale, it is twenty
+    /// decibels too low, and the trigger fires on everything. Falling back to
+    /// the default is what makes the setup screen ask for a new one.
+    func testACalibrationFromAnotherBandIsRetired() {
+        var settings = AppSettings()
+        settings.triggerDb = 20
+        settings.triggerCalibratedBandHz = 0          // the old broadband trigger
+        let data = try! JSONEncoder().encode(settings)
+        let decoded = try! JSONDecoder().decode(AppSettings.self, from: data)
+        XCTAssertNil(decoded.triggerCalibratedBandHz)
+        XCTAssertFalse(decoded.triggerIsCalibrated)
+        XCTAssertEqual(decoded.triggerDb, SLA.triggerDb,
+                       "back to the default, not left on a number that means nothing here")
+    }
+
+    /// Never calibrated is not the same as calibrated-and-wrong: a threshold
+    /// somebody typed in themselves is theirs, and is left alone.
+    func testAnUncalibratedThresholdIsLeftAlone() {
+        var settings = AppSettings()
+        settings.triggerDb = 26
+        XCTAssertNil(settings.triggerCalibratedBandHz)
+        let data = try! JSONEncoder().encode(settings)
+        let decoded = try! JSONDecoder().decode(AppSettings.self, from: data)
+        XCTAssertEqual(decoded.triggerDb, 26)
+        XCTAssertFalse(decoded.triggerIsCalibrated,
+                       "a default, or a typed number, is not a measurement of a venue")
+    }
 }
 
 /// Measuring in the frame the viewer actually sees.

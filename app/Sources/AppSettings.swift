@@ -68,6 +68,29 @@ struct AppSettings: Codable, Equatable {
     /// that must reach existing installs.
     var defaultsGeneration = 2
     var triggerDb = SLA.triggerDb
+    /// The high-pass band `triggerDb` was MEASURED in, in Hz. `nil` means
+    /// nobody has calibrated at a venue and the default is in use.
+    ///
+    /// Stored because a threshold is only meaningful in the band it was
+    /// measured in, and this app has changed that band once already. Every dB
+    /// the trigger quotes is a ratio against the noise floor OF THAT BAND: the
+    /// same real hit read 27 dB broadband and 50 dB above 6 kHz. A threshold
+    /// carried across that change is not stale, it is meaningless — too low by
+    /// twenty, so the trigger fires on everything.
+    ///
+    /// Self-invalidating on purpose, rather than another `defaultsGeneration`
+    /// bump. The generation marker needs a human to remember to bump it; this
+    /// compares the stored band against the one actually in force, so any
+    /// future change to `SLA.triggerHighPassHz` retires old calibrations by
+    /// itself and the setup screen asks for a new one.
+    var triggerCalibratedBandHz: Double?
+
+    /// True when the stored threshold was measured in the band now in use.
+    /// A default threshold is not a calibration, however sensible it is.
+    var triggerIsCalibrated: Bool {
+        guard let band = triggerCalibratedBandHz else { return false }
+        return abs(band - SLA.triggerHighPassHz) < 1.0
+    }
     var preRollS = SLA.preRollS
     var postRollS = SLA.postRollS
     var direction: TrackBuilder.Direction = .auto
@@ -228,6 +251,16 @@ extension AppSettings {
             triggerDb = storedTrigger
         }
         defaultsGeneration = max(defaultsGeneration, 2)
+        // A threshold measured in another band is not a threshold. Retire it
+        // and fall back to the default, so the setup screen asks for a new one
+        // rather than the trigger running on a number that means nothing here.
+        let storedBand = (try? c.decodeIfPresent(Double.self, forKey: .triggerCalibratedBandHz)) ?? nil
+        if let storedBand, abs(storedBand - SLA.triggerHighPassHz) < 1.0 {
+            triggerCalibratedBandHz = storedBand
+        } else {
+            triggerCalibratedBandHz = nil
+            if storedBand != nil { triggerDb = d.triggerDb }
+        }
         preRollS = take(.preRollS, d.preRollS)
         postRollS = take(.postRollS, d.postRollS)
         direction = take(.direction, d.direction)

@@ -107,8 +107,23 @@ struct SettingsView: View {
                               systemImage: "exclamationmark.triangle.fill")
                             .font(.caption).foregroundStyle(Theme.warn)
                     }
+                    // 6...60, not 6...30. The trigger listens above
+                    // `SLA.triggerHighPassHz` now, and every level in that band
+                    // is higher: the same real hits that read 27-34 dB
+                    // broadband read 49-63 dB there, and this venue's own
+                    // calibration asks for 37. A range that stopped at 30 could
+                    // not express a calibrated threshold, let alone let anyone
+                    // nudge one.
                     stepper("Threshold over noise floor", value: $model.settings.triggerDb,
-                            range: 6...30, step: 1, unit: "dB")
+                            range: 6...60, step: 1, unit: "dB")
+                    if model.settings.triggerIsCalibrated {
+                        Text(String(format: "Measured at a venue, in the band above %.0f kHz.",
+                                    SLA.triggerHighPassHz / 1000))
+                            .font(.caption).foregroundStyle(Theme.pass)
+                    } else {
+                        Text("Not calibrated — this is the default. Set up → Sound measures it from the venue, which is where it belongs: a quiet garden and a cage want numbers twenty decibels apart.")
+                            .font(.caption).foregroundStyle(Theme.warn)
+                    }
                     // Only inside a round: calibration listens through the
                     // capture session, and from the start screen no session is
                     // running — the meter would sit at 0 dB, the countdown

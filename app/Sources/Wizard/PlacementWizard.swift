@@ -87,16 +87,29 @@ final class PlacementWizard: ObservableObject {
 
     // MARK: - Stages
 
-    /// The setup screen in order: aim it level, measure the hitter, arm.
+    /// The setup screen in order: aim it level, measure the hitter, listen to
+    /// the venue, arm.
     ///
     /// Ordered because each stage assumes the one before it — the distance is
     /// measured in a tilt-rectified frame, so a wildly off-level camera makes
     /// the measurement worse — and every one of them skippable, because none of
     /// them blocks arming and pretending otherwise is how a user learns to
     /// distrust the screen.
-    enum SetupStage: Int, CaseIterable { case level, hitter, ready }
+    ///
+    /// `sound` is here rather than in Settings because the trigger threshold is
+    /// a property of the VENUE, and setup is the one thing that happens once
+    /// per venue. Buried behind Settings it was a step that had to be done and
+    /// therefore was not: a quiet garden and a cage want thresholds twenty
+    /// decibels apart, and the app shipped one number for both.
+    enum SetupStage: Int, CaseIterable { case level, hitter, sound, ready }
 
     @Published private(set) var stage: SetupStage = .level
+
+    /// Whether the trigger threshold in force was measured at a venue, in the
+    /// band the trigger is actually listening in. Mirrored from settings by the
+    /// setup screen, so `advisories` can say so without this type having to
+    /// know about storage.
+    @Published var triggerIsCalibrated = false
 
     /// How the camera distance is being measured right now.
     ///
@@ -677,6 +690,16 @@ final class PlacementWizard: ObservableObject {
         // people learn to skip past the warnings that matter.
         if scaleSource == .none {
             out.append((.info, "No camera distance yet — measure it in Set up. Not required: it buys a 3-frame contact correction and a lens-height check."))
+        }
+
+        // The trigger's threshold is a property of the venue, and a default is
+        // not a measurement of one. A warning rather than info: unlike a
+        // missing camera distance, which costs a small correction, an
+        // uncalibrated trigger is the difference between recording the swings
+        // and recording the car park. On the corpus's own venue the default
+        // sat 7 dB under what the place actually needed.
+        if !triggerIsCalibrated {
+            out.append((.warning, "Trigger not calibrated here — it is on the default. Two minutes in Set up → Sound, and it will pick a threshold from what this venue sounds like."))
         }
 
         // Height last, because it is the one the user can least often fix —

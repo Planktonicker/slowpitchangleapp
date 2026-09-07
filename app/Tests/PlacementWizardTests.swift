@@ -84,13 +84,46 @@ final class PlacementWizardTests: XCTestCase {
         wizard.advance()
         XCTAssertEqual(wizard.stage, .hitter)
         wizard.skip()
+        XCTAssertEqual(wizard.stage, .sound, "the venue's own trigger threshold")
+        wizard.skip()
         XCTAssertEqual(wizard.stage, .ready)
         wizard.advance()
         XCTAssertEqual(wizard.stage, .ready, "there is nothing after the last stage")
         wizard.back()
-        XCTAssertEqual(wizard.stage, .hitter)
+        XCTAssertEqual(wizard.stage, .sound)
         wizard.go(to: .level)
         XCTAssertEqual(wizard.stage, .level)
+    }
+
+    /// Sound sits between measuring the hitter and arming, and is skippable
+    /// like every other stage.
+    ///
+    /// Skippable on purpose, even though an uncalibrated trigger is the
+    /// difference between recording the swings and recording the car park:
+    /// calibration needs somebody to hit three balls, which is not always
+    /// possible when the camera is being set up, and a stage that blocked
+    /// arming would strand them. It says so in `advisories` instead.
+    func testSoundStageIsBetweenHitterAndArmAndDoesNotBlock() {
+        let wizard = makeWizard()
+        wizard.go(to: .sound)
+        XCTAssertEqual(wizard.stage, .sound)
+        wizard.skip()
+        XCTAssertEqual(wizard.stage, .ready, "skipping sound still reaches arm")
+    }
+
+    /// An uncalibrated trigger is said out loud, as a warning rather than info.
+    ///
+    /// A missing camera distance costs a three-frame contact correction; a
+    /// default threshold at the wrong venue costs the swings themselves.
+    func testAnUncalibratedTriggerIsAWarning() {
+        let wizard = makeWizard()
+        wizard.triggerIsCalibrated = false
+        let uncalibrated = wizard.advisories.filter { $0.text.contains("Trigger not calibrated") }
+        XCTAssertEqual(uncalibrated.count, 1)
+        XCTAssertEqual(uncalibrated.first?.level, .warning)
+
+        wizard.triggerIsCalibrated = true
+        XCTAssertFalse(wizard.advisories.contains { $0.text.contains("Trigger not calibrated") })
     }
 
     func testBeginSetupReturnsToTheFirstStage() {

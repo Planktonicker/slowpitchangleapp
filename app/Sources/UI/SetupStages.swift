@@ -49,9 +49,15 @@ struct SetupHeader: View {
     }
 }
 
-/// Three tappable segments. Tappable because the stages are ordered but not
+/// Four tappable segments. Tappable because the stages are ordered but not
 /// locked — somebody who wants to re-level after measuring should not have to
 /// walk backwards through the screen to do it.
+///
+/// Four is the most this header will take. It was already described as very
+/// nearly full at three, which is why the tick REPLACES the digit rather than
+/// joining it, and why every segment refuses to wrap and will shrink its type
+/// before it truncates a word. A fifth stage needs a different header, not a
+/// fifth segment.
 struct StageStepper: View {
     var stage: PlacementWizard.SetupStage
     var onSelect: (PlacementWizard.SetupStage) -> Void
@@ -60,7 +66,8 @@ struct StageStepper: View {
         HStack(spacing: 4) {
             segment(.level, number: "1", word: "LEVEL")
             segment(.hitter, number: "2", word: "HITTER")
-            segment(.ready, number: "3", word: "ARM")
+            segment(.sound, number: "3", word: "SOUND")
+            segment(.ready, number: "4", word: "ARM")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
@@ -156,6 +163,60 @@ struct LevelStagePanel: View {
             .buttonStyle(SlabButtonStyle(fill: isLevel ? Theme.pass : Theme.surface,
                                          textColor: isLevel ? .black : Theme.steel,
                                          size: 16, verticalPadding: 12))
+        }
+    }
+}
+
+// MARK: - Sound
+
+/// The trigger threshold, measured at the venue rather than assumed.
+///
+/// Here rather than in Settings because the threshold is a property of the
+/// PLACE. A quiet garden and a batting cage want numbers twenty decibels apart,
+/// and behind a Settings screen this was a step that had to be done and
+/// therefore was not.
+///
+/// It shows the number in force and where it came from before offering to
+/// measure, because "30 dB" on its own is unfalsifiable — what tells you
+/// whether to trust it is whether anything here was ever listened to.
+struct SoundStagePanel: View {
+    var isCalibrated: Bool
+    var thresholdDb: Double
+    var onCalibrate: () -> Void
+    var onBack: () -> Void
+    var onNext: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: isCalibrated ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(isCalibrated ? Theme.pass : Theme.warn)
+                Text(isCalibrated
+                     ? String(format: "Measured here — %.0f dB", thresholdDb)
+                     : String(format: "Using the default, %.0f dB", thresholdDb))
+                    .font(Theme.label(13))
+                    .foregroundStyle(isCalibrated ? Theme.pass : Theme.warn)
+            }
+            Text(isCalibrated
+                 ? "The trigger is set from what this venue actually sounds like. Measure again if you have moved, or if the place has got louder."
+                 : "The default is a starting point, not a threshold for anywhere in particular. Two minutes — stay quiet for five seconds, then hit three balls — and it will pick one from this venue.")
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.steel)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(action: onCalibrate) {
+                Text(isCalibrated ? "Measure again" : "Measure this venue")
+            }
+            .buttonStyle(SlabButtonStyle(fill: isCalibrated ? Theme.surface : Theme.yellow,
+                                         textColor: isCalibrated ? Theme.steel : .black,
+                                         size: 16, verticalPadding: 12))
+            HStack(spacing: 8) {
+                Button("Back", action: onBack)
+                    .buttonStyle(OutlineButtonStyle(verticalPadding: 10, cornerRadius: 10))
+                Button(action: onNext) { Text(isCalibrated ? "Next" : "Skip") }
+                    .buttonStyle(SlabButtonStyle(fill: isCalibrated ? Theme.pass : Theme.surface,
+                                                 textColor: isCalibrated ? .black : Theme.steel,
+                                                 size: 16, verticalPadding: 10))
+            }
         }
     }
 }

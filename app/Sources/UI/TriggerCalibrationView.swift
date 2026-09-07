@@ -59,14 +59,15 @@ struct TriggerCalibrationView: View {
                 .monospacedDigit()
                 .foregroundStyle(Theme.yellow)
             SeamMeter(db: session.currentDb, thresholdDb: model.settings.triggerDb)
-            Text("Level above this room's own background")
+            Text(String(format: "Level above this room's own background, over %.0f kHz",
+                        SLA.triggerHighPassHz / 1000))
                 .font(.caption2).foregroundStyle(.secondary)
         }
     }
 
     private var intro: some View {
         VStack(spacing: 12) {
-            Text("The default 20 dB is a starting point, not a threshold for any particular place. A quiet garden needs less; a cage needs more. Two steps and it will pick one from what this venue actually sounds like.")
+            Text(String(format: "The default %.0f dB is a starting point, not a threshold for any particular place. A quiet garden needs less; a cage needs more. Two steps and it will pick one from what this venue actually sounds like.", SLA.triggerDb))
                 .font(.callout).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Button("Start — stay quiet") { session.startBackground() }
@@ -126,6 +127,11 @@ struct TriggerCalibrationView: View {
             VStack(spacing: 10) {
                 Button("Use \(Int(r.thresholdDb.rounded())) dB") {
                     model.settings.triggerDb = r.thresholdDb
+                    // Stamp the band it was measured in. A threshold without
+                    // one cannot be told from a default, and a threshold from
+                    // another band is worse than a default — see
+                    // `AppSettings.triggerCalibratedBandHz`.
+                    model.settings.triggerCalibratedBandHz = SLA.triggerHighPassHz
                     dismiss()
                 }
                 .buttonStyle(SlabButtonStyle(size: 17))
