@@ -303,12 +303,36 @@ def _subpixel_diameter(
     n = max(10, int(reach / step))
     rs = (np.arange(0, n + 1) * step).astype(np.float32)
 
+    # Sample a FLOAT window, not the uint8 frame.
+    #
+    # `cv2.remap` on an 8-bit image interpolates in fixed point and rounds the
+    # result back to 8 bits, which is self-defeating in a measurement whose
+    # whole purpose is sub-pixel. Measured against a plain float64 bilinear it
+    # moves the answer by up to 0.021 px — small, but it is the entire
+    # disagreement between this reference and the Swift port, which works in
+    # Double. On float input the two agree to 0.0000 px, which is what lets
+    # `parity.json` pin this to a hundredth of a pixel and mean it.
+    #
+    # Cropped first so the conversion is a few thousand pixels rather than two
+    # million per candidate. The crop is clipped to the frame and the remap
+    # replicates at ITS edge, which reproduces replicating at the frame's edge
+    # exactly, because every sample lies within `reach` of the centre and the
+    # crop covers `reach` in every direction.
+    pad = int(math.ceil(reach)) + 2
+    x0 = max(0, int(math.floor(cx)) - pad)
+    y0 = max(0, int(math.floor(cy)) - pad)
+    x1 = min(frame_bgr.shape[1], int(math.ceil(cx)) + pad + 1)
+    y1 = min(frame_bgr.shape[0], int(math.ceil(cy)) + pad + 1)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    window = frame_bgr[y0:y1, x0:x1].astype(np.float32)
+
     angles = np.linspace(0.0, 2.0 * math.pi, DIAMETER_PROBE_DIRECTIONS, endpoint=False)
     profile = np.empty((DIAMETER_PROBE_DIRECTIONS, len(rs), 3), np.float32)
     for i, a in enumerate(angles):
-        mapx = (cx + rs * math.cos(a)).reshape(-1, 1)
-        mapy = (cy + rs * math.sin(a)).reshape(-1, 1)
-        profile[i] = cv2.remap(frame_bgr, mapx, mapy, cv2.INTER_LINEAR,
+        mapx = (cx - x0 + rs * math.cos(a)).reshape(-1, 1)
+        mapy = (cy - y0 + rs * math.sin(a)).reshape(-1, 1)
+        profile[i] = cv2.remap(window, mapx, mapy, cv2.INTER_LINEAR,
                                borderMode=cv2.BORDER_REPLICATE).reshape(-1, 3)
 
     core_sel = rs <= max(0.4 * r0_px, step)
