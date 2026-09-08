@@ -20,6 +20,9 @@ struct RoundsView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var viewing: SessionSummary?
+    /// The bundle a round has just been exported to, held while the share
+    /// sheet is up.
+    @State private var sharing: [URL] = []
     /// Rounds a swipe has proposed deleting, held until the dialog answers.
     @State private var doomed: [Session] = []
 
@@ -82,6 +85,10 @@ struct RoundsView: View {
                 SessionSummaryView(summary: summary) { viewing = nil }
                     .environmentObject(model)
             }
+            .sheet(isPresented: Binding(get: { !sharing.isEmpty },
+                                        set: { if !$0 { sharing = [] } })) {
+                ShareSheet(items: sharing)
+            }
             // The summary sheet can reopen a round too. When it does, this
             // screen has to get out of the way — otherwise a live capture
             // session is running underneath a list of finished ones.
@@ -127,6 +134,18 @@ struct RoundsView: View {
                 Button("Hit into it again") { reopen(round) }
                     .buttonStyle(SlabButtonStyle(size: 13, verticalPadding: 8))
             }
+            // On its own line, not a third button beside those two. Slabs
+            // divide the row's width between them, and "HIT INTO IT AGAIN" at
+            // a third of a phone's width is already past the point where the
+            // style's own shrink-to-fit gives up and truncates.
+            Button {
+                if let url = model.exportRound(round.id, startedAt: round.startedAt) {
+                    sharing = [url]
+                }
+            } label: {
+                Label("Export the whole round", systemImage: "square.and.arrow.up")
+            }
+            .buttonStyle(OutlineButtonStyle(verticalPadding: 8))
         }
         .padding(.vertical, 6)
         .listRowBackground(Theme.surface)

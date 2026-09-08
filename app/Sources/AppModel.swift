@@ -1158,11 +1158,44 @@ final class AppModel: ObservableObject {
         learnedBallBySession[id] = nil
     }
 
+    /// Every swing belonging to a round, oldest first.
+    ///
+    /// A round IS its swings — nothing stores one separately (see
+    /// `RoundsView`) — so this is the definition rather than a lookup.
+    func swings(inRound id: UUID) -> [SwingDTO] {
+        swings.filter { $0.sessionID == id }.sorted { $0.capturedAt < $1.capturedAt }
+    }
+
     /// How many swings a round would take with it. The delete confirmation
     /// says this, because "delete round" reads like removing a heading.
     func swingCount(inRound id: UUID) -> Int {
-        swings.filter { $0.sessionID == id }.count
+        swings(inRound: id).count
     }
+
+    /// The whole round as one bundle.
+    ///
+    /// Exists because the alternative was Swings → Select → tick every row of
+    /// that round → Share, which is a lot of tapping to answer "send me the
+    /// round", and easy to get wrong: the rows are not grouped by round, so
+    /// picking the right nine out of forty is done by timestamp, by eye.
+    ///
+    /// Exports every swing in the round, INCLUDING the ones that produced no
+    /// reading. Those are not noise to be filtered out — a round where nothing
+    /// was measured is the most important thing a bundle can carry, and each
+    /// such swing now brings the reason with it.
+    func exportRound(_ id: UUID, startedAt: Date) -> URL? {
+        let members = swings(inRound: id)
+        guard !members.isEmpty else { return nil }
+        let stamp = Self.roundStampFormatter.string(from: startedAt)
+        return exportDiagnostics(for: members,
+                                 named: "round_\(stamp)_\(members.count)swings")
+    }
+
+    private static let roundStampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd_HHmm"
+        return f
+    }()
 
     /// Delete every stored swing, reloading once at the end.
     ///
@@ -1475,7 +1508,12 @@ final class AppModel: ObservableObject {
     /// keeping the part any question is actually about — where the ball was
     /// when it was hit. Track summaries are kept whole, because "why was that
     /// one chosen" is answered by the losers.
+    /// - Parameter named: a stem for the file, when the caller knows what the
+    ///   selection IS. A round exports as `round_<date>_<n>swings`, because
+    ///   three bundles from one afternoon called `diagnostics_9swings` differ
+    ///   only by a timestamp nobody can map back to a round.
     func exportDiagnostics(for doomed: [SwingDTO],
+                           named: String? = nil,
                            candidateWindowS: Double = 0.5) -> URL? {
         guard !doomed.isEmpty else { return nil }
         var out: [[String: Any]] = []
@@ -1548,8 +1586,9 @@ final class AppModel: ObservableObject {
                                                      options: [.prettyPrinted, .sortedKeys])
         else { return nil }
         let stamp = Self.stampFormatter.string(from: Date())
+        let stem = named ?? "diagnostics_\(out.count)swings_\(stamp)"
         let url = ClipStore.exportsDirectory
-            .appendingPathComponent("diagnostics_\(out.count)swings_\(stamp).json")
+            .appendingPathComponent("\(stem).json")
         do {
             try data.write(to: url, options: .atomic)
             return url

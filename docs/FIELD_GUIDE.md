@@ -369,14 +369,24 @@ with what you saw.
 
 ## What to send Claude, and when
 
-**The one that matters most, and it is one file for a whole session:**
+**The one that matters most, and it is one file for a whole round:**
 
-> Swings → **Select** → tick every swing from the session → the **share icon**
+> **Rounds** → find the round → **Export the whole round**
+
+That is the short way, and it cannot pick the wrong swings: a round IS its
+swings, so the button takes all of them. The file is named after the round —
+`round_20260905_0917_9swings.json` — so several from one afternoon are tellable
+apart without opening them.
+
+The long way still works when you want a hand-picked few rather than a whole
+round:
+
+> Swings → **Select** → tick the ones you want → the **share icon**
 > (top right, the box with the arrow out of it) → AirDrop, Files or Mail.
 
-That writes a single `diagnostics_<n>swings_<date>.json` carrying, for every
-swing you ticked: the report, the ball track, the flags, the camera angles and
-the detector's own trace. It is tens of kilobytes. It replaces sending clips
+Either way you get one JSON carrying, for every swing: the report, the ball
+track, the flags, the camera angles, the detector's own trace — and, for a swing
+that produced no reading at all, the reason it did not. It is tens of kilobytes. It replaces sending clips
 one at a time, and — this is the point — it goes into `spike/corpus/`, where
 it stays. Clips sent as `.mov` attachments are looked at once and gone; a
 bundle in the corpus is replayed against every future change to the pipeline,
