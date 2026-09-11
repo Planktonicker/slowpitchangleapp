@@ -226,28 +226,26 @@ final class AppModel: ObservableObject {
         capture.preRollS = settings.preRollS
         capture.postRollS = settings.postRollS
         reload()
-        // Clip files no swing points at, cleared once, at launch, when nothing
+        // Half-finished import copies, cleared once, at launch, when nothing
         // can be mid-analysis.
         //
         // There was a sweep already and it could not reach the files that
         // mattered: it was keyed on `lastImportedClip`, which is in-memory and
         // therefore nil after every launch, and it ran inside `beginAnalysis`,
         // which a REFUSED import never reaches. So the orphan most likely to
-        // exist was the one it could never see — and an orphan is not merely
-        // wasted storage, it silently blocks its own clip from ever being
-        // imported again, because the duplicate check matched it and no
-        // refusal could clear it.
+        // exist was the one it could never see.
         //
-        // Guarded on a non-empty store: clips on disk with no swings loaded is
-        // a store that failed to open, not a directory of orphans, and
-        // deleting the owner's footage on the strength of that would be
-        // unrecoverable.
-        if !swings.isEmpty {
-            let freed = ClipStore.deleteUnreferencedClips(referenced: referencedClipNames)
-            if freed > 0 {
-                banner = Banner(kind: .info,
-                                text: "Cleared \(freed) leftover clip file\(freed == 1 ? "" : "s") that no swing pointed at. Those were blocking those clips from being imported again.")
-            }
+        // What it deletes is decided by NAME, in `deleteUnreferencedClips`,
+        // and not by this call site — read the argument there before widening
+        // it. "Not referenced by a swing" is not the same question as "safe to
+        // delete", because the store can be rebuilt empty while the clips
+        // directory, which lives in a different container, keeps everything.
+        // One swing filmed after that is enough to make `swings` non-empty, so
+        // a row count is never evidence about what is on disk.
+        let freed = ClipStore.deleteUnreferencedClips(referenced: referencedClipNames)
+        if freed > 0 {
+            banner = Banner(kind: .info,
+                            text: "Cleared \(freed) half-finished import\(freed == 1 ? "" : "s") — clips copied in but never measured. Those were taking up space; nothing that ever reached Swings was touched.")
         }
     }
 
@@ -711,7 +709,15 @@ final class AppModel: ObservableObject {
         var estimatedS: Double
 
         var message: String {
-            String(format: "This clip is %.0f seconds long — a session, not a swing. Measuring it will take roughly %.0f minutes, and only the single best track in the whole file is reported; every other swing in it is discarded without a word. Trimming it to the one swing first is faster and gives a better answer.",
+            // NOT "trim it in Photos". A Photos trim is stored as an edit on
+            // top of the recording, and the 240fps original this app has to
+            // fetch is the thing underneath it — so the trim is invisible here
+            // and the clip arrives at its full length anyway. Worse, two trims
+            // of one recording fetch byte-identical files, which is why they
+            // then look like duplicates of each other. The advice that works
+            // is to export the trim, which costs the frame rate, or to film
+            // one swing per clip.
+            String(format: "This clip is %.0f seconds long — a session, not a swing. Measuring it will take roughly %.0f minutes, and only the single best track in the whole file is reported; every other swing in it is discarded without a word. Trimming it in Photos will not help: the 240 fps original underneath the trim is what gets imported, at its full length. Filming one swing per clip is what makes this quick.",
                    durationS, max(1, estimatedS / 60).rounded())
         }
     }
@@ -732,7 +738,7 @@ final class AppModel: ObservableObject {
         var existingName: String
 
         var message: String {
-            "This looks like the same clip as \(existingName), which is already in Swings — same size, same length. Importing it again adds a second copy and a second reading of the same swing. Measuring it again with the current settings is usually what was wanted, and the swing screen has a re-measure button for that."
+            "This looks like the same clip as \(existingName), which is already in Swings — same size, same length. If both came from Photos and are two trims of one recording, they ARE the same file: the 240 fps original under the trim is what gets imported, so the trim never arrives. Otherwise the swing screen has a re-measure button, which is usually what was wanted."
         }
     }
 

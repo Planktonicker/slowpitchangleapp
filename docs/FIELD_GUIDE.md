@@ -149,11 +149,27 @@ side-on, 4–6 m away — or use footage you already have.
   content hash, so it is occasionally wrong about two genuinely different
   clips: **"Import it anyway"** is there for exactly that, and costs nothing
   but a second copy.
+  - **A trim in Photos does not make a new clip, here.** Photos stores a trim
+    as an edit sitting on top of the recording, and the 240 fps original this
+    app has to fetch is the thing underneath it. So the trim never arrives: the
+    whole recording does, at full length, every time — and three trims of one
+    session fetch three byte-identical files, which is why the second and third
+    read as duplicates of the first. **Film one swing per clip.** That is the
+    only thing that shortens what gets measured, because the export that would
+    honour a trim is the 30 fps render, which is the one thing this app cannot
+    use.
 - **A clip that measures nothing still appears in the list**, as a row marked
   **"no track"** in orange. That is deliberate. It can be opened, its frames
   exported, its report read and the row deleted — all of which was impossible
-  when a failed import left a banner and vanished. It carries no reading, so it
-  is in no average and no CSV number.
+  when a failed import left a banner and vanished.
+  - It carries no reading, so nothing that averages readings touches it: not
+    the round summary, not the trends, not the G4 repeatability gate. Two
+    places do count it, on purpose. **G1 counts it as a miss**, because "could
+    the ball be tracked at all" is exactly what G1 asks, and quietly dropping
+    the failures would flatter the one number the project is being judged on.
+    And **"Export everything as CSV" writes it as a row** with 0 frames and
+    zeroes in the measurement columns — the same as a failed live capture,
+    which has always been recorded this way.
 
 **The rule for this whole part: change one thing at a time, and only what the
 report or Claude said to change.** The report exists so nobody has to guess.

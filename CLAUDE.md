@@ -253,6 +253,15 @@ Open, in rough priority order:
   clear the file causing it and that clip became permanently un-importable.
   Anything asking "do we already have this?" asks
   `AppModel.referencedClipNames`, never `contentsOfDirectory`.
+- **"No swing points at this file" is not "this file is litter."** The record
+  set and the file set live in different containers and can come apart in the
+  direction that loses footage: `SwiftDataStore` answers ANY failure to open by
+  deleting the store and rebuilding it empty, while `Documents/Clips` keeps
+  everything. One swing filmed after that makes `swings` non-empty, so a row
+  count is never evidence about what is on disk. `deleteUnreferencedClips`
+  therefore decides by NAME — only `ClipStore.importPrefix`, a copy that was
+  never filed — and the three name shapes in that directory (`pending_…`,
+  `import_…`, `<setting>_NN.mov`) are kept disjoint so that it can.
 - **Copy first, ask second.** A url from `fileImporter` or the Photos picker is
   security-scoped and that scope dies with the Task that opened it, so any
   decision deferred to a dialog outlives the right to read the file it is

@@ -527,17 +527,21 @@ final class PipelineTests: XCTestCase {
         let preexisting = Set((try? fm.contentsOfDirectory(atPath: dir.path)) ?? [])
 
         let referenced = "zz_test_referenced.mov"
-        let orphan = "zz_test_orphan.mov"
+        let orphan = "import_1_zz_test_orphan.mov"
         let pending = "pending_zz_test.mov"
+        // Filmed footage that no swing points at any more. The store can be
+        // rebuilt empty while this directory keeps everything, so this is NOT
+        // litter and the sweep must not touch it.
+        let filed = "tee_99.mov"
         let incoming = dir.appendingPathComponent("zz_test_incoming.mov")
         // Byte-identical, which is exactly what the duplicate check keys on.
         let bytes = Data(repeating: 7, count: 4096)
-        for name in [referenced, orphan, pending] {
+        for name in [referenced, orphan, pending, filed] {
             try bytes.write(to: dir.appendingPathComponent(name))
         }
         try bytes.write(to: incoming)
         defer {
-            for name in [referenced, orphan, pending] {
+            for name in [referenced, orphan, pending, filed] {
                 try? fm.removeItem(at: dir.appendingPathComponent(name))
             }
             try? fm.removeItem(at: incoming)
@@ -564,6 +568,44 @@ final class PipelineTests: XCTestCase {
                        "the orphan that was blocking re-import is gone")
         XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent(pending).path),
                       "a clip being written right now is not an orphan")
+        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent(filed).path),
+                      "footage already filed as a swing is never litter, referenced or not")
+    }
+
+    /// The sweep must not be able to eat the clip library.
+    ///
+    /// The failure this pins is not hypothetical and not slow: `SwiftDataStore`
+    /// answers ANY failure to open — a schema change, a corrupt WAL after a
+    /// crash mid-capture — by deleting the store and rebuilding it empty, and
+    /// the clips live in a different container that the rebuild does not
+    /// touch. So "no swing points at this file" and "this file is litter" come
+    /// apart, in the direction that loses footage. One swing filmed after the
+    /// reset is enough to make the store non-empty, which is why a row count
+    /// was never the guard it looked like.
+    func testTheSweepCannotEatFilmedFootageAfterAStoreReset() throws {
+        let fm = FileManager.default
+        let dir = ClipStore.clipsDirectory
+        let filed = ["tee_90.mov", "cage_91.mov", "live_92.mov"]
+        let leftover = "import_1_zz_reset_leftover.mov"
+        for name in filed + [leftover] {
+            try Data(repeating: 3, count: 64).write(to: dir.appendingPathComponent(name))
+        }
+        defer {
+            for name in filed + [leftover] {
+                try? fm.removeItem(at: dir.appendingPathComponent(name))
+            }
+        }
+
+        // The store came back empty, so NOTHING is referenced — the worst case
+        // the old `!swings.isEmpty` guard was trying and failing to cover.
+        ClipStore.deleteUnreferencedClips(referenced: [])
+
+        for name in filed {
+            XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent(name).path),
+                          "\(name) is a real recording and the rebuilt store simply forgot it")
+        }
+        XCTAssertFalse(fm.fileExists(atPath: dir.appendingPathComponent(leftover).path),
+                       "an unfiled import copy is still litter, reset or no reset")
     }
 
     // MARK: - Settings round-trip

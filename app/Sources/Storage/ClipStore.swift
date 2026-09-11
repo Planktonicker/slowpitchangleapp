@@ -65,14 +65,13 @@ enum ClipStore {
         }
     }
 
-    /// Copy an imported file into the clip store, keeping its extension.
+    /// The prefix every copy of somebody else's file is written under.
     ///
-    /// Copied rather than analysed in place, for two reasons: a file picked
-    /// from Files or iCloud Drive lives behind a security-scoped URL that is
-    /// only valid for the length of the picker callback, and a swing record
-    /// that points at somebody else's document would break the moment they
-    /// moved it. The store owns every clip it references.
-    /// Clip files no swing points at, deleted. Returns how many went.
+    /// Load-bearing: it is what tells a half-finished IMPORT apart from FILMED
+    /// footage, and `deleteUnreferencedClips` deletes only the first kind.
+    static let importPrefix = "import_"
+
+    /// Unfiled import copies no swing points at, deleted. Returns how many.
     ///
     /// Called at launch, when nothing can be mid-analysis. The app already had
     /// a sweep, but it was keyed on `lastImportedClip` — an in-memory property
@@ -82,19 +81,32 @@ enum ClipStore {
     /// more. Each stranded file then blocked its own clip from ever being
     /// imported again.
     ///
-    /// Conservative about what it will touch: only files in the clips
-    /// directory, and only when the caller has supplied the full set of
-    /// referenced names. An empty store with clips on disk is a first launch
-    /// before the swings have loaded, not a directory full of orphans, so the
-    /// caller has to say it means it.
+    /// **Only `import_` names, and that restriction is the whole safety
+    /// argument.** The three name shapes in this directory are disjoint:
+    /// `pending_…` is the recorder mid-write, `import_…` is a copy that has
+    /// not been filed yet, and `<setting>_NN.mov` is footage this app has
+    /// already accepted as a swing. Deleting on "not referenced" alone looked
+    /// equivalent and is not, because the record set and the file set can come
+    /// apart in the direction that matters: `SwiftDataStore` responds to any
+    /// failure to open by DELETING the store and rebuilding it empty, while
+    /// Documents/Clips — a different directory, in a different container — is
+    /// untouched. One swing filmed after such a reset is enough to make
+    /// `swings` non-empty, and a sweep that trusted that would have deleted
+    /// every earlier recording on the next launch and called it housekeeping.
+    /// Those files are the scarcest thing this project has.
+    ///
+    /// Narrowing costs nothing, either. An `import_` name is exactly the
+    /// orphan class the duplicate check used to choke on, and the duplicate
+    /// check no longer consults the directory at all — so this is now
+    /// housekeeping rather than a fix, and housekeeping does not get to
+    /// delete footage.
     @discardableResult
     static func deleteUnreferencedClips(referenced: Set<String>) -> Int {
         let fm = FileManager.default
         let names = (try? fm.contentsOfDirectory(atPath: clipsDirectory.path)) ?? []
         var removed = 0
         for name in names where !referenced.contains(name) {
-            // `pending_` is a clip being written right now by the recorder.
-            if name.hasPrefix("pending_") { continue }
+            guard name.hasPrefix(importPrefix) else { continue }
             if (try? fm.removeItem(at: clipsDirectory.appendingPathComponent(name))) != nil {
                 removed += 1
             }
@@ -124,16 +136,23 @@ enum ClipStore {
         if safeBase.isEmpty { safeBase = "clip" }
         let stamp = Int(Date().timeIntervalSince1970)
         let fm = FileManager.default
-        var url = clipsDirectory.appendingPathComponent("import_\(stamp)_\(safeBase).\(safeExt)")
+        var url = clipsDirectory.appendingPathComponent("\(importPrefix)\(stamp)_\(safeBase).\(safeExt)")
         var n = 2
         while fm.fileExists(atPath: url.path) {
             url = clipsDirectory
-                .appendingPathComponent("import_\(stamp)_\(safeBase)_\(n).\(safeExt)")
+                .appendingPathComponent("\(importPrefix)\(stamp)_\(safeBase)_\(n).\(safeExt)")
             n += 1
         }
         return url
     }
 
+    /// Copy an imported file into the clip store, keeping its extension.
+    ///
+    /// Copied rather than analysed in place, for two reasons: a file picked
+    /// from Files or iCloud Drive lives behind a security-scoped URL that is
+    /// only valid for the length of the picker callback, and a swing record
+    /// that points at somebody else's document would break the moment they
+    /// moved it. The store owns every clip it references.
     static func importClip(from source: URL) throws -> URL {
         let dst = freeImportURL(base: source.deletingPathExtension().lastPathComponent,
                                 ext: source.pathExtension)
