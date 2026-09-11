@@ -504,6 +504,68 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(axis.y, 540 - f * tan(10 * Double.pi / 180), accuracy: 1e-6)
     }
 
+    // MARK: - The clips directory is not the history
+
+    /// An unreferenced file must not block an import, and must be clearable.
+    ///
+    /// This is the bug the owner reported as "the app refuse to accept other
+    /// videos, which i dont know why". The duplicate check matched by byte size
+    /// against every file in the clips directory, and that directory routinely
+    /// holds clips no swing points at: an import whose analysis found nothing,
+    /// a long-clip warning that was cancelled, anything a crash left. Matching
+    /// one refused the import while naming a clip "which is in Swings" that was
+    /// not in Swings — and no refusal could ever clear the file causing it, so
+    /// that clip became permanently un-importable.
+    ///
+    /// Touches the real clips directory, because that is where the bug lived: a
+    /// fake would have agreed with the old code. It creates only files with its
+    /// own prefix and removes them again, and the sweep is given every other
+    /// name already present so it cannot reach anything it did not make.
+    func testAnUnreferencedClipNeitherBlocksAnImportNorSurvivesTheSweep() throws {
+        let fm = FileManager.default
+        let dir = ClipStore.clipsDirectory
+        let preexisting = Set((try? fm.contentsOfDirectory(atPath: dir.path)) ?? [])
+
+        let referenced = "zz_test_referenced.mov"
+        let orphan = "zz_test_orphan.mov"
+        let pending = "pending_zz_test.mov"
+        let incoming = dir.appendingPathComponent("zz_test_incoming.mov")
+        // Byte-identical, which is exactly what the duplicate check keys on.
+        let bytes = Data(repeating: 7, count: 4096)
+        for name in [referenced, orphan, pending] {
+            try bytes.write(to: dir.appendingPathComponent(name))
+        }
+        try bytes.write(to: incoming)
+        defer {
+            for name in [referenced, orphan, pending] {
+                try? fm.removeItem(at: dir.appendingPathComponent(name))
+            }
+            try? fm.removeItem(at: incoming)
+        }
+
+        // Only the referenced name counts as history.
+        let known: Set<String> = [referenced]
+        let match = ClipStore.existingClipMatchingSize(of: incoming, referenced: known)
+        XCTAssertEqual(match?.lastPathComponent, referenced,
+                       "a clip a swing points at is a real duplicate")
+
+        let noneKnown = ClipStore.existingClipMatchingSize(of: incoming, referenced: [])
+        XCTAssertNil(noneKnown,
+                     "an orphan on disk must not refuse an import — it is not in Swings")
+
+        // The sweep clears the orphan, keeps the referenced one, and will not
+        // touch a clip the recorder is still writing.
+        let keep = preexisting.union([referenced, incoming.lastPathComponent])
+        let freed = ClipStore.deleteUnreferencedClips(referenced: keep)
+        XCTAssertGreaterThanOrEqual(freed, 1)
+        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent(referenced).path),
+                      "a referenced clip is history, not litter")
+        XCTAssertFalse(fm.fileExists(atPath: dir.appendingPathComponent(orphan).path),
+                       "the orphan that was blocking re-import is gone")
+        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent(pending).path),
+                      "a clip being written right now is not an orphan")
+    }
+
     // MARK: - Settings round-trip
 
     func testAppSettingsSurviveEncoding() {

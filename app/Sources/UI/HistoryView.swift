@@ -98,55 +98,48 @@ struct HistoryView: View {
                 }
                 ToolbarItem(placement: .topBarLeading) { filterMenu }
                 ToolbarItem(placement: .topBarTrailing) { selectButton }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        // Photos first, and it is not a preference. The
-                        // document picker cannot reach the original recording:
-                        // it renders slow motion down to 30fps on the way out,
-                        // and a 240fps clip measured as 30fps is wrong by a
-                        // factor of eight with nothing downstream able to tell.
-                        Button {
-                            sheet = .photoPicker
-                        } label: {
-                            Label("From Photos (keeps 240fps)", systemImage: "photo.on.rectangle")
-                        }
-                        Button {
-                            showImporter = true
-                        } label: {
-                            Label("From Files", systemImage: "folder")
-                        }
-                    } label: {
-                        Image(systemName: "square.and.arrow.down")
-                    }
-                    .disabled(model.analysisProgress != nil)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        let urls = model.exportAll()
-                        if !urls.isEmpty { sheet = .share(urls) }
-                    } label: {
-                        Image(systemName: "square.and.arrow.up")
-                    }
-                    // `model.swings`, not `visible`: exportAll writes every
-                    // stored swing, not the filtered view, so scoping this to
-                    // the round would grey out an export that would have
-                    // worked.
-                    .disabled(model.swings.isEmpty)
-                }
-                // The last import's stage-by-stage report, on request rather
-                // than in the way. Present only while there is one, because a
-                // permanently greyed icon reads as a broken feature — and it
-                // is the ONLY copy for an import that produced no swing, which
-                // is exactly the case worth reading.
-                if model.lastDiagnostics != nil {
+                // Not while selecting. Select mode already puts Export, Delete
+                // and its own Done in the bar; adding import to that is how the
+                // overflow "..." appears, and what it swallows is Done.
+                // Importing during a selection is not a thing anyone does.
+                if editMode != .active {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { sheet = .diagnostics } label: {
-                            Image(systemName: "doc.text.magnifyingglass")
+                        Menu {
+                            // Photos first, and it is not a preference. The
+                            // document picker cannot reach the original recording:
+                            // it renders slow motion down to 30fps on the way out,
+                            // and a 240fps clip measured as 30fps is wrong by a
+                            // factor of eight with nothing downstream able to tell.
+                            Button {
+                                sheet = .photoPicker
+                            } label: {
+                                Label("From Photos (keeps 240fps)", systemImage: "photo.on.rectangle")
+                            }
+                            Button {
+                                showImporter = true
+                            } label: {
+                                Label("From Files", systemImage: "folder")
+                            }
+                        } label: {
+                            Image(systemName: "square.and.arrow.down")
                         }
-                        .accessibilityLabel("Last analysis report")
+                        .disabled(model.analysisProgress != nil)
                     }
                 }
             }
+            // Two trailing items, and that is a ceiling rather than a taste.
+            //
+            // There were four, plus Done. iOS does not shrink a crowded
+            // navigation bar, it collapses the overflow into a "..." — and
+            // what went into it was DONE, so the screen lost its way out while
+            // gaining a menu nobody was looking for. The owner reported the bar
+            // as noisy and asked for a back button they already had.
+            //
+            // Everything removed from here moved into the filter menu on the
+            // left, which was already a Menu and therefore free. Nothing was
+            // stranded: `exportAll` writes the summary, full and scoreboard
+            // CSVs and lives nowhere else, and the import report is the ONLY
+            // copy for an import that produced no swing.
             // ONE sheet modifier — see the note in StartView. Three stacked
             // on one view is not something SwiftUI reliably honours: the later
             // ones win, the earlier ones silently do nothing, and the symptom
@@ -156,7 +149,7 @@ struct HistoryView: View {
                 case .share(let urls):
                     ShareSheet(items: urls)
                 case .photoPicker:
-                    PhotoClipPicker { result in
+                    PhotoClipPicker(onPick: { result in
                         switch result {
                         case .success(let url):
                             model.importCopiedClip(at: url)
@@ -164,7 +157,16 @@ struct HistoryView: View {
                             model.banner = AppModel.Banner(kind: .error,
                                                            text: error.localizedDescription)
                         }
-                    }
+                    }, onFinish: {
+                        // The binding, not the controller — see `onFinish`.
+                        // Without this the picker closed but `sheet` stayed on
+                        // `.photoPicker`, and since that case's id is a
+                        // constant, tapping "From Photos" again assigned an
+                        // unchanged value and did nothing at all.
+                        sheet = nil
+                    }, onDownload: { fraction in
+                        model.noteDownload(fraction)
+                    })
                     .ignoresSafeArea()
                 case .diagnostics:
                     DiagnosticsView(report: model.lastDiagnostics ?? "",
@@ -198,7 +200,31 @@ struct HistoryView: View {
                     model.longClipPrompt = nil
                     model.beginAnalysis(of: prompt.url)
                 }
-                Button("Cancel", role: .cancel) { model.longClipPrompt = nil }
+                // Cancel DELETES the copy. It is already inside the store by
+                // the time this is asked — `importCopiedClip` runs the warning
+                // after the file is on disk — so leaving it there stranded a
+                // file no swing pointed at, which then blocked that same clip
+                // from ever being imported again.
+                Button("Cancel", role: .cancel) { model.discardLongClip(prompt) }
+            } message: { prompt in
+                Text(prompt.message)
+            }
+            // The same shape for a clip that looks like one already here. Asked
+            // rather than refused: the match is size plus duration, not a
+            // content hash, so it can be wrong — and a check that can be wrong
+            // must not be the last word.
+            //
+            // The setter only CLEARS — it must not delete the copy. SwiftUI
+            // flips `isPresented` to false before it runs the tapped button's
+            // action, so a setter that deleted would delete the file out from
+            // under "Import it anyway" every time. Deleting belongs in the one
+            // button that means it.
+            .alert("Already in Swings?",
+                   isPresented: Binding(get: { model.duplicatePrompt != nil },
+                                        set: { if !$0 { model.duplicatePrompt = nil } }),
+                   presenting: model.duplicatePrompt) { prompt in
+                Button("Import it anyway") { model.importDuplicateAnyway(prompt) }
+                Button("Don't import", role: .cancel) { model.discardDuplicate(prompt) }
             } message: { prompt in
                 Text(prompt.message)
             }
@@ -212,8 +238,8 @@ struct HistoryView: View {
             // is not evidence, it is an interruption, and the way to stop
             // being interrupted was to stop importing.
             //
-            // The report is now a button in the toolbar, lit only while there
-            // is one to read (see `reportButton`), and every swing that
+            // The report is now an item in the filter menu, present only while
+            // there is one to read, and every swing that
             // produced a record carries its own report on the swing screen.
             // Nothing has become unreachable; it just waits to be asked.
         }
@@ -242,7 +268,23 @@ struct HistoryView: View {
     /// on a screen with nothing else moving, so without this the app looks
     /// frozen and the user picks a second file on top of the first.
     @ViewBuilder private var importProgress: some View {
-        if let progress = model.analysisProgress {
+        // The iCloud fetch first: it happens BEFORE any measuring, and it is
+        // the one that used to show nothing at all. A clip that lives only in
+        // iCloud can take minutes to come down, during which the sheet has
+        // already closed — an idle screen that looks exactly like a tap that
+        // missed, so the natural response is to tap again.
+        if let fraction = model.downloadProgress {
+            VStack(spacing: 6) {
+                Text("Fetching from iCloud…")
+                    .font(.system(size: 13, weight: .bold))
+                ProgressView(value: fraction).tint(Theme.yellow)
+                Text("The full-quality original, not the preview. Measuring starts when it lands.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(14)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
+            .padding()
+        } else if let progress = model.analysisProgress {
             VStack(spacing: 6) {
                 Text("Measuring the clip…")
                     .font(.system(size: 13, weight: .bold))
@@ -272,6 +314,22 @@ struct HistoryView: View {
                 Button("\(setting.displayName) (\(count))") { filter = setting }
                     .disabled(count == 0)
             }
+            Divider()
+            // Displaced from the toolbar, not deleted — see the note there.
+            if model.lastDiagnostics != nil {
+                Button {
+                    sheet = .diagnostics
+                } label: {
+                    Label("Last import report", systemImage: "doc.text.magnifyingglass")
+                }
+            }
+            Button {
+                let urls = model.exportAll()
+                if !urls.isEmpty { sheet = .share(urls) }
+            } label: {
+                Label("Export everything as CSV", systemImage: "square.and.arrow.up")
+            }
+            .disabled(model.swings.isEmpty)
         } label: {
             Label(filter?.displayName
                   ?? (model.isInSession && showEverything ? "Every swing" : "All"),

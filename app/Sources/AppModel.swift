@@ -19,6 +19,26 @@ final class AppModel: ObservableObject {
     @Published private(set) var swings: [SwingDTO] = []
     @Published var currentSetting: SwingSetting = .tee
     @Published private(set) var analysisProgress: Double?
+
+    /// Fraction of an iCloud fetch, or nil when none is running.
+    ///
+    /// Separate from `analysisProgress` because it is a different wait with a
+    /// different remedy: measuring is the phone working, downloading is the
+    /// network, and the honest thing is to say which. It also comes FIRST —
+    /// nothing can be measured until the original has landed.
+    @Published private(set) var downloadProgress: Double?
+
+    /// Called by the Photos picker while it pulls an original out of iCloud.
+    func noteDownload(_ fraction: Double?) {
+        // Only meaningful while a fetch is live; a stray final callback after
+        // the clear must not raise the card again, for the same reason the
+        // analysis bar guards its own hops.
+        if let fraction {
+            downloadProgress = min(max(fraction, 0), 1)
+        } else {
+            downloadProgress = nil
+        }
+    }
     @Published private(set) var lastSwing: SwingDTO?
     /// Swings in the round so far — DERIVED, never stored. Five writers used
     /// to hand-maintain a counter and disagreed: arm() zeroed it mid-round, so
@@ -102,7 +122,27 @@ final class AppModel: ObservableObject {
         return { [weak self] p in
             let pct = Int((p * 100).rounded(.down))
             guard lastPercent.setIfDifferent(pct) else { return }
-            Task { @MainActor [weak self] in self?.analysisProgress = p }
+            // Only ever UPDATES a bar that is already up; it never raises
+            // one. These hops are unstructured Tasks created off the main
+            // actor, so they are unordered against the `MainActor.run` that
+            // finishes the analysis and clears the bar — and the analyzer
+            // emits progress right up to the last frame, so one hop landing
+            // after the clear is not a corner case. Without this guard that
+            // hop sets `analysisProgress` back to 0.99 with nothing left
+            // running to ever clear it again: the "Measuring the clip…" card
+            // stays on screen for the rest of the launch and the import menu,
+            // which is `.disabled(model.analysisProgress != nil)`, goes grey
+            // and stays grey with no message. That is the other half of "the
+            // app refuse to accept other videos, which i dont know why".
+            //
+            // The read and the write are both on the main actor, so the check
+            // cannot be raced. A late hop from a previous analysis can still
+            // paint a stale percent onto a live bar; that self-corrects on the
+            // next hop and is not worth a generation counter.
+            Task { @MainActor [weak self] in
+                guard let self, self.analysisProgress != nil else { return }
+                self.analysisProgress = p
+            }
         }
     }
 
@@ -186,6 +226,29 @@ final class AppModel: ObservableObject {
         capture.preRollS = settings.preRollS
         capture.postRollS = settings.postRollS
         reload()
+        // Clip files no swing points at, cleared once, at launch, when nothing
+        // can be mid-analysis.
+        //
+        // There was a sweep already and it could not reach the files that
+        // mattered: it was keyed on `lastImportedClip`, which is in-memory and
+        // therefore nil after every launch, and it ran inside `beginAnalysis`,
+        // which a REFUSED import never reaches. So the orphan most likely to
+        // exist was the one it could never see — and an orphan is not merely
+        // wasted storage, it silently blocks its own clip from ever being
+        // imported again, because the duplicate check matched it and no
+        // refusal could clear it.
+        //
+        // Guarded on a non-empty store: clips on disk with no swings loaded is
+        // a store that failed to open, not a directory of orphans, and
+        // deleting the owner's footage on the strength of that would be
+        // unrecoverable.
+        if !swings.isEmpty {
+            let freed = ClipStore.deleteUnreferencedClips(referenced: referencedClipNames)
+            if freed > 0 {
+                banner = Banner(kind: .info,
+                                text: "Cleared \(freed) leftover clip file\(freed == 1 ? "" : "s") that no swing pointed at. Those were blocking those clips from being imported again.")
+            }
+        }
     }
 
     // MARK: - Session
@@ -488,13 +551,27 @@ final class AppModel: ObservableObject {
                 self.banner = Banner(kind: .warning, text: problem)
                 return
             }
-            // ...and a file already in the store is not measured twice.
-            if let dupe = await Self.duplicateOf(picked) {
-                self.banner = Banner(kind: .warning, text: dupe)
-                return
-            }
+            // A file already in the store is ASKED about, not refused.
+            //
+            // It used to be refused outright, with a banner explaining that
+            // re-measuring was probably what was wanted. Reasonable, and wrong
+            // whenever it is not: a genuinely different clip that happens to
+            // match on size and duration had no way in at all, and the owner
+            // could not see what had been turned away or why beyond a banner
+            // that was already gone. The match is size plus duration — not a
+            // content hash — so it can be wrong, and a check that can be wrong
+            // must not be the last word.
+            let dupe = await Self.duplicateOf(picked, referenced: self.referencedClipNames)
             do {
-                self.importCopiedClip(at: try ClipStore.importClip(from: picked))
+                let copied = try ClipStore.importClip(from: picked)
+                if let dupe {
+                    // Copied FIRST: see `DuplicatePrompt`. The picked url's
+                    // security scope does not survive this task.
+                    self.duplicatePrompt = DuplicatePrompt(
+                        copiedURL: copied, existingName: dupe.lastPathComponent)
+                } else {
+                    self.importCopiedClip(at: copied)
+                }
             } catch {
                 self.banner = Banner(kind: .error,
                                      text: "Could not read that file: \(error.localizedDescription)")
@@ -530,12 +607,52 @@ final class AppModel: ObservableObject {
     /// second copy of a clip already measured adds a duplicate swing to the
     /// history, doubles what it costs on a phone that fills quickly at 240fps,
     /// and skews G1, G4 and G5, all to produce the number already on screen.
-    static func duplicateOf(_ url: URL) async -> String? {
-        guard let existing = ClipStore.existingClipMatchingSize(of: url) else { return nil }
+    static func duplicateOf(_ url: URL, referenced: Set<String>) async -> URL? {
+        guard let existing = ClipStore.existingClipMatchingSize(of: url,
+                                                                referenced: referenced)
+        else { return nil }
         let a = try? await AVURLAsset(url: url).load(.duration).seconds
         let b = try? await AVURLAsset(url: existing).load(.duration).seconds
         guard let a, let b, abs(a - b) < 0.05 else { return nil }
-        return "Already imported — this is the same clip as \(existing.lastPathComponent), which is in Swings. To measure it again with the current settings, open it there and tap re-measure; importing it a second time would only add a duplicate."
+        return existing
+    }
+
+    /// Every clip filename a stored swing points at.
+    ///
+    /// The clips DIRECTORY is not the history — see
+    /// `ClipStore.existingClipMatchingSize`. This is.
+    var referencedClipNames: Set<String> {
+        Set(swings.compactMap(\.clipFilename))
+    }
+
+    /// Yes: measure the copy that is already in the store.
+    ///
+    /// Back through `importCopiedClip` rather than straight to
+    /// `beginAnalysis`, so a clip that is BOTH a duplicate and a long session
+    /// file still gets asked about its length — but with the duplicate
+    /// question suppressed, or the yes walks into the same dialog it just
+    /// answered and the only way out is to say no.
+    func importDuplicateAnyway(_ prompt: DuplicatePrompt) {
+        duplicatePrompt = nil
+        importCopiedClip(at: prompt.copiedURL, allowingDuplicate: true)
+    }
+
+    /// The long clip was not wanted after all: its copy goes too.
+    ///
+    /// The file is already inside the store when the warning is shown, so
+    /// dismissing the warning without this left it there with nothing pointing
+    /// at it — and an unreferenced clip blocks its own re-import for ever.
+    func discardLongClip(_ prompt: LongClipPrompt) {
+        longClipPrompt = nil
+        if !referencedClipNames.contains(prompt.url.lastPathComponent) {
+            try? FileManager.default.removeItem(at: prompt.url)
+        }
+    }
+
+    /// No: the copy made in order to ask the question goes away with it.
+    func discardDuplicate(_ prompt: DuplicatePrompt) {
+        duplicatePrompt = nil
+        try? FileManager.default.removeItem(at: prompt.copiedURL)
     }
 
     /// Analyse a clip already sitting in the store.
@@ -543,7 +660,10 @@ final class AppModel: ObservableObject {
     /// The Photos path writes the original recording out of the library itself,
     /// so it arrives here already copied — there is nothing left to import,
     /// only to measure.
-    func importCopiedClip(at stored: URL) {
+    /// - Parameter allowingDuplicate: the duplicate question has already been
+    ///   asked and answered yes. Without this the answer re-enters here, is
+    ///   asked the same question, and the dialog never closes.
+    func importCopiedClip(at stored: URL, allowingDuplicate: Bool = false) {
         // Ask before spending minutes. A 272-second session file took thirteen
         // minutes to measure and produced ONE number off it, because only the
         // best track in a clip is measured and the rest are discarded in
@@ -566,9 +686,13 @@ final class AppModel: ObservableObject {
                 self.banner = Banner(kind: .warning, text: problem)
                 return
             }
-            if let dupe = await Self.duplicateOf(stored) {
-                try? FileManager.default.removeItem(at: stored)
-                self.banner = Banner(kind: .warning, text: dupe)
+            if !allowingDuplicate,
+               let dupe = await Self.duplicateOf(stored,
+                                                 referenced: self.referencedClipNames) {
+                // Asked, not deleted. The copy is already ours and already in
+                // the store, so it is exactly what the answer "yes" needs.
+                self.duplicatePrompt = DuplicatePrompt(
+                    copiedURL: stored, existingName: dupe.lastPathComponent)
                 return
             }
             if let prompt = await Self.lengthWarning(for: stored) {
@@ -593,6 +717,26 @@ final class AppModel: ObservableObject {
     }
 
     @Published var longClipPrompt: LongClipPrompt?
+
+    /// A clip that looks like one already in the store, waiting for an answer.
+    ///
+    /// It holds the url of a copy ALREADY IN THE STORE, not of the file the
+    /// user picked. A picked url is security-scoped and that scope closes when
+    /// the import task ends, so a decision deferred to a dialog outlives the
+    /// right to read the file it is about. Copying first and asking second is
+    /// the only ordering that works; answering "no" deletes the copy.
+    struct DuplicatePrompt: Identifiable, Equatable {
+        var id: String { copiedURL.path }
+        /// Already inside the store, and deleted if the answer is no.
+        var copiedURL: URL
+        var existingName: String
+
+        var message: String {
+            "This looks like the same clip as \(existingName), which is already in Swings — same size, same length. Importing it again adds a second copy and a second reading of the same swing. Measuring it again with the current settings is usually what was wanted, and the swing screen has a re-measure button for that."
+        }
+    }
+
+    @Published var duplicatePrompt: DuplicatePrompt?
 
     /// Decide whether a clip is long enough to be worth asking about, from
     /// metadata alone — no decoding, so this costs nothing.
@@ -807,10 +951,41 @@ final class AppModel: ObservableObject {
                               report: String? = nil) {
         analysisProgress = nil
         guard let analysis else {
-            // Kept, not deleted. A clip the pipeline made nothing of is exactly
-            // the one whose frames are worth exporting, and deleting it here
-            // would throw away the evidence at the moment it became useful.
-            // The next import clears it.
+            // A row, not just a banner — and this is the whole of "it does not
+            // even show up".
+            //
+            // The clip was kept, correctly: the one the pipeline made nothing
+            // of is exactly the one whose frames are worth exporting. But
+            // nothing was RECORDED, so it was kept somewhere the owner could
+            // not see, could not delete and could not re-measure, while a
+            // banner explaining it expired after six seconds. The identical
+            // failure on the live-capture path has always saved a placeholder
+            // row (see `finishClip`); an import saved nothing, and the
+            // asymmetry had no reason behind it.
+            //
+            // The row also stops the file being an ORPHAN. An unreferenced
+            // clip in the store blocks its own re-import for ever, because the
+            // duplicate check matches it and no refusal can clear it.
+            let name = ClipStore.fileUnderConvention(clip: stored, setting: setting)
+            lastImportedClip = name.map { ClipStore.clipURL(named: $0) } ?? stored
+            var dto = SwingDTO()
+            dto.setting = setting
+            dto.clipFilename = name ?? stored.lastPathComponent
+            dto.trackedFrames = 0
+            dto.autoTriggered = false
+            dto.notes = failure ?? "Nothing measurable in that clip."
+            dto.captureFlags = [.importedClip]
+            // Into the round it was imported during, same as a successful one.
+            dto.sessionID = session?.id
+            do {
+                try store.save(dto)
+                reload()
+                lastSwing = dto
+            } catch {
+                banner = Banner(kind: .error,
+                                text: "Could not save the swing: \(error.localizedDescription)")
+                return
+            }
             banner = Banner(kind: .warning,
                             text: failure ?? "Nothing measurable in that clip.")
             return

@@ -243,6 +243,29 @@ Open, in rough priority order:
 - `AVAssetImageGenerator` defaults to **half a second** of seek tolerance — 120
   frames at 240fps. Always set both tolerances to `.zero`.
 
+- **The Clips directory is not the history; the swing records are.** The
+  directory also holds clips whose analysis found nothing, clips whose
+  long-clip prompt was cancelled, and whatever a crash left behind — files no
+  `SwingDTO` points at, invisible in the app and deletable from nowhere in it.
+  The duplicate check used to scan the directory, so one of those orphans could
+  refuse an import by naming a clip "which is in Swings" that was not in
+  Swings — and the refusal returned before the cleanup, so nothing could ever
+  clear the file causing it and that clip became permanently un-importable.
+  Anything asking "do we already have this?" asks
+  `AppModel.referencedClipNames`, never `contentsOfDirectory`.
+- **Copy first, ask second.** A url from `fileImporter` or the Photos picker is
+  security-scoped and that scope dies with the Task that opened it, so any
+  decision deferred to a dialog outlives the right to read the file it is
+  about. `DuplicatePrompt` therefore carries a url already inside the store,
+  and answering "no" deletes it. The corollary is that every dismissal path has
+  to delete — a prompt cancelled without one leaves an orphan, which by the
+  gotcha above locks that clip out for good.
+- **SwiftUI sets `isPresented` to false BEFORE running the tapped button's
+  action.** So side effects in the `Binding`'s setter run first, and a setter
+  that cleaned up after a cancelled dialog deleted the file out from under the
+  button that said "import it anyway". Setters clear state; the button that
+  means it does the work.
+
 - **"Cannot find 'X' in scope" for a type whose file is plainly on disk means
   the generated project is stale, not that the code is wrong.** Quit Xcode
   first, then `xcodegen generate`, then reopen — a running Xcode can write its

@@ -113,7 +113,9 @@ side-on, 4–6 m away — or use footage you already have.
    - Never use "From Files" for slow-motion — that route hands over a 30fps
      render and every speed comes out 8× wrong.
 2. Wait through "Measuring the clip…".
-3. A sheet titled **"Clip diagnostics"** opens by itself. Read two lines:
+3. Open the report: the **filter menu** (top *left*) → **"Last import report"**.
+   It is there whenever there is one to read, and it is the only copy for an
+   import that measured nothing. Read two lines:
    - the `clip` line: the frame rate is **measured from the clip's own frame
      timing**, so it reads whatever you actually filmed — 240, 200, 198.94 —
      and the word after it says where the number came from. `(measured)` is
@@ -139,6 +141,19 @@ side-on, 4–6 m away — or use footage you already have.
 
 4. **Always tap "Copy" and paste the whole report to Claude**, success or
    failure. It is a few hundred bytes and it is the only evidence that matters.
+
+**Two things the import will do that are worth expecting:**
+
+- **"Already in Swings?"** — a clip the same size and length as one already
+  there gets a question, not a refusal. That check is size plus duration, not a
+  content hash, so it is occasionally wrong about two genuinely different
+  clips: **"Import it anyway"** is there for exactly that, and costs nothing
+  but a second copy.
+- **A clip that measures nothing still appears in the list**, as a row marked
+  **"no track"** in orange. That is deliberate. It can be opened, its frames
+  exported, its report read and the row deleted — all of which was impossible
+  when a failed import left a banner and vanished. It carries no reading, so it
+  is in no average and no CSV number.
 
 **The rule for this whole part: change one thing at a time, and only what the
 report or Claude said to change.** The report exists so nobody has to guess.
@@ -361,9 +376,9 @@ Clap test (B3). Bar moves but no capture → Status sheet → is "Ignored — no
 hitter" climbing? Bar doesn't move → recalibrate (Part D) or use **MANUAL**.
 
 ### After the session
-Swings tab → any swing → replay and details. Share icon exports everything as
-CSV. Sessions where something felt wrong: export and send the CSV row along
-with what you saw.
+Swings tab → any swing → replay and details. The **filter menu** (top left) →
+**"Export everything as CSV"** writes the lot. Sessions where something felt
+wrong: export and send the CSV row along with what you saw.
 
 ---
 
