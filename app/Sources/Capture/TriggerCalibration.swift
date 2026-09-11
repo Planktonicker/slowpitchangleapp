@@ -39,11 +39,14 @@ final class TriggerCalibration: ObservableObject {
 
     struct Result: Equatable {
         var backgroundPeakDb: Double
-        var quietestHitDb: Double
-        var loudestHitDb: Double
+        /// `nil` when nobody hit anything — a listen-only calibration. Then
+        /// there is a threshold and no verdict, because separation is the
+        /// distance between two measured ends and only one was measured.
+        var quietestHitDb: Double?
+        var loudestHitDb: Double?
         var thresholdDb: Double
-        var separationDb: Double
-        var verdict: TriggerCalibrationVerdict
+        var separationDb: Double?
+        var verdict: TriggerCalibrationVerdict?
         var hitCount: Int
     }
 
@@ -147,9 +150,11 @@ final class TriggerCalibration: ObservableObject {
         }
     }
 
-    /// Stop early with whatever hits are recorded. Offered because three swings
-    /// is a request, not a requirement, and refusing to finish would strand
-    /// someone who only wanted two.
+    /// Stop with whatever hits are recorded — including none.
+    ///
+    /// Three swings is a request, not a requirement. With none it produces a
+    /// listen-only threshold rather than refusing, which is the common case:
+    /// one person, a tripod, and nobody to hit for them.
     func finishEarly() {
         if burstPeak > 0 {
             hits.append(burstPeak)
@@ -159,8 +164,24 @@ final class TriggerCalibration: ObservableObject {
     }
 
     private func finish() {
+        // No hits is a RESULT now, not a failure to reach one.
+        //
+        // Asking for three hits was asking for a second person, or for the
+        // hitter to set the phone down and walk back — and a calibration that
+        // needs a helper is a calibration that does not happen, which is how
+        // this app came to run one threshold at every venue. Listening alone
+        // puts the line within half a decibel of where three hits put it, on
+        // the one venue both have been measured at; see
+        // `SLA.thresholdFromBackground`.
         guard let quietest = hits.min(), let loudest = hits.max() else {
-            phase = .idle
+            phase = .done(Result(backgroundPeakDb: backgroundPeak,
+                                 quietestHitDb: nil,
+                                 loudestHitDb: nil,
+                                 thresholdDb: SLA.thresholdFromBackground(
+                                     backgroundPeakDb: backgroundPeak),
+                                 separationDb: nil,
+                                 verdict: nil,
+                                 hitCount: 0))
             return
         }
         let s = SLA.suggestTriggerDb(backgroundPeakDb: backgroundPeak,

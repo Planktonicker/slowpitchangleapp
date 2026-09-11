@@ -44,6 +44,7 @@ final class ParityTests: XCTestCase {
         var seed_track: [SeedCase]
         var motion_mask: [MotionCase]
         var diameter_probe: [DiameterCase]
+        var listen_only_threshold: [ListenOnlyCase]
         var contact_from_audio: [ContactAudioCase]
     }
 
@@ -63,6 +64,11 @@ final class ParityTests: XCTestCase {
         var prev: [[Int]]?
         var cur: [[Int]]
         var expected: [[Int]]?
+    }
+
+    struct ListenOnlyCase: Decodable {
+        var background_peak_db: Double
+        var expected_threshold_db: Double
     }
 
     struct DiameterCase: Decodable {
@@ -819,6 +825,40 @@ final class ParityTests: XCTestCase {
                 assertClose(got, want, rel: 1e-6, abs: 0.01, "\(c.name) diameter")
             }
         }
+    }
+
+    /// A threshold from the venue alone, with nobody hitting.
+    ///
+    /// Pinned because it is what the setup screen offers by default now, and
+    /// because it is the number a venue runs on when the owner is setting up a
+    /// tripod by themselves — which is most of the time.
+    func testListenOnlyThresholdMatchesReference() {
+        assertClose(SLA.triggerListenOnlyMarginDb,
+                    Self.fixtures.constants["TRIGGER_LISTEN_ONLY_MARGIN_DB"]!, "listen-only margin")
+        let cases = Self.fixtures.listen_only_threshold
+        XCTAssertFalse(cases.isEmpty)
+        for c in cases {
+            assertClose(SLA.thresholdFromBackground(backgroundPeakDb: c.background_peak_db),
+                        c.expected_threshold_db, "listen-only from \(c.background_peak_db) dB")
+        }
+    }
+
+    /// The two calibrations must agree about the corpus venue, or the short one
+    /// is not a substitute for the long one.
+    ///
+    /// Measured there: background peaks at 30.1 dB in the band the trigger
+    /// listens in, the quietest of seven labelled hits at 45.7. Listening alone
+    /// puts the line at 36.1 and three hits put it at 35.6 — half a decibel
+    /// apart. The hits were never buying the threshold; they were buying the
+    /// verdict.
+    func testListeningAloneAgreesWithThreeHitsOnTheCorpusVenue() {
+        let listenOnly = SLA.thresholdFromBackground(backgroundPeakDb: 30.1)
+        let withHits = SLA.suggestTriggerDb(backgroundPeakDb: 30.1, quietestHitDb: 45.7)
+        XCTAssertEqual(listenOnly, withHits.thresholdDb, accuracy: 1.0)
+        XCTAssertEqual(withHits.verdict, .good, "15.6 dB of room is a usable venue")
+        // And the default sits inside the band the corpus sweep found clean.
+        XCTAssertGreaterThanOrEqual(SLA.triggerDb, 32)
+        XCTAssertLessThanOrEqual(SLA.triggerDb, 36)
     }
 
     // MARK: - Least squares

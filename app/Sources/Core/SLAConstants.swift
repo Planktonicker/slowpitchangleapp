@@ -261,6 +261,36 @@ enum SLA {
     /// passing car is what produces a false trigger and an average hides it.
     /// `quietestHitDb` is the same reasoning inverted — the threshold has to
     /// catch the softest swing, not the best one.
+    /// How far above the venue's own loudest background moment to put the
+    /// threshold when NOBODY HAS HIT ANYTHING. Mirrors
+    /// `TRIGGER_LISTEN_ONLY_MARGIN_DB`.
+    static let triggerListenOnlyMarginDb = 6.0
+
+    /// A threshold from the venue alone, with nobody hitting.
+    ///
+    /// Mirrors `threshold_from_background`; pinned by the
+    /// `listen_only_threshold` block of `parity.json`.
+    ///
+    /// This is what makes setup's SOUND stage usable by one person with a
+    /// tripod. Asking for three hits was asking for a second person, or for the
+    /// hitter to put the phone down and come back — and a calibration that
+    /// needs a helper is a calibration that does not happen, which is how the
+    /// app came to be running one threshold at every venue.
+    ///
+    /// Measured on `spike/corpus/`: listening alone puts the line at 36.1 dB
+    /// for that venue and the three-hit calibration puts it at 35.6. Half a
+    /// decibel apart — the hits were never buying the threshold, they were
+    /// buying the VERDICT, which is a different thing and still worth having
+    /// when somebody can hit for you.
+    ///
+    /// Returns a threshold and no verdict, deliberately. Separation is the
+    /// distance between two measured ends; with one end measured there is none
+    /// to report, and inventing a confidence from half the evidence is what
+    /// `docs/BIOMECHANICS.md` forbids everywhere else.
+    static func thresholdFromBackground(backgroundPeakDb: Double) -> Double {
+        backgroundPeakDb + triggerListenOnlyMarginDb
+    }
+
     static func suggestTriggerDb(backgroundPeakDb: Double,
                                  quietestHitDb: Double)
         -> (thresholdDb: Double, separationDb: Double, verdict: TriggerCalibrationVerdict) {
@@ -346,12 +376,19 @@ enum SLA {
     /// from 27 dB to 50, and the loudest non-swing from 30 to 30. 20 there
     /// would fire on everything.
     ///
-    /// 30 rather than the 37 the venue measurement asks for, deliberately, and
-    /// the asymmetry is the reason: **a missed measurement is recoverable and a
-    /// missed swing is not.** At 30 all three of the corpus's low-frequency
-    /// false positives stop firing and both verified hits clear it by 20 dB;
-    /// the fourth false positive sits right on it. Erring low buys a clip that
-    /// can be deleted, and erring high loses a swing that cannot be got back.
+    /// 36, and that number is now measured rather than reasoned. Sweeping the
+    /// whole corpus — seven labelled hits, four labelled no-swings — every
+    /// threshold from 32 to 36 records all seven and refuses all four. Below
+    /// 32 the false positives start (one at 30, two at 22, four at 12); above
+    /// 36 there is no evidence either way, so the top of the clean band is not
+    /// the place to sit.
+    ///
+    /// It was 30 for one build, erring low on the principle that a missed
+    /// swing cannot be got back while a false positive is a clip you delete.
+    /// That principle stands; 30 was simply the wrong number for it. The
+    /// quietest of the seven hits peaks at 45.7 dB and the loudest non-swing at
+    /// 30.1, so 36 sits 9 dB under every hit and 6 dB over every background
+    /// moment — erring low WITHIN the clean band rather than outside it.
     ///
     /// It is also only a starting point, and more so than before: the corpus
     /// audio is AAC out of a `.mov`, which discards high frequencies, while the
@@ -366,7 +403,7 @@ enum SLA {
     /// Still a default, not an answer: the right threshold is per venue, and
     /// Settings → Trigger → Calibrate measures one. A quiet garden needs less
     /// than this, a cage needs more.
-    static let triggerDb = 30.0
+    static let triggerDb = 36.0
 
     /// The band the contact trigger listens in, and how steeply everything
     /// below it is discarded.

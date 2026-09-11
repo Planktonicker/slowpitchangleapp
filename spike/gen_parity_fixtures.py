@@ -527,6 +527,7 @@ def main():
         "SEED_SEARCH_RADIUS_PX": float(sla.SEED_SEARCH_RADIUS_PX),
         "SEED_SEARCH_RADIUS_FRAC": float(sla.SEED_SEARCH_RADIUS_FRAC),
         "MOTION_DIFF_THRESHOLD": float(sla.MOTION_DIFF_THRESHOLD),
+        "TRIGGER_LISTEN_ONLY_MARGIN_DB": float(sla.TRIGGER_LISTEN_ONLY_MARGIN_DB),
         "DIAMETER_PROBE_DIRECTIONS": float(sla.DIAMETER_PROBE_DIRECTIONS),
         "DIAMETER_BG_INNER": float(sla.DIAMETER_BG_INNER),
         "DIAMETER_BG_OUTER": float(sla.DIAMETER_BG_OUTER),
@@ -559,6 +560,7 @@ def main():
         "body_strides": [],
         "body_drift_gate": [],
         "trigger_calibration": [],
+        "listen_only_threshold": [],
         "track_straightness": [],
         "select_track": [],
         "build_tracks": [],
@@ -1175,6 +1177,15 @@ def main():
             "expected_separation_db": sep, "expected_verdict": verdict,
         })
 
+    # A threshold from the venue alone, with nobody hitting. The listen-only
+    # calibration is what makes the setup screen's SOUND stage possible when
+    # there is no one to hit three balls for you.
+    for bg in (0.0, 6.0, 12.0, 22.5, 30.1, 41.0):
+        out["listen_only_threshold"].append({
+            "background_peak_db": bg,
+            "expected_threshold_db": sla.threshold_from_background(bg),
+        })
+
     dst = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "..", "app", "Tests", "Fixtures", "parity.json")
     dst = os.path.normpath(dst)
@@ -1194,6 +1205,7 @@ def main():
           f"{len(out['rectify_tilt'])} tilt-rectify cases, "
           f"{len(out['body_angles']) + len(out['body_tilts']) + len(out['body_distances']) + len(out['body_strides'])} body cases, "
           f"{len(out['trigger_calibration'])} trigger-calibration cases, "
+          f"{len(out['listen_only_threshold'])} listen-only cases, "
           f"{len(out['track_straightness'])} straightness cases, "
           f"{len(out['select_track'])} selection cases, "
           f"{len(out['build_tracks'])} track-building cases, "

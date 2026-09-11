@@ -88,7 +88,7 @@ struct TriggerCalibrationView: View {
 
     private func hitting(_ recorded: Int) -> some View {
         VStack(spacing: 12) {
-            Text("Now hit \(TriggerCalibration.hitsWanted) balls")
+            Text("Done — or hit \(TriggerCalibration.hitsWanted) balls to check it")
                 .font(Theme.label(16)).foregroundStyle(Theme.yellow)
             HStack(spacing: 8) {
                 ForEach(0..<TriggerCalibration.hitsWanted, id: \.self) { i in
@@ -97,10 +97,18 @@ struct TriggerCalibrationView: View {
                         .frame(width: 16, height: 16)
                 }
             }
-            Text("Normal swings, not your hardest — the threshold is set from the quietest one, so a soft hit here is worth more than a good one.")
+            Text(recorded == 0
+                 ? "The threshold is already set from what this venue sounds like, and you can stop here. Hitting a few tells it how much room there is between the noise and a real hit — worth doing if somebody can hit for you, and not worth waiting for if nobody can."
+                 : "Normal swings, not your hardest — the threshold is set from the quietest one, so a soft hit here is worth more than a good one.")
                 .font(.caption).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            if recorded > 0 {
+            // Two buttons rather than one with a switched style: `ButtonStyle`
+            // has no type-erased box in the standard library, and inventing one
+            // to save four lines is not a trade worth making.
+            if recorded == 0 {
+                Button("Done — nobody to hit") { session.finishEarly() }
+                    .buttonStyle(SlabButtonStyle(size: 17))
+            } else {
                 Button("Use \(recorded) and finish") { session.finishEarly() }
                     .buttonStyle(OutlineButtonStyle())
             }
@@ -109,18 +117,25 @@ struct TriggerCalibrationView: View {
 
     private func results(_ r: TriggerCalibration.Result) -> some View {
         VStack(spacing: 14) {
-            StatChip(text: r.verdict.label, color: colour(r.verdict), filled: true)
+            if let verdict = r.verdict {
+                StatChip(text: verdict.label, color: colour(verdict), filled: true)
+            } else {
+                StatChip(text: "Listened only", color: Theme.steel, filled: false)
+            }
 
             HStack(spacing: 14) {
                 MetricTile(label: "Background", value: String(format: "%.0f", r.backgroundPeakDb),
                            unit: "dB", tint: .white)
-                MetricTile(label: "Quietest hit", value: String(format: "%.0f", r.quietestHitDb),
-                           unit: "dB", tint: .white)
+                if let quietest = r.quietestHitDb {
+                    MetricTile(label: "Quietest hit", value: String(format: "%.0f", quietest),
+                               unit: "dB", tint: .white)
+                }
                 MetricTile(label: "Threshold", value: String(format: "%.0f", r.thresholdDb),
                            unit: "dB")
             }
 
-            Text(r.verdict.advice)
+            Text(r.verdict?.advice
+                 ?? "Set from the venue's own background, with nobody hitting. That is a threshold, not a verdict: whether this place has room between its noise and a real hit takes a few hits to know, and can be measured any time somebody can hit for you.")
                 .font(.callout).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
 
@@ -139,9 +154,15 @@ struct TriggerCalibrationView: View {
                     .buttonStyle(OutlineButtonStyle())
             }
 
-            Text(String(format: "%d hits recorded, loudest %.0f dB. Separation %.0f dB.",
-                        r.hitCount, r.loudestHitDb, r.separationDb))
-                .font(.caption2).foregroundStyle(.secondary)
+            if let loudest = r.loudestHitDb, let sep = r.separationDb {
+                Text(String(format: "%d hits recorded, loudest %.0f dB. Separation %.0f dB.",
+                            r.hitCount, loudest, sep))
+                    .font(.caption2).foregroundStyle(.secondary)
+            } else {
+                Text(String(format: "Background measured over %.0f s. Nothing was hit.",
+                            TriggerCalibration.backgroundListenS))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 

@@ -199,7 +199,7 @@ struct SoundStagePanel: View {
             }
             Text(isCalibrated
                  ? "The trigger is set from what this venue actually sounds like. Measure again if you have moved, or if the place has got louder."
-                 : "The default is a starting point, not a threshold for anywhere in particular. Two minutes — stay quiet for five seconds, then hit three balls — and it will pick one from this venue.")
+                 : "The default is a starting point, not a threshold for anywhere in particular. Five seconds of quiet is all it needs — nobody has to hit anything. Hitting a few afterwards is optional, and only tells you how much room there is.")
                 .font(.system(size: 13))
                 .foregroundStyle(Theme.steel)
                 .fixedSize(horizontal: false, vertical: true)

@@ -1818,6 +1818,39 @@ TRIGGER_CAL_MARGINAL = "marginal"
 TRIGGER_CAL_UNUSABLE = "unusable"
 
 
+# How far above the venue's own loudest background moment to put the threshold
+# when NOBODY HAS HIT ANYTHING — a listen-only calibration.
+#
+# Measured on `spike/corpus/`, in the band the trigger listens in: the loudest
+# thing in a clip the hitter says had no swing in it peaks at 30.1 dB over the
+# rolling floor, and the quietest of seven labelled hits peaks at 45.7. That is
+# 15.6 dB of room, and 6 puts the line at 36 — clear of every background moment
+# by 6 dB and under every hit by 9.
+#
+# Six rather than half the gap, because a listen-only calibration does not KNOW
+# the gap: it has measured one end. The margin therefore has to be a number
+# that works without knowing how loud a hit is, and the asymmetry is the honest
+# one — a false positive is a clip to delete, a missed swing cannot be got back.
+TRIGGER_LISTEN_ONLY_MARGIN_DB = 6.0
+
+
+def threshold_from_background(background_peak_db: float) -> float:
+    """A threshold from the venue alone, with nobody hitting.
+
+    The calibration that asks for three hits measures both ends and can say
+    whether the venue is usable at all (`suggest_trigger_db`). This one measures
+    only the background, and is what makes calibration possible when there is
+    nobody to hit for you — which is most of the time somebody is setting a
+    tripod up.
+
+    It returns a threshold and no verdict, deliberately. Separation is the
+    distance between two measured ends; with one end measured there is no
+    separation to report, and inventing a confidence from half the evidence is
+    exactly what `docs/BIOMECHANICS.md` forbids elsewhere.
+    """
+    return background_peak_db + TRIGGER_LISTEN_ONLY_MARGIN_DB
+
+
 def suggest_trigger_db(background_peak_db: float,
                        quietest_hit_db: float) -> tuple[float, float, str]:
     """Pick a contact threshold from a venue measurement.
