@@ -6,7 +6,9 @@ package app.swinglab.core
 
 import kotlin.math.PI
 import kotlin.math.atan2
+import kotlin.math.ceil
 import kotlin.math.cos
+import kotlin.math.floor
 import kotlin.math.sin
 import kotlin.math.sqrt
 
@@ -78,8 +80,27 @@ data class ROI(val x0: Int, val y0: Int, val x1: Int, val y1: Int) {
 
 /**
  * Port of `BallDetector.swift` `BallDetector` (sla_common.detect_ball_candidates /
- * _subpixel_diameter); the reasoning lives there, including its two deliberate
- * deviations from OpenCV (pixel-count area, moment ellipse).
+ * _subpixel_diameter); the reasoning lives there.
+ *
+ * Pinned to the PYTHON, not to the Swift, by the `detect_candidates` fixtures,
+ * and different from the Swift wherever the Swift differed from the Python:
+ *
+ *  - HSV is OpenCV's rounded 8-bit conversion ([HSVConvert]).
+ *  - Erosion never eats a pixel for touching the frame edge ([Morphology]).
+ *  - Blobs are `findContours(RETR_EXTERNAL)` contours, not connected
+ *    components: a blob inside another's hole is not a candidate, and the
+ *    candidates come in OpenCV's order (last found first).
+ *  - The area is the contour's polygon area, not a pixel count.
+ *  - The centre — where the diameter probe stands — is `fitEllipse`'s centre
+ *    (`minEnclosingCircle`'s below five contour points), not the pixel
+ *    centroid. On the notched fixture ball the centroid read 18.93 px.
+ *  - Without a probe measurement the diameter is the fitted minor axis, with no
+ *    Swift-only floor under it.
+ *  - The probe samples as `cv2.remap` and numpy do, in float32 ([subpixelDiameter]).
+ *
+ * The Swift's two "deliberate deviations" (pixel-count area, moment ellipse)
+ * were described as touching no reported number; both moved the centre, and
+ * the centre moves the diameter, which is the scale.
  *
  * Masks are ByteArrays of 0 and 255 (`255.toByte()` reads back as -1), one byte
  * a pixel, row-major over the ROI — the Swift's `[UInt8]`.
@@ -99,9 +120,9 @@ object BallDetector {
             while (x < image.width) {
                 val p = row + x * 4
                 if (HSVConvert.inRange(
-                        (bytes[p].toInt() and 0xFF).toDouble(),
-                        (bytes[p + 1].toInt() and 0xFF).toDouble(),
-                        (bytes[p + 2].toInt() and 0xFF).toDouble(),
+                        bytes[p].toInt() and 0xFF,
+                        bytes[p + 1].toInt() and 0xFF,
+                        bytes[p + 2].toInt() and 0xFF,
                         settings.hsvLo, settings.hsvHi,
                     )
                 ) count += 1
@@ -117,6 +138,13 @@ object BallDetector {
      * then the motion gate — in that order, always; the reasoning lives there.
      * [motion] is in FULL-FRAME coordinates. Like the Swift, [roi] must already
      * lie inside the image (callers pass a clamped one).
+     *
+     * Kotlin differs at the ROI's edge. The reference only ever masks whole
+     * frames, and a pixel's value after open+close depends on the colour of
+     * everything within four pixels of it, so the window is masked with a
+     * four-pixel margin (two without the close) and then cropped: inside the ROI
+     * this is exactly the full-frame mask, which the Swift's, eroding at the ROI
+     * edge as if it were the frame's, was not.
      */
     fun maskAfterMorphology(
         image: PixelImage,
@@ -131,25 +159,38 @@ object BallDetector {
         val h = r.y1 - r.y0
         if (!(w > 0 && h > 0)) return ByteArray(0)
 
+        val margin = if (close) 4 else 2
+        val ex0 = maxOf(0, r.x0 - margin)
+        val ey0 = maxOf(0, r.y0 - margin)
+        val ex1 = minOf(image.width, r.x1 + margin)
+        val ey1 = minOf(image.height, r.y1 + margin)
+        val ew = ex1 - ex0
+        val eh = ey1 - ey0
+
         val bytes = image.bytes
-        val mask = ByteArray(w * h)
-        for (yy in 0 until h) {
-            val row = (r.y0 + yy) * image.bytesPerRow + r.x0 * 4
-            val rowBase = yy * w
-            for (xx in 0 until w) {
+        val wide = ByteArray(ew * eh)
+        for (yy in 0 until eh) {
+            val row = (ey0 + yy) * image.bytesPerRow + ex0 * 4
+            val rowBase = yy * ew
+            for (xx in 0 until ew) {
                 val p = row + xx * 4
                 if (HSVConvert.inRange(
-                        (bytes[p].toInt() and 0xFF).toDouble(),
-                        (bytes[p + 1].toInt() and 0xFF).toDouble(),
-                        (bytes[p + 2].toInt() and 0xFF).toDouble(),
+                        bytes[p].toInt() and 0xFF,
+                        bytes[p + 1].toInt() and 0xFF,
+                        bytes[p + 2].toInt() and 0xFF,
                         lo, hi,
                     )
-                ) mask[rowBase + xx] = MASK_ON
+                ) wide[rowBase + xx] = MASK_ON
             }
         }
 
-        Morphology.open(mask, w, h)
-        if (close) Morphology.close(mask, w, h)
+        Morphology.open(wide, ew, eh)
+        if (close) Morphology.close(wide, ew, eh)
+
+        val mask = ByteArray(w * h)
+        for (yy in 0 until h) {
+            System.arraycopy(wide, (r.y0 - ey0 + yy) * ew + (r.x0 - ex0), mask, yy * w, w)
+        }
 
         if (motion != null && motion.size == image.width * image.height) {
             for (yy in 0 until h) {
@@ -187,7 +228,12 @@ object BallDetector {
     ): List<BallObservation> =
         detectWithCensus(image, frame, t, settings, roi, motion).observations
 
-    /** Port of `BallDetector.detectWithCensus`; the reasoning lives there. */
+    /**
+     * Port of `BallDetector.detectWithCensus`: `detect_ball_candidates`, gate for
+     * gate, with the tally of what each gate threw away. `census.blobs` counts
+     * external contours. The guard is `w > 0`, not the Swift's `w > 2`: the
+     * reference has no minimum frame size.
+     */
     fun detectWithCensus(
         image: PixelImage,
         frame: Int,
@@ -201,33 +247,48 @@ object BallDetector {
             .clamped(image.width, image.height)
         val w = r.x1 - r.x0
         val h = r.y1 - r.y0
-        if (!(w > 2 && h > 2)) return DetectionResult(emptyList(), census)
+        if (!(w > 0 && h > 0)) return DetectionResult(emptyList(), census)
 
         val mask = maskAfterMorphology(image, r, settings.hsvLo, settings.hsvHi, motion)
 
-        val blobs = ConnectedComponents.label(mask, w, h)
+        // Full-frame coordinates from the start: fitEllipse works in float32,
+        // so where a contour sits changes the bits of its answer.
+        val contours = OpenCV.findContours(mask, w, h, r.x0, r.y0)
 
         val minArea = PI * settings.minRadiusPx * settings.minRadiusPx
+        // Elongation allowance: up to ~4x blur smear along the motion axis.
         val maxArea = PI * settings.maxRadiusPx * settings.maxRadiusPx * 4.0
 
         val out = ArrayList<BallObservation>()
-        census.blobs = blobs.size
-        for (blob in blobs) {
-            val area = blob.count.toDouble()
+        census.blobs = contours.size
+        for (c in contours) {
+            val area = OpenCV.contourArea(c)
             if (area < minArea) { census.tooSmall += 1; continue }
             if (area > maxArea) { census.tooLarge += 1; continue }
 
-            val cx = r.x0.toDouble() + blob.meanX
-            val cy = r.y0.toDouble() + blob.meanY
-
-            var minor = blob.minorAxis
-            val major = blob.majorAxis
-            if (major > 0 && minor > 1e-6 && major / minor > 6.0) {
-                census.tooElongated += 1
-                continue
+            val cx: Double
+            val cy: Double
+            var minor: Double
+            if (c.size >= 5) {
+                val e = OpenCV.fitEllipse(c)
+                cx = e.cx.toDouble()
+                cy = e.cy.toDouble()
+                minor = swiftMin(e.width.toDouble(), e.height.toDouble())
+                val major = swiftMax(e.width.toDouble(), e.height.toDouble())
+                if (major > 0 && major / swiftMax(minor, 1e-6) > 6.0) {
+                    census.tooElongated += 1
+                    continue
+                }
+            } else {
+                val circle = OpenCV.minEnclosingCircle(c)
+                cx = circle.cx.toDouble()
+                cy = circle.cy.toDouble()
+                minor = 2.0 * circle.radius.toDouble()
             }
-            if (minor <= 1e-6) minor = 2 * settings.minRadiusPx
 
+            // The fitted shape only places the probe; the diameter comes from
+            // the pixels. See `subpixelDiameter` for why the mask cannot be
+            // trusted to say how big the ball is.
             val refined = subpixelDiameter(image, cx, cy, minor / 2.0)
             if (refined != null) minor = refined
 
@@ -245,7 +306,20 @@ object BallDetector {
     /**
      * Port of `BallDetector.subpixelDiameter` (sla_common._subpixel_diameter):
      * radial matte-fraction probe, median of the alpha = 0.5 crossings; the
-     * reasoning lives there. Pinned by the `diameter_probe` block of parity.json.
+     * reasoning lives there. Pinned by the `diameter_probe` and
+     * `detect_candidates` blocks of parity.json.
+     *
+     * Kotlin differs from the Swift, which worked in Double, by doing what the
+     * reference's libraries do, in float32, so the two agree to the bit rather
+     * than to a hundredth of a pixel: the sample positions are float32 offsets
+     * from the crop `_subpixel_diameter` takes (numpy arithmetic), the bilinear
+     * is OpenCV 5's float remap kernel (three fused multiply-adds), the window
+     * means are numpy's sequential float32 sums, the window limits are compared
+     * as float32 (numpy casts the Python float), the contrast is `np.dot`'s
+     * (float products summed in double), and alpha is a float32 matrix-vector
+     * product. Of those only the last is not reproduced exactly — the BLAS
+     * associates the farthest few samples of each ray differently, an ulp in the
+     * background annulus, far outside any edge — and no fixture case moves.
      */
     fun subpixelDiameter(image: PixelImage, cx: Double, cy: Double, r0: Double): Double? {
         val step = SLA.diameterProfileStepPx
@@ -254,29 +328,51 @@ object BallDetector {
         val count = n + 1
         val dirs = SLA.diameterProbeDirections
 
-        val rs = DoubleArray(count)
-        for (i in 0 until count) rs[i] = i.toDouble() * step
+        // The crop the reference samples from; the remap replicates ITS edge.
+        val pad = ceil(reach).toInt() + 2
+        val x0 = maxOf(0, floor(cx).toInt() - pad)
+        val y0 = maxOf(0, floor(cy).toInt() - pad)
+        val x1 = minOf(image.width, ceil(cx).toInt() + pad + 1)
+        val y1 = minOf(image.height, ceil(cy).toInt() + pad + 1)
+        if (x1 <= x0 || y1 <= y0) return null
 
-        val pb = DoubleArray(dirs * count)
-        val pg = DoubleArray(dirs * count)
-        val pr = DoubleArray(dirs * count)
+        val rs = FloatArray(count) { (it * step).toFloat() }
+        val pb = FloatArray(dirs * count)
+        val pg = FloatArray(dirs * count)
+        val pr = FloatArray(dirs * count)
+        val ox = (cx - x0).toFloat()
+        val oy = (cy - y0).toFloat()
+        val bytes = image.bytes
+        fun at(wx: Int, wy: Int): Int =
+            (y0 + wy.coerceIn(0, y1 - y0 - 1)) * image.bytesPerRow + (x0 + wx.coerceIn(0, x1 - x0 - 1)) * 4
+        fun ch(i: Int): Float = (bytes[i].toInt() and 0xFF).toFloat()
         for (d in 0 until dirs) {
-            val a = 2.0 * PI * d.toDouble() / dirs.toDouble()
-            val ca = cos(a)
-            val sa = sin(a)
+            val a = d.toDouble() * (2.0 * PI / dirs)        // np.linspace(0, 2 pi, dirs, endpoint=False)
+            val ca = cos(a).toFloat()
+            val sa = sin(a).toFloat()
             for (i in 0 until count) {
-                val p = image.sampleBilinear(cx + rs[i] * ca, cy + rs[i] * sa)
-                pb[d * count + i] = p.b
-                pg[d * count + i] = p.g
-                pr[d * count + i] = p.r
+                val sx = ox + rs[i] * ca
+                val sy = oy + rs[i] * sa
+                val ix = floor(sx).toInt()
+                val iy = floor(sy).toInt()
+                val fx = sx - ix.toFloat()
+                val fy = sy - iy.toFloat()
+                val p00 = at(ix, iy)
+                val p01 = at(ix + 1, iy)
+                val p10 = at(ix, iy + 1)
+                val p11 = at(ix + 1, iy + 1)
+                val k = d * count + i
+                pb[k] = lerp2(ch(p00), ch(p01), ch(p10), ch(p11), fx, fy)
+                pg[k] = lerp2(ch(p00 + 1), ch(p01 + 1), ch(p10 + 1), ch(p11 + 1), fx, fy)
+                pr[k] = lerp2(ch(p00 + 2), ch(p01 + 2), ch(p10 + 2), ch(p11 + 2), fx, fy)
             }
         }
 
-        val coreLimit = swiftMax(0.4 * r0, step)
-        val bgLo = SLA.diameterBgInner * r0
-        val bgHi = SLA.diameterBgOuter * r0 + SLA.diameterBgPadPx
-        var coreB = 0.0; var coreG = 0.0; var coreR = 0.0; var coreN = 0
-        var bgB = 0.0; var bgG = 0.0; var bgR = 0.0; var bgN = 0
+        val coreLimit = swiftMax(0.4 * r0, step).toFloat()
+        val bgLo = (SLA.diameterBgInner * r0).toFloat()
+        val bgHi = (SLA.diameterBgOuter * r0 + SLA.diameterBgPadPx).toFloat()
+        var coreB = 0f; var coreG = 0f; var coreR = 0f; var coreN = 0
+        var bgB = 0f; var bgG = 0f; var bgR = 0f; var bgN = 0
         for (d in 0 until dirs) {
             for (i in 0 until count) {
                 val k = d * count + i
@@ -289,30 +385,29 @@ object BallDetector {
             }
         }
         if (!(coreN > 0 && bgN > 0)) return null
-        coreB /= coreN.toDouble(); coreG /= coreN.toDouble(); coreR /= coreN.toDouble()
-        bgB /= bgN.toDouble(); bgG /= bgN.toDouble(); bgR /= bgN.toDouble()
+        coreB /= coreN.toFloat(); coreG /= coreN.toFloat(); coreR /= coreN.toFloat()
+        bgB /= bgN.toFloat(); bgG /= bgN.toFloat(); bgR /= bgN.toFloat()
 
         val dB = coreB - bgB
         val dG = coreG - bgG
         val dR = coreR - bgR
-        val denom = dB * dB + dG * dG + dR * dR
-        if (!(denom >= 900.0)) return null
+        val denom = (((dB * dB).toDouble() + (dG * dG).toDouble()) + (dR * dR).toDouble()).toFloat()
+        if (!(denom.toDouble() >= 900.0)) return null
 
-        fun alpha(base: Int, i: Int): Double {
-            val k = base + i
-            return ((pb[k] - bgB) * dB + (pg[k] - bgG) * dG + (pr[k] - bgR) * dR) / denom
-        }
+        fun alpha(k: Int): Float =
+            Math.fma(pr[k] - bgR, dR, Math.fma(pg[k] - bgG, dG, (pb[k] - bgB) * dB)) / denom
 
         val edges = ArrayList<Double>(dirs)
         for (d in 0 until dirs) {
             val base = d * count
             var i = 1
             while (i < count - 1) {
-                if (alpha(base, i) < 0.5 && alpha(base, i + 1) < 0.5) {
-                    val a0 = alpha(base, i - 1)
-                    val a1 = alpha(base, i)
+                // Two consecutive samples under half: past the edge, not noise.
+                if (alpha(base + i) < 0.5f && alpha(base + i + 1) < 0.5f) {
+                    val a0 = alpha(base + i - 1).toDouble()
+                    val a1 = alpha(base + i).toDouble()
                     val frac = if (a0 > a1) (a0 - 0.5) / (a0 - a1) else 0.5
-                    edges.add(rs[i - 1] + frac * step)
+                    edges.add(rs[i - 1].toDouble() + frac * step)
                     break
                 }
                 i += 1
@@ -323,12 +418,25 @@ object BallDetector {
         edges.sort()
         return 2.0 * edges[edges.size / 2]
     }
+
+    /** OpenCV 5's scalar bilinear for float images: `v0 = p00 + fx (p01 - p00)`, and so on, each a fused multiply-add. */
+    private fun lerp2(p00: Float, p01: Float, p10: Float, p11: Float, fx: Float, fy: Float): Float {
+        val v0 = Math.fma(fx, p01 - p00, p00)
+        val v1 = Math.fma(fx, p11 - p10, p10)
+        return Math.fma(fy, v1 - v0, v0)
+    }
 }
 
 /**
  * Port of `BallDetector.swift` `Morphology` (3x3 cross = OpenCV's 3x3
  * MORPH_ELLIPSE); the reasoning lives there. Edits the mask in place, as the
  * Swift's `inout` does.
+ *
+ * Kotlin differs at the mask's edge, as OpenCV does. `morphologyEx`'s default
+ * border is "the most neutral value": the maximum for erode, zero for dilate.
+ * So outside the mask never erodes anything, where the Swift treated it as
+ * background and ate every blob pixel on the frame's edge — a ball half out of
+ * shot lost a column the reference keeps, and its fitted centre moved with it.
  */
 object Morphology {
 
@@ -343,10 +451,10 @@ object Morphology {
                 val i = y * w + x
                 if (src[i].toInt() == 0) continue
                 var keep = true
-                if (x == 0 || src[i - 1].toInt() == 0) keep = false
-                if (keep && (x == w - 1 || src[i + 1].toInt() == 0)) keep = false
-                if (keep && (y == 0 || src[i - w].toInt() == 0)) keep = false
-                if (keep && (y == h - 1 || src[i + w].toInt() == 0)) keep = false
+                if (x > 0 && src[i - 1].toInt() == 0) keep = false
+                if (keep && x < w - 1 && src[i + 1].toInt() == 0) keep = false
+                if (keep && y > 0 && src[i - w].toInt() == 0) keep = false
+                if (keep && y < h - 1 && src[i + w].toInt() == 0) keep = false
                 if (!keep) m[i] = 0
             }
         }
@@ -381,7 +489,12 @@ object Morphology {
     }
 }
 
-/** Port of `BallDetector.swift` `ConnectedComponents` (8-connected, union-find); the reasoning lives there. */
+/**
+ * Port of `BallDetector.swift` `ConnectedComponents` (8-connected, union-find);
+ * the reasoning lives there. The ball detector no longer uses it — the
+ * reference's blobs are `findContours` contours, see [OpenCV.findContours] —
+ * but the setup measurement does, for the per-pixel labels contours lack.
+ */
 object ConnectedComponents {
 
     /** Port of `ConnectedComponents.Blob`; the reasoning lives there. */

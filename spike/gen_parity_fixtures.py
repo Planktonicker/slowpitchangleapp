@@ -1191,6 +1191,314 @@ def main():
             "expected_threshold_db": sla.threshold_from_background(bg),
         })
 
+    # =======================================================================
+    # DETECTOR — detect_ball_candidates end to end, and the OpenCV colour
+    # conversions in front of it. Blocks: "detect_candidates", "cv_color".
+    #
+    # The exception to "no cv2 detection" above, and deliberately so. The port
+    # used to copy the Swift detector, which approximated OpenCV where the
+    # reference calls it: unrounded HSV, erosion that ate blobs at the frame
+    # edge, pixel moments for the centre where the reference fits an ellipse
+    # to the contour, a pixel count for the area where it takes the contour's
+    # polygon area. Every one of those moves a blob, and a blob's centre is
+    # where the diameter probe stands, and the diameter is the scale behind
+    # every speed: on the notched ball below the moment centroid read 18.93 px
+    # against 20.56 probed at the true centre.
+    #
+    # So these cases run the REAL detector on small deterministic images and
+    # record, besides the candidates, the stages a port can get wrong on its
+    # own: the mask after morphology and gating, and every external contour
+    # with its area and the shape OpenCV fitted to it. The numbers are what
+    # THIS machine's OpenCV and numpy produce; see the Kotlin tests for which
+    # quantities are bit-exact and which carry an ulp of BLAS.
+    # =======================================================================
+    import base64
+
+    def _b64(a):
+        return base64.b64encode(np.ascontiguousarray(a, np.uint8).tobytes()).decode("ascii")
+
+    def _coverage(h, w, inside, ss=4):
+        """Fraction of each pixel inside a shape, ss x ss supersampled.
+        Pixel (x, y) is centred on integer (x, y), OpenCV's convention, so a
+        disc drawn at (cx, cy) is found there."""
+        acc = np.zeros((h, w), np.float64)
+        ys, xs = np.mgrid[0:h, 0:w].astype(np.float64)
+        for sy in range(ss):
+            for sx in range(ss):
+                acc += inside(xs - 0.5 + (sx + 0.5) / ss, ys - 0.5 + (sy + 0.5) / ss)
+        return acc / (ss * ss)
+
+    def _disc(cx, cy, r):
+        return lambda x, y: (x - cx) ** 2 + (y - cy) ** 2 <= r * r
+
+    def _smeared(cx, cy, r, length, angle_deg, steps):
+        """A disc exposed while travelling `length` px: the average of
+        `steps` discs along the path, which is what an exposure does, so the
+        ends of the streak are dim the way a real one's are."""
+        dx, dy = math.cos(math.radians(angle_deg)), math.sin(math.radians(angle_deg))
+        def inside(x, y):
+            tot = 0.0
+            for k in range(steps):
+                o = (k / (steps - 1) - 0.5) * length
+                tot = tot + ((x - cx - o * dx) ** 2 + (y - cy - o * dy) ** 2 <= r * r)
+            return tot / steps
+        return inside
+
+    def _paint(h, w, ground, layers):
+        """Composite (coverage, bgr) layers over a flat ground, rounded to 8 bits."""
+        img = np.empty((h, w, 3), np.float64)
+        img[:] = ground
+        for cov, col in layers:
+            img = img * (1 - cov[:, :, None]) + np.array(col, np.float64) * cov[:, :, None]
+        return np.clip(np.round(img), 0, 255).astype(np.uint8)
+
+    OPTIC = (20, 220, 220)       # H30 S232 V220: the middle of the default window
+    TURF = (40, 70, 45)          # dark, unsaturated enough to fail S>=100
+
+    det_cases = []
+
+    def _case(name, img, motion=None, lo=sla.HSV_LO_DEFAULT, hi=sla.HSV_HI_DEFAULT,
+              min_r=sla.MIN_RADIUS_PX_DEFAULT, max_r=sla.MAX_RADIUS_PX_DEFAULT, note=""):
+        det_cases.append((name, img, motion, lo, hi, min_r, max_r, note))
+
+    h = w = 40
+    _case("clean_r5_centred", _paint(h, w, TURF, [(_coverage(h, w, _disc(19.0, 20.0, 5.5)), OPTIC)]),
+          note="smallest ball the default area gate admits comfortably")
+    h = w = 48
+    _case("clean_r10_subpixel", _paint(h, w, TURF, [(_coverage(h, w, _disc(23.37, 24.81, 10.5)), OPTIC)]))
+    h = w = 96
+    _case("clean_r20", _paint(h, w, TURF, [(_coverage(h, w, _disc(47.6, 46.2, 20.0)), OPTIC)]),
+          note="background annulus runs off the frame; the probe replicates the edge")
+    _case("notched_21px", _ball_image(61, 30.0, 30.0, 10.5, 0.0, True, 200),
+          note="the diameter_probe image, through the detector: the centre is the question")
+    _case("blurred_21px", _ball_image(61, 30.0, 30.0, 10.5, 14.0, False, 200),
+          note="the diameter_probe image, through the detector")
+    h, w = 64, 48
+    _case("edge_left", _paint(h, w, TURF, [(_coverage(h, w, _disc(3.2, 30.4, 9.0)), OPTIC)]),
+          note="cut by the left edge; erosion must not eat the edge column")
+    h, w = 40, 44
+    _case("edge_corner", _paint(h, w, TURF, [(_coverage(h, w, _disc(1.5, 2.5, 12.0)), OPTIC)]),
+          note="a quarter-and-more of a ball in the top-left corner")
+
+    # HSV rounding. Each square is a colour cv2 puts INSIDE the default window
+    # that the unrounded conversion puts outside — S 99.78 rounds to 100, H
+    # 40.10 to 40, H 17.81 to 18 — plus a control that is outside either way.
+    # A port that compares unrounded values loses three candidates here.
+    hsv_squares = [((154, 253, 253), 6), ((47, 255, 185), 26), ((100, 192, 255), 46), ((160, 253, 253), 66)]
+    for col, _x in hsv_squares[:3]:
+        hh, ss_, vv = (int(v) for v in cv2.cvtColor(np.array([[col]], np.uint8), cv2.COLOR_BGR2HSV)[0, 0])
+        assert sla.HSV_LO_DEFAULT[0] <= hh <= sla.HSV_HI_DEFAULT[0] and ss_ >= sla.HSV_LO_DEFAULT[1], col
+    h, w = 28, 84
+    img = np.empty((h, w, 3), np.uint8)
+    img[:] = (40, 40, 40)
+    for col, x0 in hsv_squares:
+        img[8:20, x0:x0 + 12] = col
+    _case("hsv_window_boundaries", img, note="squares at S=100, H=40, H=18 after rounding, and a control")
+
+    h, w = 48, 72
+    _case("streak_within_6to1", _paint(h, w, TURF, [(_coverage(h, w, _smeared(35.0, 23.5, 5.5, 26.0, 20.0, 27)), OPTIC)]),
+          note="motion blur the elongation gate admits")
+    def _capsule(x0, y0, x1, y1, r):
+        def inside(x, y):
+            vx, vy = x1 - x0, y1 - y0
+            t = np.clip(((x - x0) * vx + (y - y0) * vy) / (vx * vx + vy * vy), 0.0, 1.0)
+            return (x - x0 - t * vx) ** 2 + (y - y0 - t * vy) ** 2 <= r * r
+        return inside
+    # Drawn solid rather than exposed: an exposure this long leaves too little
+    # colour per pixel to pass the window at all, and this case is about the
+    # elongation gate, not about the window.
+    _case("streak_beyond_6to1", _paint(h, w, TURF, [(_coverage(h, w, _capsule(6.0, 27.5, 66.0, 19.5, 4.5)), OPTIC)]),
+          note="too elongated even for blur: rejected")
+    h, w = 40, 64
+    _case("two_balls_apart", _paint(h, w, TURF, [(_coverage(h, w, _disc(20.0, 18.0, 7.0)), OPTIC),
+                                                  (_coverage(h, w, _disc(38.5, 22.0, 7.0)), OPTIC)]),
+          note="a 4.5 px gap: two candidates, in OpenCV's order")
+    _case("two_balls_touching", _paint(h, w, TURF, [(_coverage(h, w, _disc(20.0, 18.0, 7.0)), OPTIC),
+                                                     (_coverage(h, w, _disc(35.5, 20.0, 7.0)), OPTIC)]),
+          note="a 1.5 px gap the close bridges: one blob")
+    h, w = 56, 80
+    _case("three_balls_order", _paint(h, w, TURF, [(_coverage(h, w, _disc(60.0, 12.0, 6.0)), OPTIC),
+                                                    (_coverage(h, w, _disc(15.0, 30.0, 6.5)), OPTIC),
+                                                    (_coverage(h, w, _disc(45.0, 42.0, 7.5)), OPTIC)]),
+          note="findContours returns the LAST-found contour first")
+    h = w = 64
+    ring = _coverage(h, w, _disc(31.0, 32.0, 22.0)) - _coverage(h, w, _disc(31.0, 32.0, 15.0))
+    _case("ring_with_dot", _paint(h, w, TURF, [(np.clip(ring, 0, 1), OPTIC),
+                                                (_coverage(h, w, _disc(31.0, 32.0, 6.0)), OPTIC)]),
+          note="RETR_EXTERNAL: the dot inside the ring's hole is not a contour")
+
+    # Contours with four and five points take the two other fitting paths:
+    # minEnclosingCircle below five, fitEllipseDirect at exactly five.
+    h = w = 40
+    img = np.empty((h, w, 3), np.uint8)
+    img[:] = TURF
+    ys, xs = np.mgrid[0:h, 0:w]
+    img[np.abs(xs - 17) + np.abs(ys - 21) <= 7] = OPTIC
+    _case("diamond_four_points", img, note="a diamond survives the cross morphology exactly: 4 contour points")
+    img = np.empty((h, w, 3), np.uint8)
+    img[:] = TURF
+    img[(np.abs(xs - 22) + np.abs(ys - 18) <= 8) & (ys >= 18 - 8 + 3)] = OPTIC
+    _case("cut_diamond_five_points", img, note="5 contour points: fitEllipse's direct branch")
+
+    h, w = 48, 48
+    ball = _paint(h, w, TURF, [(_coverage(h, w, _disc(23.37, 24.81, 10.5)), OPTIC)])
+    half = np.zeros((h, w), np.uint8)
+    half[:, 24:] = 255
+    _case("motion_gate_half", ball, motion=half,
+          note="the motion mask covers the right half: the blob is cut AFTER the morphology")
+    h, w = 40, 64
+    two = _paint(h, w, TURF, [(_coverage(h, w, _disc(16.0, 20.0, 7.0)), OPTIC),
+                              (_coverage(h, w, _disc(46.0, 19.0, 7.0)), OPTIC)])
+    moved = np.zeros((h, w), np.uint8)
+    cv2.circle(moved, (46, 19), 11, 255, -1)
+    _case("motion_gate_static_ball", two, motion=moved, note="only the ball that moved survives")
+    _case("motion_gate_everything_moved", two, motion=np.full((h, w), 255, np.uint8),
+          note="an all-moved mask changes nothing")
+
+    h = w = 40
+    _case("low_contrast_fallback", _paint(h, w, (124, 200, 200), [(_coverage(h, w, _disc(19.4, 20.3, 8.0)), (100, 200, 200))]),
+          note="core-ground contrast under 30: no probe, the fitted minor axis is the diameter")
+    _case("diameter_gate", _paint(h, w, TURF, [(_coverage(h, w, _disc(19.4, 20.3, 10.5)), OPTIC)]),
+          min_r=4.0, max_r=9.0, note="area passes, the probed diameter is over 2*max_radius")
+    _case("below_min_area", _paint(h, w, TURF, [(_coverage(h, w, _disc(19.4, 20.3, 3.4)), OPTIC)]),
+          note="area under pi*min_radius^2")
+    _case("above_max_area", _paint(h, w, TURF, [(_coverage(h, w, _disc(19.4, 20.3, 10.5)), OPTIC)]),
+          min_r=2.0, max_r=4.0, note="area over 4*pi*max_radius^2")
+
+    out["detect_candidates"] = []
+    for name, img, motion, lo, hi, min_r, max_r, note in det_cases:
+        hh, ww = img.shape[:2]
+        found = sla.detect_ball_candidates(img, 7, 0.125, fg_mask=motion, hsv_lo=lo, hsv_hi=hi,
+                                           min_radius_px=min_r, max_radius_px=max_r)
+        mask = sla.yellow_mask(img, lo, hi)          # the same four calls detect makes first
+        if motion is not None:
+            mask = cv2.bitwise_and(mask, motion)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        crec = []
+        for c in contours:
+            area = cv2.contourArea(c)
+            rec = {"points": [[int(p[0][0]), int(p[0][1])] for p in c], "area": float(area)}
+            # Shapes are fitted only where the detector fits them: on a
+            # degenerate speck, fitEllipse perturbs its input from OpenCV's
+            # global RNG, which no fixture can reproduce.
+            if area >= math.pi * min_r ** 2:
+                if len(c) >= 5:
+                    (ex, ey), (ea, eb), _ang = cv2.fitEllipse(c)
+                    rec["ellipse"] = {"cx": float(ex), "cy": float(ey), "width": float(ea), "height": float(eb)}
+                else:
+                    (ex, ey), er = cv2.minEnclosingCircle(c)
+                    rec["circle"] = {"cx": float(ex), "cy": float(ey), "radius": float(er)}
+            crec.append(rec)
+        out["detect_candidates"].append({
+            "name": name, "note": note, "width": ww, "height": hh,
+            "frame": 7, "t": 0.125,
+            "hsv_lo": [float(v) for v in lo], "hsv_hi": [float(v) for v in hi],
+            "min_radius_px": float(min_r), "max_radius_px": float(max_r),
+            "bgr_b64": _b64(img),
+            "motion_b64": None if motion is None else _b64(motion),
+            "mask_b64": _b64(mask),
+            "contours": crec,
+            "expected": [{"frame": o.frame, "t": o.t, "x": o.x, "y": o.y,
+                          "diameter_px": o.diameter_px, "area_px": o.area_px} for o in found],
+        })
+
+    # The contour stage on its own, on masks built to be awkward rather than
+    # ball-like: specks, one-pixel lines and rings, diagonal-only links, holes
+    # with things in them, blobs on every edge. findContours' order and its
+    # RETR_EXTERNAL nesting rule are whatever its border-following marks make
+    # them, so they are pinned on shapes where those marks interact, not
+    # merely described. Shapes are fitted as the detector would fit them:
+    # minEnclosingCircle below five points (deterministic at any size), the
+    # ellipse only on contours big enough to pass the detector's area gate.
+    def _hashmask(h, w, k, keep):
+        """Speckle from a fixed integer hash of (x, y, k): no RNG, so no seed
+        or library version can change it. `keep` of 256 pixels are set."""
+        ys, xs = np.mgrid[0:h, 0:w].astype(np.int64)
+        v = ((xs * 73856093) ^ (ys * 19349663) ^ (k * 83492791)) & 0xFFFFFFFF
+        v = ((v * 2654435761) & 0xFFFFFFFF) >> 24
+        return (v < keep).astype(np.uint8) * 255
+
+    def _rows(*rows):
+        return np.array([[255 if ch == "#" else 0 for ch in r] for r in rows], np.uint8)
+
+    geo = [
+        ("empty", np.zeros((6, 9), np.uint8)),
+        ("full", np.full((5, 7), 255, np.uint8)),
+        ("single_pixel", _rows(".....", "..#..", ".....")),
+        ("corner_pixels", _rows("#...#", ".....", "#...#")),
+        ("horizontal_line", _rows("......", ".####.", "......")),
+        ("vertical_line_on_edge", _rows("#..", "#..", "#..", "#..")),
+        ("diagonal_chain", _rows("#....", ".#...", "..#..", "...#.", "....#")),
+        ("l_shape", _rows("#....", "#....", "#....", "#####")),
+        ("one_pixel_ring_with_dot", _rows(".......", ".#####.", ".#...#.", ".#.#.#.", ".#...#.", ".#####.", ".......")),
+        ("ring_in_ring", _rows("#########", "#.......#", "#.#####.#", "#.#...#.#", "#.#.#.#.#",
+                               "#.#...#.#", "#.#####.#", "#.......#", "#########")),
+        ("diagonal_gap_hole", _rows(".###.", "#...#", "#.#.#", "#...#", ".###.")),
+        ("checker", _rows("#.#.#.", ".#.#.#", "#.#.#.", ".#.#.#")),
+        ("c_shape_with_dot", _rows("#####.", "#.....", "#..#..", "#.....", "#####.")),
+        ("comb", _rows("#.#.#.#", "#.#.#.#", "#######")),
+    ]
+    for k in range(10):
+        hh, ww = 12 + (k * 5) % 13, 14 + (k * 7) % 11
+        m = _hashmask(hh, ww, k, 60 + 14 * k)
+        if k % 2:
+            ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+            m = cv2.morphologyEx(cv2.morphologyEx(m, cv2.MORPH_OPEN, ker), cv2.MORPH_CLOSE, ker)
+        geo.append((f"hashed_{k}", m))
+    yy, xx = np.mgrid[0:40, 0:40]
+    blobs = (((xx - 12) ** 2 + (yy - 13) ** 2 < 80) | ((xx - 30) ** 2 / 2.0 + (yy - 25) ** 2 < 90) |
+             ((np.abs(xx - 8) + np.abs(yy - 32)) < 7) | ((xx - 39) ** 2 + (yy - 5) ** 2 < 40))
+    geo.append(("ball_sized_blobs", blobs.astype(np.uint8) * 255))
+
+    out["contour_geometry"] = []
+    for name, m in geo:
+        contours, _ = cv2.findContours(m, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        crec = []
+        for c in contours:
+            area = cv2.contourArea(c)
+            rec = {"points": [[int(p[0][0]), int(p[0][1])] for p in c], "area": float(area)}
+            if len(c) < 5:
+                (ex, ey), er = cv2.minEnclosingCircle(c)
+                rec["circle"] = {"cx": float(ex), "cy": float(ey), "radius": float(er)}
+            elif area >= math.pi * sla.MIN_RADIUS_PX_DEFAULT ** 2:
+                (ex, ey), (ea, eb), _ang = cv2.fitEllipse(c)
+                rec["ellipse"] = {"cx": float(ex), "cy": float(ey), "width": float(ea), "height": float(eb)}
+            crec.append(rec)
+        out["contour_geometry"].append({"name": name, "width": int(m.shape[1]), "height": int(m.shape[0]),
+                                        "mask_b64": _b64(m), "contours": crec})
+
+    # The two 8-bit conversions in front of the detector, over every colour.
+    # cvtColor's HSV is fixed-point and ROUNDS H and S — the default window
+    # admits 69,679 colours more than unrounded HSV does — and its gray (what
+    # every Python caller hands motion_mask) is a 15-bit weighted sum. A digest
+    # of all 2^24 answers pins both completely in one number each:
+    #   i = b<<16 | g<<8 | r,  digest = sum((i + 1) * code) mod 2^64
+    # with code = h<<16 | s<<8 | v for HSV and code = gray for gray. Decimal
+    # strings, because a 64-bit integer does not survive a JSON double.
+    every = np.arange(1 << 24, dtype=np.uint32)
+    every_bgr = np.stack([every >> 16, (every >> 8) & 255, every & 255], axis=-1).astype(np.uint8).reshape(4096, 4096, 3)
+    hsv_all = cv2.cvtColor(every_bgr, cv2.COLOR_BGR2HSV).reshape(-1, 3).astype(np.uint64)
+    gray_all = cv2.cvtColor(every_bgr, cv2.COLOR_BGR2GRAY).reshape(-1).astype(np.uint64)
+    weight = every.astype(np.uint64) + np.uint64(1)
+    hsv_code = (hsv_all[:, 0] << np.uint64(16)) | (hsv_all[:, 1] << np.uint64(8)) | hsv_all[:, 2]
+    samples = [(20, 220, 220), (154, 253, 253), (155, 253, 253), (47, 255, 185), (100, 192, 255),
+               (0, 0, 0), (255, 255, 255), (0, 0, 255), (255, 0, 0), (0, 255, 0), (255, 0, 255),
+               (1, 2, 3), (40, 70, 45), (124, 200, 200), (128, 128, 127), (17, 99, 201)]
+    out["cv_color"] = [{
+        "hsv_digest": str(int(np.sum(weight * hsv_code, dtype=np.uint64))),
+        "gray_digest": str(int(np.sum(weight * gray_all, dtype=np.uint64))),
+        "samples": [{"b": b, "g": g, "r": r,
+                     "h": int(hsv_all[(b << 16) | (g << 8) | r, 0]),
+                     "s": int(hsv_all[(b << 16) | (g << 8) | r, 1]),
+                     "v": int(hsv_all[(b << 16) | (g << 8) | r, 2]),
+                     "gray": int(gray_all[(b << 16) | (g << 8) | r])} for b, g, r in samples],
+    }]
+    print(f"  detector: {len(out['detect_candidates'])} detect-candidates cases "
+          f"({sum(len(c['expected']) for c in out['detect_candidates'])} candidates), "
+          f"{len(out['contour_geometry'])} contour-geometry masks "
+          f"({sum(len(c['contours']) for c in out['contour_geometry'])} contours), cv_color digests")
+    # ======================================================================= end DETECTOR
+
     dst = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "fixtures", "parity.json")
     dst = os.path.normpath(dst)
