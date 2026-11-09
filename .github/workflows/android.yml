@@ -73,8 +73,12 @@ jobs:
       - name: Build the APK
         run: |
           set -o pipefail
-          ./gradlew :app:assembleDebug --console=plain 2>&1 | tee ../apk-build.log
-          cp app/build/outputs/apk/debug/app-debug.apk ../SwingLab.apk
+          # Release, not debug: Compose runs several times slower in a debuggable
+          # build, and this is the build that goes on the phone. Both variants
+          # are signed with the same development key, so either installs over
+          # the other.
+          ./gradlew :app:assembleRelease --console=plain 2>&1 | tee ../apk-build.log
+          cp app/build/outputs/apk/release/app-release.apk ../SwingLab.apk
 
       # Errors into the job summary: a Gradle log is thousands of lines, and the
       # summary is what makes a failure readable in one fetch.
