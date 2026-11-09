@@ -28,3 +28,6 @@ Thumbs.db
 # --- Android: APKs are CI artifacts, never committed ---
 *.apk
 *.aab
+
+# --- Claude Code: temporary checkouts made by parallel agents ---
+.claude/worktrees/
