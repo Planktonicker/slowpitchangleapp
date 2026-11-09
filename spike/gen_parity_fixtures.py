@@ -1768,6 +1768,116 @@ def main():
           f"({sum(len(c['expected_db']) for c in out['contact_trigger'])} windows)")
     # -------------------------------------------------------------------------
 
+    # =======================================================================
+    # frame_timing — the clip's frame rate from its own sample timing.
+    #
+    # Not sla_common: the reference is handed an fps and never measures one.
+    # The Python copy of the app's estimator is `replay_corpus.derive_fps`
+    # (the mirror of `ClipAnalyzer.frameTiming(fromIntervals:)` that its
+    # --selftest proves), so that is what these numbers come from. Every exit
+    # velocity scales with this rate, which is why a hand-checked Swift test
+    # alone is not enough to pin the port to.
+    #
+    # Each case is a list of presentation timestamps at CONSECUTIVE frame
+    # indices, built the way a container stores them (integer ticks over a
+    # timescale) wherever that is possible, so the intervals carry the same
+    # subtraction rounding a real clip's do — the rounding that once tipped
+    # 240 fps into 300. `intervals` is exactly what derive_fps takes from
+    # them: each adjacent difference, unfiltered and in frame order (it drops
+    # the non-positive ones itself, as the app's estimator does).
+    #
+    # derive_fps reports fps, the interval count and the irregular fraction.
+    # The app's `droppedFraction` has no Python counterpart, so it is pinned
+    # by the ported Swift tests only.
+    # =======================================================================
+    import replay_corpus
+
+    def _ticks_to_stamps(steps, timescale):
+        ticks, stamps = 0, [0 / timescale]
+        for s in steps:
+            ticks += s
+            stamps.append(ticks / timescale)
+        return stamps
+
+    def _cumulative(periods, fps):
+        # Only where the case cannot be written in whole ticks: the knife
+        # edges sit a few parts in 10^7 either side of a ratio.
+        t, stamps = 0.0, [0.0]
+        for p in periods:
+            t += p / fps
+            stamps.append(t)
+        return stamps
+
+    stts = [(3, 233), (2, 224), (5, 69), (7, 21), (10, 20),
+            (8, 15), (12, 4), (15, 3), (20, 2), (17, 1)]
+    gaps = {10: 2, 20: 4, 30: 8, 40: 3}
+    frame_timing_cases = [
+        # A clean 240 fps clip in a timescale that can express it.
+        ("clean_240", [k / 240 for k in range(61)]),
+        # The owner's phone's own rate, which no preset list could offer.
+        ("awkward_198_94", [k / 198.94 for k in range(61)]),
+        # One frame never arrived: a 2-period gap, not a different rate.
+        ("dropped_frame_240", _ticks_to_stamps(
+            [2 if i == 30 else 1 for i in range(60)], 240)),
+        # Gaps of 2, 4, 8 and 3 periods are all gaps.
+        ("assorted_gaps_240", _ticks_to_stamps(
+            [gaps.get(i, 1) for i in range(60)], 240)),
+        # The knife edge as a real container writes it: timescale 600 cannot
+        # express 240 fps, so a flawless clip alternates 2 and 3 ticks
+        # (3333/5000 us). 3 ticks is EXACTLY 1.5x 2 ticks, and without
+        # SINGLE_INTERVAL_SLACK this reads 300 fps.
+        ("timescale_600_alternation", _ticks_to_stamps(
+            [2 if i % 2 == 0 else 3 for i in range(600)], 600)),
+        # The clip that exposed it, straight from its `stts` histogram:
+        # quantised AND missing nearly a third of its frames.
+        ("coarse_container_stts", _ticks_to_stamps(
+            [t for t, n in stts for _ in range(n)], 600)),
+        # A millisecond timescale: 4,4,4,4,4,5 ms for 240 fps.
+        ("timescale_1000_240", [((k * 25) // 6) / 1000 for k in range(121)]),
+        # A real variable frame rate, 1.6 and 1.0 periods alternating — 6.7%
+        # from the quantisation above, and it has to stay visible.
+        ("variable_rate_1_6_1_0", _ticks_to_stamps(
+            [16 if i % 2 == 0 else 10 for i in range(60)], 2400)),
+        # Slow motion's rendered edit, not the original.
+        ("fps_30", [k / 30 for k in range(61)]),
+        # The 1.5x boundary in exact binary: 2 and 3 ticks of 1/512 s.
+        ("knife_edge_exact_1_5", _ticks_to_stamps(
+            [2 if i % 2 == 0 else 3 for i in range(40)], 512)),
+        # Either side of the slack, which is RELATIVE to the comparison: just
+        # inside, the long intervals are single periods and average in; just
+        # outside, they are irregular and the rate is the short one.
+        ("knife_edge_inside_slack", _cumulative(
+            [1.0 if i % 2 == 0 else 1.5 * (1 + 5e-7) for i in range(40)], 240)),
+        ("knife_edge_outside_slack", _cumulative(
+            [1.0 if i % 2 == 0 else 1.5 * (1 + 5e-6) for i in range(40)], 240)),
+        # One impossibly short interval cannot set the scale (5th percentile,
+        # not the minimum), though it is still counted.
+        ("one_short_interval", _ticks_to_stamps(
+            [1 if i == 30 else 10 for i in range(60)], 2400)),
+        # A duplicated timestamp is a zero interval, which is dropped.
+        ("duplicate_timestamp", _ticks_to_stamps(
+            [0 if i == 20 else 1 for i in range(41)], 240)),
+        # Four intervals is the least that is measured; three is refused.
+        ("four_intervals", [k / 240 for k in range(5)]),
+        ("three_intervals", [k / 240 for k in range(4)]),
+        ("no_intervals", [0.0]),
+    ]
+    out["frame_timing"] = []
+    for name, stamps in frame_timing_cases:
+        fps, info = replay_corpus.derive_fps(dict(enumerate(stamps)))
+        out["frame_timing"].append({
+            "name": name,
+            "intervals": [b - a for a, b in zip(stamps, stamps[1:])],
+            "expected": None if fps is None else {
+                "fps": fps,
+                "intervals": info["intervals"],
+                "irregular_fraction": info["irregular_fraction"],
+            },
+        })
+    print(f"  {len(out['frame_timing'])} frame-timing cases "
+          f"(from replay_corpus.derive_fps)")
+    # ======================================================================= end frame_timing
+
     dst = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "fixtures", "parity.json")
     dst = os.path.normpath(dst)
