@@ -51,11 +51,15 @@ class PixelsKotlinTest {
     // PixelImage layout
 
     @Test
-    fun lumaIsTheFixedPointRec601OfBGRA() {
-        val img = PixelImage(byteArrayOf(10, 200.toByte(), 50, 0, -1, -1, -1, -1), 2, 1)
+    fun lumaIsOpenCVsFixedPointGrayOfBGRA() {
+        val img = PixelImage(byteArrayOf(10, 200.toByte(), 50, 0, -1, -1, -1, -1, 0, 0, 0, 0), 3, 1)
         val luma = img.lumaPlane()
-        assertEquals(133, luma[0].toInt() and 0xFF)   // (29*10 + 150*200 + 77*50 + 128) >> 8
+        assertEquals(133, luma[0].toInt() and 0xFF)   // (3735*10 + 19235*200 + 9798*50 + 16384) >> 15
         assertEquals(255, luma[1].toInt() and 0xFF)   // white stays white, alpha ignored
+        assertEquals(0, luma[2].toInt() and 0xFF)
+        // Pure red is one of the colours where the Swift's 29/150/77-of-256 sum,
+        // which reads 77, and cv2's gray part company.
+        assertEquals(76, PixelImage.luma(0, 0, 255))
     }
 
     /** Row padding (bytesPerRow > width*4), which Android buffers often carry, must change nothing. */
@@ -113,12 +117,27 @@ class PixelsKotlinTest {
     }
 
     @Test
-    fun hueIsHalvedIntoOpenCVsRange() {
-        assertEquals(HSVConvert.HSV(30.0, 200.0 * 255.0 / 220.0, 220.0), HSVConvert.fromBGR(20.0, 220.0, 220.0))
+    fun hueIsHalvedIntoOpenCVsRangeAndRounded() {
+        // S = 200 * 255 / 220 = 231.8, which OpenCV stores as 232.
+        assertEquals(HSVConvert.HSV(30.0, 232.0, 220.0), HSVConvert.fromBGR(20.0, 220.0, 220.0))
         assertEquals(HSVConvert.HSV(0.0, 255.0, 255.0), HSVConvert.fromBGR(0.0, 0.0, 255.0))     // red
         assertEquals(HSVConvert.HSV(120.0, 255.0, 255.0), HSVConvert.fromBGR(255.0, 0.0, 0.0))   // blue
         assertEquals(HSVConvert.HSV(150.0, 255.0, 255.0), HSVConvert.fromBGR(255.0, 0.0, 255.0)) // magenta wraps
         assertEquals(HSVConvert.HSV(0.0, 0.0, 0.0), HSVConvert.fromBGR(0.0, 0.0, 0.0))
+    }
+
+    /**
+     * The reason the rounding matters: S 99.78 is 100 to OpenCV, inside a window
+     * whose floor is 100, and the unrounded test the Swift made said no.
+     */
+    @Test
+    fun theWindowTestsTheRoundedValues() {
+        val lo = SLA.hsvLoDefault
+        val hi = SLA.hsvHiDefault
+        assertTrue(HSVConvert.inRange(154, 253, 253, lo, hi))    // S 99.78 -> 100
+        assertTrue(HSVConvert.inRange(47, 255, 185, lo, hi))     // H 40.10 -> 40
+        assertTrue(HSVConvert.inRange(100, 192, 255, lo, hi))    // H 17.81 -> 18
+        assertTrue(!HSVConvert.inRange(160, 253, 253, lo, hi))   // S 93.7: outside either way
     }
 
     // Motion mask
@@ -156,22 +175,76 @@ class PixelsKotlinTest {
         // The cross erodes the block's corners away for good; the speck goes.
         assertEquals(listOf(".......", "..###..", ".#####.", "..###..", ".......", "......."), m.render(w))
 
+        // The hole closes. The dilation also reaches the mask's edge, and the
+        // erosion leaves what touches the edge where it is, as cv2.morphologyEx
+        // does on this exact mask (the Swift, eroding from outside, gave the
+        // plain block back).
         val (c, cw, ch) = mask(".......", ".#####.", ".##.##.", ".#####.", ".......")
         Morphology.close(c, cw, ch)
-        assertEquals(listOf(".......", ".#####.", ".#####.", ".#####.", "......."), c.render(cw))
+        assertEquals(listOf("..###..", ".#####.", "#######", ".#####.", "..###.."), c.render(cw))
+
+        // Away from the edge, the close is the plain hole-filling it looks like.
+        val (d, dw, dh) = mask(".........", ".........", "..#####..", "..##.##..", "..#####..", ".........", ".........")
+        Morphology.close(d, dw, dh)
+        assertEquals(listOf(".........", ".........", "..#####..", "..#####..", "..#####..", ".........", "........."),
+                     d.render(dw))
     }
 
     /**
-     * The Swift erodes a set pixel on the mask's own border (it treats outside
-     * as background). OpenCV's default erode border does not. Pinned as the
-     * Swift's behaviour — the port mirrors the Swift — so a Kotlin-only change
-     * is caught; the divergence from `sla_common.py` is reported, not fixed here.
+     * OpenCV's default erode border is the maximum value, so the outside of the
+     * mask never erodes anything; the Swift treated it as background and ate
+     * the frame's edge. The edge only goes where a real background pixel takes it.
      */
     @Test
-    fun erodeTreatsOutsideTheMaskAsBackground() {
+    fun erodeLeavesTheMaskEdgeAloneAsOpenCVDoes() {
         val (m, w, h) = mask("###", "###", "###")
         Morphology.erode(m, w, h)
-        assertEquals(listOf("...", ".#.", "..."), m.render(w))
+        assertEquals(listOf("###", "###", "###"), m.render(w))
+        val (e, ew, eh) = mask("####.", "#####", "#####")
+        Morphology.erode(e, ew, eh)
+        assertEquals(listOf("###..", "####.", "#####"), e.render(ew))
+        // And dilation still grows nothing in from outside.
+        val (d, dw, dh) = mask("...", "...", "...")
+        Morphology.dilate(d, dw, dh)
+        assertEquals(listOf("...", "...", "..."), d.render(dw))
+    }
+
+    /**
+     * Masking a window gives exactly the full-frame mask, cropped: the reference
+     * only ever masks whole frames, and open+close reach four pixels.
+     */
+    @Test
+    fun aWindowedMaskIsTheFullFrameMaskCropped() {
+        val (img, _) = probeImage("blurred_21px")
+        val lo = SLA.hsvLoDefault
+        val hi = SLA.hsvHiDefault
+        val full = BallDetector.maskAfterMorphology(img, ROI(0, 0, img.width, img.height), lo, hi)
+        for (roi in listOf(ROI(20, 22, 33, 41), ROI(0, 25, 31, 61), ROI(29, 0, 61, 30), ROI(30, 30, 31, 31))) {
+            for (close in listOf(true, false)) {
+                val wide = BallDetector.maskAfterMorphology(img, ROI(0, 0, img.width, img.height), lo, hi, close = close)
+                val got = BallDetector.maskAfterMorphology(img, roi, lo, hi, close = close)
+                val w = roi.x1 - roi.x0
+                for (y in roi.y0 until roi.y1) for (x in roi.x0 until roi.x1) {
+                    assertEquals(wide[y * img.width + x], got[(y - roi.y0) * w + (x - roi.x0)], "$roi close=$close at $x,$y")
+                }
+            }
+        }
+        assertTrue(full.any { it.toInt() != 0 })
+    }
+
+    /**
+     * Detection inside a window finds what full-frame detection finds for every
+     * ball the window wholly contains, to the bit: the mask is the full frame's,
+     * and the contour is fitted in full-frame coordinates.
+     */
+    @Test
+    fun windowedDetectionAgreesWithFullFrameDetection() {
+        val (img, _) = probeImage("notched_21px")
+        val full = BallDetector.detect(img, 1, 0.0)
+        assertEquals(1, full.size)
+        for (roi in listOf(ROI(12, 12, 50, 49), ROI(17, 15, 44, 45), ROI(0, 0, 61, 61))) {
+            assertEquals(full, BallDetector.detect(img, 1, 0.0, roi = roi), "$roi")
+        }
     }
 
     @Test
@@ -225,7 +298,7 @@ class PixelsKotlinTest {
     // Detector end to end
 
     /**
-     * On the clean fixture balls the detector's own seed (the blob's moment
+     * On the clean fixture balls the detector's own seed (the fitted ellipse's
      * minor axis) must land the same diameter the reference probe gives from the
      * fixture's deliberately short seed — the probe is meant to be insensitive
      * to how good its seed is. Tolerance is the parity one.

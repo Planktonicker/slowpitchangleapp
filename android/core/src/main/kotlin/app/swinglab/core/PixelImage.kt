@@ -53,7 +53,17 @@ class PixelImage(
     /** One pixel's colour channels, 0-255 as Doubles; the Swift's `(b:, g:, r:)` tuple. */
     data class BGR(val b: Double, val g: Double, val r: Double)
 
-    /** Port of `PixelImage.lumaPlane`; the reasoning lives there. Unsigned bytes, row-major, `width` apart. */
+    /**
+     * Port of `PixelImage.lumaPlane`. Unsigned bytes, row-major, `width` apart.
+     *
+     * Deliberately NOT the Swift's arithmetic: the Swift used 29/150/77 out of
+     * 256 on the grounds that any reasonable luma answers "did this pixel
+     * change", but the motion gate's threshold is strict (`> 18`), so a luma one
+     * count off flips every pixel whose change sits on the line, and that 8-bit
+     * sum is one count off `cv2.cvtColor(BGR2GRAY)` — what every Python caller
+     * hands `motion_mask` — on 13% of colours. This is OpenCV's own 15-bit sum,
+     * exact on all 2^24 (pinned by the `cv_color` fixture's digest).
+     */
     fun lumaPlane(): ByteArray {
         val out = ByteArray(width * height)
         for (y in 0 until height) {
@@ -61,10 +71,9 @@ class PixelImage(
             val outRow = y * width
             for (x in 0 until width) {
                 val p = row + x * 4
-                val v = 29 * (bytes[p].toInt() and 0xFF) +
-                    150 * (bytes[p + 1].toInt() and 0xFF) +
-                    77 * (bytes[p + 2].toInt() and 0xFF)
-                out[outRow + x] = ((v + 128) shr 8).toByte()
+                out[outRow + x] = luma(bytes[p].toInt() and 0xFF,
+                                       bytes[p + 1].toInt() and 0xFF,
+                                       bytes[p + 2].toInt() and 0xFF).toByte()
             }
         }
         return out
@@ -80,6 +89,11 @@ class PixelImage(
      * Port of `PixelImage.sampleBilinear` (OpenCV `remap` INTER_LINEAR,
      * BORDER_REPLICATE); the reasoning lives there. Reads the four corners
      * without allocating a [BGR] each; the arithmetic, and its order, is the Swift's.
+     *
+     * The diameter probe no longer samples through this: OpenCV 5's float remap
+     * interpolates in float32 with fused multiply-adds, up to 2e-5 of a level
+     * away from this Double bilinear, and the probe now reproduces that instead
+     * (see [BallDetector.subpixelDiameter]).
      */
     fun sampleBilinear(x: Double, y: Double): BGR {
         val x0 = floor(x).toInt()
@@ -109,59 +123,79 @@ class PixelImage(
     }
 
     private fun channel(i: Int): Double = (bytes[i].toInt() and 0xFF).toDouble()
+
+    companion object {
+        /** `cv2.cvtColor(BGR2GRAY)` of one pixel: OpenCV's `RGB2Gray<uchar>`, 15-bit weights, rounded. */
+        fun luma(b: Int, g: Int, r: Int): Int = (b * 3735 + g * 19235 + r * 9798 + (1 shl 14)) shr 15
+    }
 }
 
 /**
  * Port of `PixelImage.swift` `HSVConvert` (OpenCV 8-bit HSV: H halved into
  * 0..179, S and V 0..255); the reasoning lives there.
+ *
+ * Deliberately NOT the Swift's arithmetic. The Swift promised "OpenCV-compatible
+ * 8-bit HSV" but computed it unrounded, and `cv2.cvtColor` ROUNDS H and S (in
+ * fixed point) before `cv2.inRange` compares them: S 99.78 is 100 to OpenCV and
+ * inside a window that starts at 100. Over all 2^24 colours the default window
+ * admits 69,679 more of them than the unrounded test does, and every one of
+ * those is a pixel the reference's mask has and the Swift's did not. This is
+ * OpenCV's `RGB2HSV_b` exactly, integer for integer (pinned by the `cv_color`
+ * fixture's digest of every colour).
  */
 object HSVConvert {
 
-    /** The Swift's `(h:, s:, v:)` tuple. */
+    /** The Swift's `(h:, s:, v:)` tuple. Whole numbers here, as OpenCV's are. */
     data class HSV(val h: Double, val s: Double, val v: Double)
 
-    /** Port of `HSVConvert.fromBGR`; the reasoning lives there. */
-    fun fromBGR(b: Double, g: Double, r: Double): HSV {
-        val v = swiftMax(r, swiftMax(g, b))
-        val minC = swiftMin(r, swiftMin(g, b))
-        val delta = v - minC
-        val s = if (v > 0) delta * 255.0 / v else 0.0
-        var h = 0.0
-        if (delta > 0) {
-            h = if (v == r) {
-                60 * (g - b) / delta
-            } else if (v == g) {
-                120 + 60 * (b - r) / delta
-            } else {
-                240 + 60 * (r - g) / delta
-            }
-            if (h < 0) h += 360
-        }
-        return HSV(h / 2, s, v)
+    private const val HSV_SHIFT = 12
+
+    // OpenCV's tables: saturate_cast<int>((255 << 12) / i) and ((180 << 12) / (6 i)).
+    // No entry is a tie, so how saturate_cast breaks ties cannot matter.
+    private val sdiv = IntArray(256) { if (it == 0) 0 else ((255 shl HSV_SHIFT) / it.toDouble()).rounded().toInt() }
+    private val hdiv = IntArray(256) { if (it == 0) 0 else ((180 shl HSV_SHIFT) / (6.0 * it)).rounded().toInt() }
+
+    /** `cv2.cvtColor(BGR2HSV)` of one 8-bit pixel, packed `h shl 16 or s shl 8 or v`. */
+    fun packedFromBGR(b: Int, g: Int, r: Int): Int {
+        val v = maxOf(b, g, r)
+        val diff = v - minOf(b, g, r)
+        val vr = if (v == r) -1 else 0
+        val vg = if (v == g) -1 else 0
+        val s = (diff * sdiv[v] + (1 shl (HSV_SHIFT - 1))) shr HSV_SHIFT
+        var h = (vr and (g - b)) +
+            (vr.inv() and ((vg and (b - r + 2 * diff)) + (vg.inv() and (r - g + 4 * diff))))
+        h = (h * hdiv[diff] + (1 shl (HSV_SHIFT - 1))) shr HSV_SHIFT
+        if (h < 0) h += 180
+        return (h shl 16) or (s shl 8) or v
     }
 
-    /** Port of `HSVConvert.inRange` (exactly `fromBGR` plus the range tests, short-circuited); the reasoning lives there. */
-    fun inRange(b: Double, g: Double, r: Double, lo: HSVBounds, hi: HSVBounds): Boolean {
-        val v = swiftMax(r, swiftMax(g, b))
+    /** Port of `HSVConvert.fromBGR`, on OpenCV's rounded values. Channels are whole 0-255 values, as every caller's are. */
+    fun fromBGR(b: Double, g: Double, r: Double): HSV {
+        val p = packedFromBGR(b.toInt(), g.toInt(), r.toInt())
+        return HSV((p shr 16).toDouble(), ((p shr 8) and 0xFF).toDouble(), (p and 0xFF).toDouble())
+    }
+
+    /** Port of `HSVConvert.inRange`: `fromBGR` plus `cv2.inRange`'s inclusive tests. */
+    fun inRange(b: Double, g: Double, r: Double, lo: HSVBounds, hi: HSVBounds): Boolean =
+        inRange(b.toInt(), g.toInt(), r.toInt(), lo, hi)
+
+    /**
+     * As above, from the bytes themselves; the mask loop calls this one. The
+     * arithmetic of [packedFromBGR], short-circuited as the Swift's is: most of
+     * a frame of grass and sky fails on V or S before H is worth computing.
+     */
+    fun inRange(b: Int, g: Int, r: Int, lo: HSVBounds, hi: HSVBounds): Boolean {
+        val v = maxOf(b, g, r)
         if (!(v >= lo.v && v <= hi.v)) return false
-
-        val minC = swiftMin(r, swiftMin(g, b))
-        val delta = v - minC
-        val s = if (v > 0) delta * 255.0 / v else 0.0
+        val diff = v - minOf(b, g, r)
+        val s = (diff * sdiv[v] + (1 shl (HSV_SHIFT - 1))) shr HSV_SHIFT
         if (!(s >= lo.s && s <= hi.s)) return false
-
-        var h = 0.0
-        if (delta > 0) {
-            h = if (v == r) {
-                60 * (g - b) / delta
-            } else if (v == g) {
-                120 + 60 * (b - r) / delta
-            } else {
-                240 + 60 * (r - g) / delta
-            }
-            if (h < 0) h += 360
-        }
-        h /= 2
+        val vr = if (v == r) -1 else 0
+        val vg = if (v == g) -1 else 0
+        var h = (vr and (g - b)) +
+            (vr.inv() and ((vg and (b - r + 2 * diff)) + (vg.inv() and (r - g + 4 * diff))))
+        h = (h * hdiv[diff] + (1 shl (HSV_SHIFT - 1))) shr HSV_SHIFT
+        if (h < 0) h += 180
         return h >= lo.h && h <= hi.h
     }
 }
