@@ -175,27 +175,54 @@ object HSVConvert {
         return HSV((p shr 16).toDouble(), ((p shr 8) and 0xFF).toDouble(), (p and 0xFF).toDouble())
     }
 
+    /**
+     * A bound as `cv2.inRange` receives it.
+     *
+     * `detect_ball_candidates` passes its bounds through `np.array(bound,
+     * np.uint8)`, which TRUNCATES: a lower bound of 17.6 lets H = 17 in.
+     * Comparing the whole-number H against 17.6 instead admits only 18 and up —
+     * one level stricter on every fractional lower bound, and every window
+     * `SetupBallMeasure` learns from a tap has them (`c.s * 0.55`, `c.v * 0.45`,
+     * a span's midpoint). The Swift had the same bug. (Upper bounds agree
+     * either way: an integer `h <= 40.7` is the same test as `h <= 40`.)
+     *
+     * Outside 0..255 numpy refuses the cast outright, so no fixture can pin
+     * that range; here it clamps, because a phone must not crash on a learned
+     * window that came out a level below zero.
+     */
+    fun uint8(bound: Double): Int = if (bound.isNaN()) 0 else bound.coerceIn(0.0, 255.0).toInt()
+
+    /** The window as whole-number bounds, converted once rather than per pixel. */
+    class Window(lo: HSVBounds, hi: HSVBounds) {
+        val loH = uint8(lo.h); val loS = uint8(lo.s); val loV = uint8(lo.v)
+        val hiH = uint8(hi.h); val hiS = uint8(hi.s); val hiV = uint8(hi.v)
+    }
+
     /** Port of `HSVConvert.inRange`: `fromBGR` plus `cv2.inRange`'s inclusive tests. */
     fun inRange(b: Double, g: Double, r: Double, lo: HSVBounds, hi: HSVBounds): Boolean =
-        inRange(b.toInt(), g.toInt(), r.toInt(), lo, hi)
+        inRange(b.toInt(), g.toInt(), r.toInt(), Window(lo, hi))
+
+    fun inRange(b: Int, g: Int, r: Int, lo: HSVBounds, hi: HSVBounds): Boolean =
+        inRange(b, g, r, Window(lo, hi))
 
     /**
-     * As above, from the bytes themselves; the mask loop calls this one. The
-     * arithmetic of [packedFromBGR], short-circuited as the Swift's is: most of
-     * a frame of grass and sky fails on V or S before H is worth computing.
+     * As above, from the bytes themselves; the mask loops call this one with a
+     * [Window] built once per frame. The arithmetic of [packedFromBGR],
+     * short-circuited as the Swift's is: most of a frame of grass and sky fails
+     * on V or S before H is worth computing.
      */
-    fun inRange(b: Int, g: Int, r: Int, lo: HSVBounds, hi: HSVBounds): Boolean {
+    fun inRange(b: Int, g: Int, r: Int, w: Window): Boolean {
         val v = maxOf(b, g, r)
-        if (!(v >= lo.v && v <= hi.v)) return false
+        if (v < w.loV || v > w.hiV) return false
         val diff = v - minOf(b, g, r)
         val s = (diff * sdiv[v] + (1 shl (HSV_SHIFT - 1))) shr HSV_SHIFT
-        if (!(s >= lo.s && s <= hi.s)) return false
+        if (s < w.loS || s > w.hiS) return false
         val vr = if (v == r) -1 else 0
         val vg = if (v == g) -1 else 0
         var h = (vr and (g - b)) +
             (vr.inv() and ((vg and (b - r + 2 * diff)) + (vg.inv() and (r - g + 4 * diff))))
         h = (h * hdiv[diff] + (1 shl (HSV_SHIFT - 1))) shr HSV_SHIFT
         if (h < 0) h += 180
-        return h >= lo.h && h <= hi.h
+        return h >= w.loH && h <= w.hiH
     }
 }

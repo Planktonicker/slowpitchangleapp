@@ -58,11 +58,11 @@ phone installs from.
 0. **Skeleton** — done: modules, parity harness, signed APK, CI publishing.
 1. **Measurement core** — the Swift `Core` and the pure parts of `Vision`,
    ported to `android/core` and pinned by parity. The tests run on this
-   machine, so this part is built and checked here, not blind. **Ported: 189
-   tests, every fixture block covered in full at the Swift's tolerances.**
-   Still to do: `frameTiming`, `BatTracker`, the level-sensor maths with an
-   Android axis adapter, and pinning the detector and the trigger to the Python
-   rather than only to the Swift (see `CLAUDE.md`, State of play).
+   machine, so this part is built and checked here, not blind. **Ported: 283
+   tests, every fixture block covered in full.** The detector and the trigger
+   are pinned to the Python itself, which the Swift never was. Still to do:
+   `ClipAnalyzer.analyze`, the orchestration that ties the stages together.
+   **Meanwhile the app is a device check** (see below).
 2. **Import and analyse** — pick a clip from the Gallery, measure it on the
    phone, keep a history, export bundles the corpus can ingest. The first build
    worth installing. Depends on device test 2.
@@ -77,6 +77,14 @@ phone installs from.
    iPhone transfers.
 
 ## Device tests the port depends on
+
+All three are buttons in the current APK's device check, each producing a
+report to paste back: camera capabilities, a 3-second 240fps recording trial
+timed from the sensor's own timestamps, and an inspector for a Samsung
+slow-motion clip. A Samsung community report already warns that an S21 saves
+a 240fps clip as a slowed-down 30fps file with no visible record of the true
+rate; Android can carry it in a `com.android.capture.fps` tag, which the
+inspector reads alongside the timestamps.
 
 1. **Can a third-party app record 240fps on this phone?** Samsung has a
    history of reserving high frame rates for its own camera app. One developer

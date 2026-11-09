@@ -112,6 +112,7 @@ object BallDetector {
     /** Port of `BallDetector.countInWindow` (2x-subsampled, scaled back to whole-frame pixels); the reasoning lives there. */
     fun countInWindow(image: PixelImage, settings: DetectorSettings): Int {
         val bytes = image.bytes
+        val window = HSVConvert.Window(settings.hsvLo, settings.hsvHi)
         var count = 0
         var y = 0
         while (y < image.height) {
@@ -123,7 +124,7 @@ object BallDetector {
                         bytes[p].toInt() and 0xFF,
                         bytes[p + 1].toInt() and 0xFF,
                         bytes[p + 2].toInt() and 0xFF,
-                        settings.hsvLo, settings.hsvHi,
+                        window,
                     )
                 ) count += 1
                 x += 2
@@ -168,6 +169,7 @@ object BallDetector {
         val eh = ey1 - ey0
 
         val bytes = image.bytes
+        val window = HSVConvert.Window(lo, hi)
         val wide = ByteArray(ew * eh)
         for (yy in 0 until eh) {
             val row = (ey0 + yy) * image.bytesPerRow + ex0 * 4
@@ -178,7 +180,7 @@ object BallDetector {
                         bytes[p].toInt() and 0xFF,
                         bytes[p + 1].toInt() and 0xFF,
                         bytes[p + 2].toInt() and 0xFF,
-                        lo, hi,
+                        window,
                     )
                 ) wide[rowBase + xx] = MASK_ON
             }

@@ -21,7 +21,9 @@ pinned to numbers that keep moving would just be a red build forever.
 
     python gen_parity_fixtures.py
 
-Everything here is deterministic — no RNG, no video, no cv2 detection. The
+Everything here is deterministic — no RNG and no video. cv2 detection runs only
+in the detector section, on synthetic frames drawn here, for the reason given
+there; it pins the fixtures to OpenCV 5 (the guard below the imports). The
 fixtures cover the parts a port can silently get wrong:
 
   * solve_gravity_scale   — the drag-aware quadratic, including the two-root
@@ -39,6 +41,18 @@ import os
 
 import cv2
 import numpy as np
+
+# The detector fixtures are OpenCV 5's numbers. cv2.remap's float path changed
+# between 4.x and 5.0: regenerated on 4.10 or 4.14, the detect_candidates
+# diameters move up to 0.036 px (the Kotlin pins them to 1e-5) and the older
+# diameter_probe block 0.013 px (pinned to 0.01). That would turn the Kotlin
+# parity tests red with no code change anywhere, and invite someone to "fix"
+# the Kotlin towards the wrong library. Refuse rather than write them.
+if int(cv2.__version__.split(".")[0]) < 5:
+    raise SystemExit(
+        f"gen_parity_fixtures.py needs OpenCV 5 or newer (found {cv2.__version__}): "
+        "the detector fixtures are pinned to OpenCV 5's remap. "
+        "pip install -r spike/requirements.txt")
 
 import sla_common as sla
 
@@ -1553,6 +1567,37 @@ def main():
     for col, x0 in hsv_squares:
         img[8:20, x0:x0 + 12] = col
     _case("hsv_window_boundaries", img, note="squares at S=100, H=40, H=18 after rounding, and a control")
+
+    # Fractional bounds. detect_ball_candidates passes its bounds through
+    # np.array(bound, np.uint8), which TRUNCATES, so a lower bound of 17.6 lets
+    # H = 17 in. Every colour window SetupBallMeasure learns from a tap has
+    # bounds like these (c.s * 0.55, c.v * 0.45, a span's midpoint), so a port
+    # that compares the whole-number H against 17.6 is one level stricter on
+    # every learned window. Each square sits exactly on floor(lower bound) in
+    # one channel; the control sits one level below that and must stay out.
+    def _first_bgr(pred):
+        b, g = np.meshgrid(np.arange(256), np.arange(256), indexing="ij")
+        for r in range(255, -1, -1):
+            img = np.stack([b, g, np.full_like(b, r)], -1).astype(np.uint8)
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(int)
+            hit = np.argwhere(pred(hsv[..., 0], hsv[..., 1], hsv[..., 2]))
+            if len(hit):
+                return (int(hit[0][0]), int(hit[0][1]), r)
+        raise AssertionError("no colour satisfies the predicate")
+    frac_lo, frac_hi = (17.6, 99.5, 119.4), (40.7, 255.0, 255.0)
+    frac_squares = [
+        _first_bgr(lambda H, S, V: (H == 17) & (S >= 200) & (V >= 200)),
+        _first_bgr(lambda H, S, V: (H >= 22) & (H <= 34) & (S == 99) & (V >= 200)),
+        _first_bgr(lambda H, S, V: (H >= 22) & (H <= 34) & (S >= 200) & (V == 119)),
+        _first_bgr(lambda H, S, V: (H == 16) & (S >= 200) & (V >= 200)),   # control: outside
+    ]
+    h, w = 28, 84
+    img = np.empty((h, w, 3), np.uint8)
+    img[:] = (40, 40, 40)
+    for col, x0 in zip(frac_squares, (6, 26, 46, 66)):
+        img[8:20, x0:x0 + 12] = col
+    _case("hsv_fractional_lower_bounds", img, lo=frac_lo, hi=frac_hi,
+          note="H=17, S=99, V=119 squares under lower bounds 17.6/99.5/119.4 (uint8 truncates them in), and an H=16 control")
 
     h, w = 48, 72
     _case("streak_within_6to1", _paint(h, w, TURF, [(_coverage(h, w, _smeared(35.0, 23.5, 5.5, 26.0, 20.0, 27)), OPTIC)]),

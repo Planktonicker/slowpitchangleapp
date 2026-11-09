@@ -386,4 +386,23 @@ class PixelsKotlinTest {
         assertTrue("fill" in got.report, got.report)
         assertEquals(null, got.learned)
     }
+
+    /**
+     * Bounds are truncated the way `np.array(bound, np.uint8)` truncates them
+     * before `cv2.inRange` sees them — so a learned lower bound of 17.6 lets
+     * H = 17 in. The detect_candidates case hsv_fractional_lower_bounds pins
+     * the consequence end to end; this pins the rule itself, including the
+     * clamp outside 0..255 where numpy would refuse the cast.
+     */
+    @Test
+    fun boundsTruncateLikeAUint8Cast() {
+        kotlin.test.assertEquals(17, HSVConvert.uint8(17.6))
+        kotlin.test.assertEquals(17, HSVConvert.uint8(17.0))
+        kotlin.test.assertEquals(99, HSVConvert.uint8(99.5))
+        kotlin.test.assertEquals(0, HSVConvert.uint8(-0.9))
+        kotlin.test.assertEquals(255, HSVConvert.uint8(255.9))
+        kotlin.test.assertEquals(0, HSVConvert.uint8(-3.0))
+        kotlin.test.assertEquals(255, HSVConvert.uint8(300.0))
+        kotlin.test.assertEquals(0, HSVConvert.uint8(Double.NaN))
+    }
 }

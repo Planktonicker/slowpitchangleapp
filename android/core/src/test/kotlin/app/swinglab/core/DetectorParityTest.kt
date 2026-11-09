@@ -36,6 +36,12 @@ import kotlin.test.assertTrue
  *    regenerated against another BLAS or numpy, whose float32 sums and dot
  *    products can move an edge crossing by a few millionths of a pixel. It is
  *    a thousand times tighter than the probe's own 0.01 px pin.
+ *
+ * NOT covered by any of these allowances: a different OpenCV MAJOR version.
+ * OpenCV 4.x's float remap moves these diameters by up to 0.036 px, so a
+ * reference regenerated on 4.x turns this red with no Kotlin change at all.
+ * The generator refuses to run below OpenCV 5 for that reason — if this goes
+ * red after a regeneration, check `cv2.__version__` before touching the Kotlin.
  */
 class DetectorParityTest {
 

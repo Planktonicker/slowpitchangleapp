@@ -1,3 +1,3 @@
-opencv-python>=4.9
+opencv-python>=5.0  # the parity fixtures are pinned to OpenCV 5 (see gen_parity_fixtures.py)
 numpy>=1.26
 matplotlib>=3.8

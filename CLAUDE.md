@@ -160,15 +160,29 @@ measured on the iPhone transfers to the S21+: a new phone is a new lens, a new
 rolling shutter and a new encoder.
 
 **The Android port** (`docs/ANDROID_PORT.md` has the phases): the measurement
-core is ported and green against every fixture block (189 tests). Known gaps,
-from an audit of that port, in priority order: `ClipAnalyzer.frameTiming` and
-its nine tests (it sets the fps every exit velocity scales with); `BatTracker`;
-`LevelSensor.tiltDown`/`rollOffSquare` plus an adapter from Android's sensor
-axes, whose gravity sign is the opposite of CoreMotion's; and the ball detector
-and audio trigger are pinned only to the Swift, not to the Python — the Swift
-detector differs from `detect_ball_candidates` in three places, one of which
-reads a notched ball 8% small, and the fix starts with a Python fixture block.
-The app module is still a placeholder screen.
+core is ported and green against every fixture block (283 tests), including
+frame timing, the bat tracker, the level-sensor maths with an Android axis
+adapter, and the validation scoreboard. The ball detector and the audio
+trigger are pinned to the PYTHON, not merely to the Swift — and in being
+pinned turned up bugs the frozen Swift still has: its detector differed from
+`detect_ball_candidates` in seven places (unrounded HSV, edge erosion,
+connected components instead of contours, pixel-count areas, a moment centre
+for the probe, gray weights one count off cv2 on 13% of colours, fractional
+colour bounds applied one level strict), and its trigger stamped a window that
+straddled two audio buffers up to 5 ms late. `ClipAnalyzer.analyze` — the
+orchestration that decodes a clip and runs the stages — is not ported yet.
+
+The app module is a **device check**, not the measuring app: three buttons
+that report whether a third-party app gets 240fps on this phone, what the
+camera's lens and shutter are, and what a Samsung slow-motion file contains.
+Its reports are the evidence the camera and import screens are built on.
+
+Open Python questions the port raised and left alone (the Python is the
+source of truth, so each is the owner's call): the notched-ball case reads
+19.4 px against a true ~21 in the Python itself, because `fitEllipse`'s centre
+is pulled by the notch; and `replay_trigger.simulate` dates window i at
+`i*0.005 + 0.0025`, which drifts 2.3 ms per second at 44.1 kHz where 0.005 s
+is not a whole number of samples (every corpus clip is 48 kHz).
 
 Open, in rough priority order:
 
@@ -203,6 +217,12 @@ decoder, slow-motion originals versus their rendered edits, normalised
 coordinates on an oriented image). Check for the twin before assuming it does
 not apply.
 
+- **The parity fixtures are OpenCV 5's numbers.** `cv2.remap`'s float path
+  changed between 4.x and 5.0, enough to move the detector diameters 3,600x
+  past the Kotlin's tolerance. `gen_parity_fixtures.py` refuses to run on
+  OpenCV 4 and `spike/requirements.txt` asks for 5. If the detector parity
+  tests go red right after a regeneration, check `cv2.__version__` before
+  touching any Kotlin.
 - **Swift and Kotlin disagree silently on numbers that look identical.** Swift
   `x.rounded()` rounds half away from zero; Kotlin `round()` rounds half to
   even. Swift's two-argument `max` falls through on NaN; Kotlin's propagates
