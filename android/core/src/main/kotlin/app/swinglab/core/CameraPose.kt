@@ -78,23 +78,10 @@ object CameraPose {
         orientation: ImagePropertyOrientation,
         width: Double,
         height: Double,
-    ): Point? = when (quarterTurns(from = orientation)) {
+    ): Point? = when (VideoOrientation.quarterTurns(from = orientation)) {
         0 -> p
         2 -> Point(width - p.x, height - p.y)
         else -> null
-    }
-
-    /**
-     * `VideoOrientation.quarterTurns(from:)`, copied because VideoOrientation.kt
-     * belongs to another slice of the port and this one has to compile without
-     * it. The Swift insists on ONE shared table; once VideoOrientation.kt is on
-     * the same branch, delete this and call `VideoOrientation.quarterTurns(from =)`.
-     */
-    private fun quarterTurns(from: ImagePropertyOrientation): Int = when (from) {
-        ImagePropertyOrientation.right, ImagePropertyOrientation.rightMirrored -> 1
-        ImagePropertyOrientation.down, ImagePropertyOrientation.downMirrored -> 2
-        ImagePropertyOrientation.left, ImagePropertyOrientation.leftMirrored -> 3
-        else -> 0
     }
 
     /** Port of `CameraPose.idealLensHeightM`: contact height, and the height the outline is drawn for. */

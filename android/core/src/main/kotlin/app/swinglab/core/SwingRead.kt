@@ -108,21 +108,15 @@ object SwingRead {
         val id: String get() = title
     }
 
-    /**
-     * Port of `SwingRead.body(_:)`.
-     *
-     * Takes `BodyMetrics`' five measurement fields rather than a `BodyMetrics`,
-     * because that type lives in PoseObservation.swift, which this module does
-     * not define yet. Once it does, the Swift's signature is one line:
-     * `fun body(m: BodyMetrics) = body(m.strideM, m.headDriftM, m.weightShiftM, m.frontKneeDeg, m.spineTiltDeg)`.
-     */
-    fun body(
-        strideM: Double?,
-        headDriftM: Double?,
-        weightShiftM: Double?,
-        frontKneeDeg: Double?,
-        spineTiltDeg: Double?,
-    ): List<Note> {
+    /** Port of `SwingRead.body(_:)`. */
+    fun body(m: BodyMetrics): List<Note> {
+        // Read once into locals: BodyMetrics' fields are `var`, and a local is
+        // what lets the null checks below smart-cast, as Swift's `if let` does.
+        val strideM = m.strideM
+        val headDriftM = m.headDriftM
+        val weightShiftM = m.weightShiftM
+        val frontKneeDeg = m.frontKneeDeg
+        val spineTiltDeg = m.spineTiltDeg
         val notes = mutableListOf<Note>()
 
         if (headDriftM != null) {

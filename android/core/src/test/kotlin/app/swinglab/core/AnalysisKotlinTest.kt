@@ -154,13 +154,13 @@ class AnalysisKotlinTest {
 
     @Test
     fun bodyNotesRoundHalfAwayFromZero() {
-        val notes = SwingRead.body(strideM = 0.405, headDriftM = 0.153, weightShiftM = null,
-                                   frontKneeDeg = 166.5, spineTiltDeg = null)
+        val notes = SwingRead.body(BodyMetrics(strideM = 0.405, headDriftM = 0.153, weightShiftM = null,
+                                               frontKneeDeg = 166.5, spineTiltDeg = null))
         assertEquals(
             listOf("Head moved 15 cm", "Front leg straight at contact — 167°", "Stride 41 cm"),
             notes.map { it.title })
         assertEquals(listOf(true, true, false), notes.map { it.isConvention })
-        assertTrue(SwingRead.body(null, null, null, null, null).isEmpty(), "a missing number produces no sentence")
+        assertTrue(SwingRead.body(BodyMetrics()).isEmpty(), "a missing number produces no sentence")
     }
 
     @Test
@@ -229,5 +229,25 @@ class AnalysisKotlinTest {
         }
         assertEquals(ImagePropertyOrientation.up, ImagePropertyOrientation.fromRaw(1))
         assertEquals(3, VideoOrientation.quarterTurns(from = ImagePropertyOrientation.leftMirrored))
+    }
+
+    /** rotate(pose:) moves every joint exactly as point() moves a single pixel, and a confidence does not rotate. */
+    @Test
+    fun rotatePoseMovesEachJointLikePointAndKeepsConfidence() {
+        val obs = PoseObservation(frame = 7, t = 0.029, joints = mapOf(
+            PoseJoint.nose to PosePoint(x = 1003.11, y = 361.21, confidence = 0.91),
+            PoseJoint.leftAnkle to PosePoint(x = 988.0, y = 1010.5, confidence = 0.12),
+        ))
+        assertEquals(listOf(obs), VideoOrientation.rotate(pose = listOf(obs), width = 1920, height = 1080, quarterTurns = 0))
+        for (q in 1..3) {
+            val r = VideoOrientation.rotate(pose = listOf(obs), width = 1920, height = 1080, quarterTurns = q).single()
+            assertEquals(obs.frame, r.frame)
+            assertEquals(obs.t, r.t)
+            assertEquals(obs.joints.keys, r.joints.keys)
+            for ((j, pt) in obs.joints) {
+                val want = VideoOrientation.point(x = pt.x, y = pt.y, width = 1920, height = 1080, quarterTurns = q)
+                assertEquals(PosePoint(want.x, want.y, pt.confidence), r.joints[j], "q $q $j")
+            }
+        }
     }
 }

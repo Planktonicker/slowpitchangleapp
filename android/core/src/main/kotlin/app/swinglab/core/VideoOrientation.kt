@@ -10,10 +10,6 @@ import kotlin.math.atan2
 /**
  * Port of `VideoOrientation.swift` `enum VideoOrientation` (buffer pixels to the
  * displayed frame); the reasoning lives there.
- *
- * `rotate(pose:width:height:quarterTurns:)` is not ported yet: it is written
- * against `PoseObservation`, which this module does not define until
- * PoseObservation.swift is ported.
  */
 object VideoOrientation {
 
@@ -65,6 +61,22 @@ object VideoOrientation {
             3 -> ImagePropertyOrientation.left
             else -> ImagePropertyOrientation.up
         }
+
+    /** Port of `VideoOrientation.rotate(pose:width:height:quarterTurns:)`; each joint keeps its confidence. */
+    // Both rotate overloads erase to rotate(List, int, int, int) on the JVM, so
+    // this one gets its own bytecode name; Kotlin callers still write rotate(pose = ...).
+    @JvmName("rotatePose")
+    fun rotate(pose: List<PoseObservation>, width: Int, height: Int, quarterTurns: Int): List<PoseObservation> {
+        val q = quarterTurns
+        if (q == 0) return pose
+        return pose.map { obs ->
+            val joints = obs.joints.mapValues { (_, pt) ->
+                val p = point(x = pt.x, y = pt.y, width = width, height = height, quarterTurns = q)
+                PosePoint(x = p.x, y = p.y, confidence = pt.confidence)
+            }
+            PoseObservation(frame = obs.frame, t = obs.t, joints = joints)
+        }
+    }
 
     /** Port of `VideoOrientation.rotate(track:width:height:quarterTurns:)`; diameters are lengths and do not rotate. */
     fun rotate(track: List<BallObservation>, width: Int, height: Int, quarterTurns: Int): List<BallObservation> {
