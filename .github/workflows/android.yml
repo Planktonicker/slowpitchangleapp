@@ -68,7 +68,7 @@ jobs:
       - name: Core parity tests
         run: |
           set -o pipefail
-          ./gradlew :core:test --console=plain 2>&1 | tee ../core-test.log
+          ./gradlew :core:test :app:testReleaseUnitTest --console=plain 2>&1 | tee ../core-test.log
 
       - name: Build the APK
         run: |

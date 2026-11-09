@@ -19,8 +19,8 @@ android {
         // storage) is newer than that.
         minSdk = 30
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.0"
+        versionCode = 4
+        versionName = "1.0.1"
     }
 
     // ONE signing key for every build, wherever it is built.
@@ -71,4 +71,6 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.12.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    testImplementation(kotlin("test"))
 }

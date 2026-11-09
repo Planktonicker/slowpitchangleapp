@@ -176,6 +176,9 @@ The app module is a **device check**, not the measuring app: three buttons
 that report whether a third-party app gets 240fps on this phone, what the
 camera's lens and shutter are, and what a Samsung slow-motion file contains.
 Its reports are the evidence the camera and import screens are built on.
+**The first answer is in: a third-party app records true 1920x1080 at 240fps
+on the S21+** (constrained high-speed session, hardware H.264, clean file
+timestamps), so live capture is buildable.
 
 Open Python questions the port raised and left alone (the Python is the
 source of truth, so each is the owner's call): the notched-ball case reads
@@ -217,6 +220,12 @@ decoder, slow-motion originals versus their rendered edits, normalised
 coordinates on an oriented image). Check for the twin before assuming it does
 not apply.
 
+- **On the S21+ a high-speed session reports most frames' capture results
+  twice**, sensor timestamps about a microsecond apart. Counted as frames they
+  read "295 fps" off a camera delivering 240. Collapse timestamps closer than
+  half a millisecond (`IntervalStats.DUPLICATE_US`), or time frames from the
+  encoder's output, which is clean. `docs/ANDROID_PORT.md` has the rest of
+  what the device check found.
 - **The parity fixtures are OpenCV 5's numbers.** `cv2.remap`'s float path
   changed between 4.x and 5.0, enough to move the detector diameters 3,600x
   past the Kotlin's tolerance. `gen_parity_fixtures.py` refuses to run on

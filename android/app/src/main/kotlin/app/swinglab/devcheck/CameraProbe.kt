@@ -43,9 +43,13 @@ object CameraProbe {
         r.line("Camera ids: ${ids.joinToString()}")
 
         val seen = mutableSetOf<String>()
+        var best: Pair<Int, String> = 0 to NO_HIGH_SPEED
         fun probe(id: String, note: String) {
             if (!seen.add(id)) return
-            try { describe(r, mgr, id, note) } catch (e: Exception) {
+            try {
+                val found = describe(r, mgr, id, note)
+                if (found != null && found.first > best.first) best = found
+            } catch (e: Exception) {
                 r.section("Camera $id $note"); r.line("Could not read: $e")
             }
         }
@@ -62,13 +66,23 @@ object CameraProbe {
 
         encoders(r)
         r.section("Verdict")
-        r.line(verdict)
+        r.line(best.second)
         return r
     }
 
-    private var verdict = "No back camera advertises constrained high-speed video: a third-party app cannot record 120/240fps on this phone."
+    private const val NO_HIGH_SPEED =
+        "No back camera advertises constrained high-speed video: a third-party app cannot record 120/240fps on this phone."
 
-    private fun describe(r: Report, mgr: CameraManager, id: String, note: String) {
+    /**
+     * Prints one camera and returns how good its high-speed offer is (higher
+     * is better) with the sentence to say about it, or null for no offer.
+     *
+     * Ranked rather than "last one wins". The first version kept a single
+     * verdict that each back camera overwrote in turn, so on the S21+ the
+     * telephoto or ultra-wide, probed last, reported "no 240fps" for a phone
+     * whose main camera then recorded a clean 240fps.
+     */
+    private fun describe(r: Report, mgr: CameraManager, id: String, note: String): Pair<Int, String>? {
         val c = mgr.getCameraCharacteristics(id)
         val facing = when (c.get(CameraCharacteristics.LENS_FACING)) {
             CameraMetadata.LENS_FACING_BACK -> "back"
@@ -124,7 +138,7 @@ object CameraProbe {
             (c.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)?.joinToString() ?: "none"))
 
         val map = c.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: run {
-            r.line("No stream configuration map."); return
+            r.line("No stream configuration map."); return null
         }
         // The fastest a NORMAL session can run at 1080p.
         val fhd = Size(1920, 1080)
@@ -136,6 +150,7 @@ object CameraProbe {
         }
 
         r.line("CONSTRAINED HIGH-SPEED VIDEO: ${if (highSpeed) "ADVERTISED" else "not advertised"}")
+        var offer: Pair<Int, String>? = null
         if (highSpeed) {
             val sizes = map.highSpeedVideoSizes.sortedByDescending { it.width * it.height }
             if (sizes.isEmpty()) r.line("  (advertised, but no sizes listed)")
@@ -146,14 +161,15 @@ object CameraProbe {
                 if (s.width >= 1920 && s.height >= 1080 && ranges.any { it.upper >= 240 }) best240fhd = true
             }
             if (facing == "back") {
-                verdict = if (best240fhd)
-                    "Camera $id ADVERTISES 1920x1080 at 240fps to third-party apps. Now run the 3-second trial: advertised is not the same as delivered."
+                offer = if (best240fhd)
+                    3 to "Camera $id ADVERTISES 1920x1080 at 240fps to third-party apps. Now run the 3-second trial: advertised is not the same as delivered."
                 else if (sizes.any { s -> map.getHighSpeedVideoFpsRangesFor(s).any { it.upper >= 240 } })
-                    "Camera $id advertises 240fps, but not at 1920x1080 — see the sizes above. Run the trial."
+                    2 to "Camera $id advertises 240fps, but not at 1920x1080 — see the sizes above. Run the trial."
                 else
-                    "Camera $id advertises high-speed video, but not 240fps — see the ranges above."
+                    1 to "Camera $id advertises high-speed video, but not 240fps — see the ranges above."
             }
         }
+        return offer
     }
 
     private fun encoders(r: Report) {
