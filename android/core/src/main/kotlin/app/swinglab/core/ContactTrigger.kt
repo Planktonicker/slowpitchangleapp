@@ -157,6 +157,15 @@ class ContactTrigger(thresholdDb: Double = SLA.triggerDb) {
                     TriggerBiquad(highPassHz = SLA.triggerHighPassHz, sampleRate = sampleRate)
                 }
             }
+            // Deliberately not the Swift. Samples carried over from the last
+            // batch come BEFORE this batch's first sample, so a window that
+            // straddles two batches began before startSeconds. The Swift dates
+            // every window from startSeconds and so stamps a straddling one up
+            // to a window (5 ms) late; replay_trigger.simulate, the reference,
+            // dates each window by its place in the stream whatever the buffer
+            // size — and a microphone buffer is almost never a whole number of
+            // windows. Unchanged whenever the previous batch left no carry.
+            val carriedIn = carryCount
             reserveCarry(carryCount + samples.size)
             for (raw in samples) {
                 var sample = raw
@@ -178,7 +187,7 @@ class ContactTrigger(thresholdDb: Double = SLA.triggerDb) {
                 if (db > _peakDb) _peakDb = db
 
                 val windowTime = startSeconds +
-                    offset.toDouble() / sampleRate +
+                    (offset - carriedIn).toDouble() / sampleRate +
                     rmsWindowS / 2
 
                 if (_isArmed &&

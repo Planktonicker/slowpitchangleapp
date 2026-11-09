@@ -464,6 +464,265 @@ def flight_cases():
 
 
 # ---------------------------------------------------------------------------
+# Contact trigger: replay_trigger.py's mirror of ContactTrigger
+# ---------------------------------------------------------------------------
+#
+# The trigger's DSP lives in replay_trigger.py rather than sla_common.py,
+# because it mirrors the app instead of measuring the ball. It still decides
+# when the app records, which is upstream of every number the app makes, so it
+# is pinned the same way. Everything below CALLS replay_trigger (highpass() and
+# simulate()) and never restates them: a second copy of the filter in this file
+# would pin the Kotlin to the copy. The settings come from where
+# replay_trigger's own main() takes them, the Kotlin sources, so a constant
+# changed there without regenerating fails the Kotlin test that compares them.
+#
+# The audio is synthesised from a recipe, not stored: two seconds at 48 kHz is
+# a megabyte of JSON. Each case carries its components (tones, pulses, Hann
+# bursts, chirps), and the Kotlin test rebuilds the samples with the same
+# arithmetic in the same order. No RNG anywhere. The "hiss" is a sum of
+# incommensurate tones in the band the trigger listens in, so the floor wobbles
+# window to window the way a real one does and its median is not a constant;
+# the 220 Hz hum under it is thirty dB louder, and the high-pass has to make it
+# vanish.
+
+TRIGGER_SR = 48000.0
+
+_TRIGGER_HISS = ((6737.0, 0.3), (7919.0, 1.7), (9173.0, 2.9), (10391.0, 4.1),
+                 (11833.0, 5.3), (13567.0, 0.9), (15511.0, 2.2))
+
+
+def _trigger_hiss(amp, start, stop, detune=1.0):
+    return [{"kind": "tone", "hz": hz * detune, "amp": amp, "phase": ph,
+             "start": start, "stop": stop} for hz, ph in _TRIGGER_HISS]
+
+
+def _trigger_room(n, hum=True):
+    parts = _trigger_hiss(1e-4, 0, n)
+    if hum:
+        parts.append({"kind": "tone", "hz": 220.0, "amp": 1e-2, "phase": 0.0,
+                      "start": 0, "stop": n})
+    return parts
+
+
+def _trigger_pulse(at, amp=0.5, length=48):
+    return {"kind": "pulse", "amp": amp, "start": at, "stop": at + length}
+
+
+def _trigger_signal(components, n, sr):
+    """The recipe as samples. Each component ADDS into the buffer, in list order.
+
+    The arithmetic is spelled out operation by operation because the Kotlin
+    test repeats it: same order, same grouping, so the two rebuild the same
+    samples to within what sin() itself differs by between libraries.
+    """
+    x = [0.0] * n
+    for c in components:
+        kind, lo, hi = c["kind"], c["start"], c["stop"]
+        if kind == "pulse":
+            for i in range(lo, hi):
+                x[i] += c["amp"]
+        elif kind == "tone":
+            for i in range(lo, hi):
+                x[i] += c["amp"] * math.sin(2.0 * math.pi * c["hz"] * i / sr + c["phase"])
+        elif kind == "hann_tone":
+            m = hi - lo
+            for k in range(m):
+                w = 0.5 - 0.5 * math.cos(2.0 * math.pi * k / (m - 1))
+                x[lo + k] += c["amp"] * math.sin(2.0 * math.pi * c["hz"] * k / sr) * w
+        elif kind == "chirp":
+            dur = (hi - lo) / sr
+            for k in range(hi - lo):
+                t = k / sr
+                x[lo + k] += c["amp"] * math.sin(
+                    2.0 * math.pi * (c["f0"] * t + (c["f1"] - c["f0"]) * t * t / (2.0 * dur)))
+        else:
+            raise ValueError(f"unknown component {kind!r}")
+    return np.array(x, dtype=np.float64)
+
+
+def _trigger_margins(name, db, t, fires, threshold, gap, max_floor):
+    """Refuse a case whose outcome would hang on the last bit of a double.
+
+    The Kotlin sums a window's squares in order where numpy sums pairwise, and
+    takes a median as (a+b)/2 where np.quantile interpolates; both land within
+    a few ulps, which is nothing, unless a window's dB sits ON the threshold or
+    a candidate window sits exactly one refractory after a fire. Then the two
+    can disagree about whether it fires, and the fixture would be pinning
+    rounding. Checked on simulate()'s own output, so it constrains the cases,
+    not the DSP.
+    """
+    fire_times = [f[0] for f in fires]
+    for i in range(max_floor // 2, len(db)):
+        assert abs(db[i] - threshold) > 1e-6, (name, i, db[i])
+        if db[i] >= threshold:
+            before = [ft for ft in fire_times if ft < t[i] - 1e-12]
+            if before:
+                assert abs((t[i] - before[-1]) - gap) > 1e-6, (name, i)
+
+
+def trigger_highpass_cases():
+    """highpass() on its own: impulse and step responses and two real signals.
+
+    The impulse response's first three samples are the section's coefficients
+    (b0, then b1 - a1*b0, ...); the rest is the recursion, and a second design
+    point (1 kHz at 44.1 kHz) keeps the formula from being right only at the
+    one cutoff the app uses.
+    """
+    import replay_trigger as rt
+
+    sr = TRIGGER_SR
+    cases = []
+
+    def add(name, components, n, rate, fc, order, indices):
+        x = _trigger_signal(components, n, rate)
+        y = rt.highpass(x, rate, fc, order)
+        cases.append({
+            "name": name, "sample_rate": rate, "high_pass_hz": fc, "order": order,
+            "n_samples": n, "components": components,
+            "indices": list(indices),
+            "expected": [float(y[i]) for i in indices],
+        })
+
+    impulse = [_trigger_pulse(0, amp=1.0, length=1)]
+    step = [_trigger_pulse(0, amp=1.0, length=64)]
+    add("impulse_one_section", impulse, 64, sr, 6000.0, 2, range(64))
+    add("impulse_two_sections", impulse, 64, sr, 6000.0, 4, range(64))
+    add("impulse_1k_at_44k1", impulse, 64, 44100.0, 1000.0, 4, range(64))
+    add("step_two_sections", step, 64, sr, 6000.0, 4, range(64))
+
+    # A 200 Hz - 20 kHz sweep over the room: the whole magnitude response,
+    # sampled every 997th sample (prime, so the indices walk across the phase).
+    n = int(1.0 * sr)
+    sweep = _trigger_room(n) + [{"kind": "chirp", "f0": 200.0, "f1": 20000.0,
+                                 "amp": 0.05, "start": 0, "stop": n}]
+    add("sweep_over_room", sweep, n, sr, 6000.0, 4, range(0, n, 997))
+
+    # Half full scale at 500 Hz and a tenth of it at 12 kHz: the thump the
+    # band exists to ignore and the crack it exists to hear.
+    n = int(0.25 * sr)
+    bursts = _trigger_room(n) + [
+        {"kind": "hann_tone", "hz": 500.0, "amp": 0.5, "start": 2400, "stop": 2880},
+        {"kind": "hann_tone", "hz": 12000.0, "amp": 0.05, "start": 7213, "stop": 7693},
+    ]
+    add("thump_and_crack", bursts, n, sr, 6000.0, 4,
+        list(range(2400, 2880, 13)) + list(range(7213, 7693, 13)) + [0, 1, 2, n - 1])
+    return cases
+
+
+def contact_trigger_cases():
+    """simulate() — the whole trigger, window for window, on synthetic audio.
+
+    Each case records the dB over the rolling floor of EVERY 5 ms window (the
+    trace the Kotlin's `lastDb` reads back when fed one window at a time) and
+    every fire. `refractory_mode` says which of simulate()'s two models it is:
+    "attempt" is the app as it now is, where detection buys only the short
+    attempt refractory because nothing confirms the fire; "confirmed" is a fire
+    that became a clip every time, which the Kotlin models by calling
+    `confirmFire` after each one.
+    """
+    import replay_trigger as rt
+
+    sr = TRIGGER_SR
+    band = rt.source_constant(rt.CONSTANTS_SRC, "triggerHighPassHz", 6000.0)
+    order = int(rt.source_constant(rt.CONSTANTS_SRC, "triggerHighPassOrder", 4))
+    app_db = rt.source_constant(rt.CONSTANTS_SRC, "triggerDb", 36.0)
+    attempt = rt.source_constant(rt.TRIGGER_SRC, "attemptRefractoryS", 0.25)
+    max_floor = max(8, int(rt.FLOOR_WINDOW_S / rt.RMS_WINDOW_S))
+    cases = []
+
+    def s(sec):
+        return int(sec * sr)
+
+    def add(name, components, n, threshold, refractory=2.0, mode="attempt"):
+        assert mode in ("attempt", "confirmed")
+        x = _trigger_signal(components, n, sr)
+        if mode == "attempt":
+            fires, db, t, _ = rt.simulate(x, sr, threshold, refractory, band_hz=band,
+                                          attempt_refractory_s=attempt)
+            gap = attempt
+        else:
+            # The app adds the attempt refractory on top of the confirmed one,
+            # which simulate()'s confirmed model does not; the two agree only
+            # while the confirmed one is the longer.
+            assert refractory >= attempt
+            fires, db, t, _ = rt.simulate(x, sr, threshold, refractory, band_hz=band)
+            gap = refractory
+        _trigger_margins(name, db, t, fires, threshold, gap, max_floor)
+        cases.append({
+            "name": name, "sample_rate": sr, "n_samples": n, "components": components,
+            "high_pass_hz": band, "order": order,
+            "rms_window_s": rt.RMS_WINDOW_S, "floor_window_s": rt.FLOOR_WINDOW_S,
+            "threshold_db": threshold, "refractory_s": refractory,
+            "attempt_refractory_s": attempt, "refractory_mode": mode,
+            "expected_db": [float(v) for v in db],
+            "expected_fires": [{"t": float(a), "db": float(b)} for a, b in fires],
+        })
+
+    # Nothing at all: every window is the two 1e-9 guards against each other.
+    add("silence", [], s(0.5), app_db)
+
+    # A click train over the room. The first click lands before the floor
+    # history is half full and must not fire however loud it is; the third and
+    # sixth land inside the attempt refractory of the click before them.
+    n = s(2.0)
+    add("click_train", _trigger_room(n) + [
+        _trigger_pulse(s(0.10) + 31), _trigger_pulse(s(0.60) + 77),
+        _trigger_pulse(s(0.70) + 5), _trigger_pulse(s(0.95) + 113),
+        _trigger_pulse(s(1.40) + 59), _trigger_pulse(s(1.52) + 191),
+        _trigger_pulse(s(1.80) + 7, amp=0.05),
+    ], n, app_db)
+
+    # The band: half full scale at 500 Hz and 2 kHz, then a tenth of it at
+    # 12 kHz. Only the last is a bat on a ball.
+    n = s(1.6)
+    add("thump_vs_crack", _trigger_room(n) + [
+        {"kind": "hann_tone", "hz": 500.0, "amp": 0.5,
+         "start": s(0.60) + 17, "stop": s(0.61) + 17},
+        {"kind": "hann_tone", "hz": 2000.0, "amp": 0.5,
+         "start": s(0.90) + 29, "stop": s(0.91) + 29},
+        {"kind": "hann_tone", "hz": 12000.0, "amp": 0.05,
+         "start": s(1.20) + 41, "stop": s(1.21) + 41},
+    ], n, app_db)
+
+    # Sustained chatter becomes the floor. Its onset fires; a click inside it
+    # is measured against it and does not; a click just after it ends is still
+    # measured against it, because the median has not caught up; a click once
+    # the median has caught up fires again.
+    n = s(2.0)
+    add("chatter_lifts_the_floor", _trigger_room(n)
+        + _trigger_hiss(1.5e-2, s(0.30) + 11, s(1.50) + 11, detune=1.037) + [
+        _trigger_pulse(s(1.20) + 3), _trigger_pulse(s(1.62) + 97),
+        _trigger_pulse(s(1.90) + 61),
+    ], n, 24.0)
+
+    # The confirmed refractory, at a length other than the default: the second
+    # click is inside it, the third is past it.
+    n = s(1.8)
+    add("confirmed_refractory", _trigger_room(n) + [
+        _trigger_pulse(s(0.40) + 19), _trigger_pulse(s(1.10) + 83),
+        _trigger_pulse(s(1.55) + 37),
+    ], n, app_db, refractory=1.0, mode="confirmed")
+
+    # A DC offset from the first sample and a step later on: the high-pass
+    # turns each into a transient. The first lands while the floor history is
+    # not yet half full; the second is heard at a low threshold.
+    n = s(1.4)
+    add("dc_and_step", _trigger_room(n) + [
+        {"kind": "pulse", "amp": 0.2, "start": 0, "stop": n},
+        {"kind": "pulse", "amp": 0.3, "start": s(0.80) + 23, "stop": n},
+    ], n, 20.0)
+
+    # A sweep through the cutoff: what fires is wherever the rising high band
+    # outruns the half-second median trailing behind it.
+    n = s(1.6)
+    add("sweep_through_cutoff", _trigger_room(n) + [
+        {"kind": "chirp", "f0": 200.0, "f1": 20000.0, "amp": 0.05,
+         "start": s(0.30), "stop": s(1.50)},
+    ], n, app_db)
+    return cases
+
+
+# ---------------------------------------------------------------------------
 
 def main():
     out = {
@@ -1498,6 +1757,16 @@ def main():
           f"{len(out['contour_geometry'])} contour-geometry masks "
           f"({sum(len(c['contours']) for c in out['contour_geometry'])} contours), cv_color digests")
     # ======================================================================= end DETECTOR
+
+    # --- Contact trigger (replay_trigger.py) --------------------------------
+    # Its own section so it merges cleanly beside the others; the cases and the
+    # reasoning are in trigger_highpass_cases() / contact_trigger_cases().
+    out["trigger_highpass"] = trigger_highpass_cases()
+    out["contact_trigger"] = contact_trigger_cases()
+    print(f"  {len(out['trigger_highpass'])} trigger high-pass cases, "
+          f"{len(out['contact_trigger'])} contact-trigger cases "
+          f"({sum(len(c['expected_db']) for c in out['contact_trigger'])} windows)")
+    # -------------------------------------------------------------------------
 
     dst = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "fixtures", "parity.json")
