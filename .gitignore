@@ -24,3 +24,7 @@ DerivedData/
 # --- OS junk ---
 .DS_Store
 Thumbs.db
+
+# --- Android: APKs are CI artifacts, never committed ---
+*.apk
+*.aab

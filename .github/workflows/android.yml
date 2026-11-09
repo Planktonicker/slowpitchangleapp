@@ -1,0 +1,109 @@
+# Builds, tests and publishes the SwingLab Android app.
+#
+# Two jobs in one: the measurement core's parity tests (plain JVM, seconds), and
+# an installable APK. The core tests read the SAME app/Tests/Fixtures/parity.json
+# the iOS tests read, so a change to spike/sla_common.py that regenerates the
+# fixtures re-runs this workflow too, which is the point of the paths filter.
+#
+# Publishing: every push to main replaces the APK on the `android-latest`
+# release, so the phone always installs from one fixed page —
+#   https://github.com/Planktonicker/slowpitchangleapp/releases/tag/android-latest
+# A release asset rather than a workflow artifact on purpose: artifacts arrive
+# as a zip behind a GitHub login, and unzipping on a phone before sideloading is
+# a step nobody should have to learn. Every build is signed with the same
+# committed key (android/keystore/README.md), so each one installs over the last
+# without losing stored swings.
+name: Android
+
+on:
+  push:
+    branches:
+      - main
+      - 'claude/**'
+    paths:
+      - 'android/**'
+      - 'app/Tests/Fixtures/parity.json'
+      - '.github/workflows/android.yml'
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'app/Tests/Fixtures/parity.json'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write   # the android-latest release; nothing else
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # The runner image ships an Android SDK; record which, because nobody
+      # reading this log can see the machine.
+      - name: Toolchain
+        run: |
+          java -version
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" || true
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Core parity tests
+        run: |
+          set -o pipefail
+          ./gradlew :core:test --console=plain 2>&1 | tee ../core-test.log
+
+      - name: Build the APK
+        run: |
+          set -o pipefail
+          ./gradlew :app:assembleDebug --console=plain 2>&1 | tee ../apk-build.log
+          cp app/build/outputs/apk/debug/app-debug.apk ../SwingLab.apk
+
+      # Errors into the job summary: a Gradle log is thousands of lines, and the
+      # summary is what makes a failure readable in one fetch.
+      - name: Summarise
+        if: always()
+        working-directory: .
+        run: |
+          {
+            echo "## Android build"
+            for f in core-test.log apk-build.log; do
+              [ -f "$f" ] || continue
+              echo "### $f"
+              echo '```'
+              grep -E "^e: |error:|FAILED|Test.*>.*FAILED|AssertionError|expected|BUILD (SUCCESSFUL|FAILED)" "$f" | head -150 || true
+              echo '```'
+            done
+            if [ -f SwingLab.apk ]; then
+              echo "APK: $(du -h SwingLab.apk | cut -f1)"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish to the android-latest release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view android-latest >/dev/null 2>&1 || \
+            gh release create android-latest --prerelease \
+              --title "SwingLab for Android — latest build" \
+              --notes "Rebuilt on every push to main. On the phone: tap SwingLab.apk, allow installs from your browser when asked. Each build installs over the last; stored swings are kept."
+          gh release upload android-latest SwingLab.apk --clobber
+          gh release edit android-latest --notes "Rebuilt on every push to main. Built from ${GITHUB_SHA::7}. On the phone: tap SwingLab.apk, allow installs from your browser when asked. Each build installs over the last; stored swings are kept."
