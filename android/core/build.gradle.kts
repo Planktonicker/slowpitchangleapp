@@ -22,11 +22,14 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
-    // The SAME fixture file the iOS tests read — never a copy. Two copies of
-    // the reference numbers is how a port drifts without a test noticing.
-    systemProperty(
-        "parity.fixtures",
-        rootProject.projectDir.resolve("../app/Tests/Fixtures/parity.json").canonicalPath,
-    )
+    // The live fixtures, read in place from beside the Python that writes them —
+    // never a copy. (app/Tests/Fixtures/parity.json is the frozen iOS app's
+    // snapshot and stops moving; it is not this module's reference.)
+    val fixtures = rootProject.projectDir.resolve("../spike/fixtures/parity.json")
+    systemProperty("parity.fixtures", fixtures.canonicalPath)
+    // Declared as an input so regenerating the fixtures re-runs the tests.
+    // Without it Gradle calls the task UP-TO-DATE and stays green on numbers
+    // that no longer exist.
+    inputs.file(fixtures).withPropertyName("parityFixtures")
     testLogging { events("failed"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
 }

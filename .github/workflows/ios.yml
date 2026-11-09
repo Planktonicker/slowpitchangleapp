@@ -8,6 +8,11 @@
 # Simulator only. A device build would need signing, and every measurement this
 # app makes needs a real camera and a real IMU anyway — CI can prove the code
 # compiles and the pure-maths tests pass, and nothing beyond that.
+#
+# THE iOS APP IS FROZEN (at 8c87828): the owner moved to Android, and new
+# measurement changes go to Python and Kotlin only. This still builds and tests
+# it against its own snapshot of the reference numbers, so it stays a working
+# app — but only runs when someone actually changes it.
 name: iOS
 
 on:
@@ -15,7 +20,13 @@ on:
     branches:
       - main
       - 'claude/**'
+    paths:
+      - 'app/**'
+      - '.github/workflows/ios.yml'
   pull_request:
+    paths:
+      - 'app/**'
+      - '.github/workflows/ios.yml'
   workflow_dispatch:
 
 # A fix-and-push loop should not queue up runs of code that is already stale.

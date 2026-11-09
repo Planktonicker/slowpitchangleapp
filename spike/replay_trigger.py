@@ -46,8 +46,11 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 CORPUS = os.path.join(HERE, "corpus")
 INDEX = os.path.join(CORPUS, "index.json")
-CONSTANTS_SWIFT = os.path.join(HERE, "..", "app", "Sources", "Core", "SLAConstants.swift")
-TRIGGER_SWIFT = os.path.join(HERE, "..", "app", "Sources", "Capture", "ContactTrigger.swift")
+# The LIVE app's trigger, which since the iOS freeze means the Kotlin port.
+_KOTLIN = os.path.join(HERE, "..", "android", "core", "src", "main", "kotlin",
+                       "app", "swinglab", "core")
+CONSTANTS_SRC = os.path.join(_KOTLIN, "SLAConstants.kt")
+TRIGGER_SRC = os.path.join(_KOTLIN, "ContactTrigger.kt")
 
 # Mirrors of ContactTrigger's own windowing. Read from the Swift below where
 # they are declared there; these are the fallbacks.
@@ -111,7 +114,7 @@ def highpass(x: np.ndarray, sr: float, fc: float, order: int | None = None) -> n
     real crack from 45 to 50.
     """
     if order is None:
-        order = int(swift_constant(CONSTANTS_SWIFT, "triggerHighPassOrder", 4))
+        order = int(source_constant(CONSTANTS_SRC, "triggerHighPassOrder", 4))
     w0 = 2 * math.pi * fc / sr
     c, s = math.cos(w0), math.sin(w0)
     alpha = s / (2 * (1 / math.sqrt(2)))
@@ -178,12 +181,12 @@ def simulate(d: np.ndarray, sr: float, threshold_db: float, refractory_s: float,
     return fires, db, t, floor
 
 
-def swift_constant(path: str, name: str, fallback: float) -> float:
+def source_constant(path: str, name: str, fallback: float) -> float:
     try:
         src = open(path, encoding="utf-8").read()
     except OSError:
         return fallback
-    m = re.search(rf"static let {name}\s*(?::\s*\w+\s*)?=\s*(-?\d+(?:\.\d+)?)", src)
+    m = re.search(rf"(?:const\s+)?val {name}\s*(?::\s*\w+\s*)?=\s*(-?\d+(?:\.\d+)?)", src)
     return float(m.group(1)) if m else fallback
 
 
@@ -355,11 +358,11 @@ def main() -> int:
         return selftest()
 
     threshold = args.threshold if args.threshold is not None else \
-        swift_constant(CONSTANTS_SWIFT, "triggerDb", 30.0)
-    attempt = swift_constant(TRIGGER_SWIFT, "attemptRefractoryS", 0.25)
+        source_constant(CONSTANTS_SRC, "triggerDb", 30.0)
+    attempt = source_constant(TRIGGER_SRC, "attemptRefractoryS", 0.25)
     band = args.band
     if band is None:
-        band = swift_constant(CONSTANTS_SWIFT, "triggerHighPassHz", 6000.0)
+        band = source_constant(CONSTANTS_SRC, "triggerHighPassHz", 6000.0)
     if band <= 0:
         band = None
     args.band = band

@@ -5,32 +5,50 @@ have already been made and paid for; re-deriving them costs a field trip.
 
 ## What this is
 
-A native Swift/SwiftUI iPhone app that measures slow-pitch softball **launch
-angle**, **exit velocity**, **bat metrics** and **sagittal-plane body metrics**
-from one tripod-mounted phone filming side-on at 240fps. Everything stays on the
-device. AGPL-3.0-only; every source file carries an SPDX header.
+A phone app that measures slow-pitch softball **launch angle**, **exit
+velocity**, **bat metrics** and **sagittal-plane body metrics** from one
+tripod-mounted phone filming side-on at 240fps. Everything stays on the device.
+AGPL-3.0-only; every source file carries an SPDX header.
+
+**The app is being ported to Android** (Kotlin, `android/`) for the owner's
+Galaxy S21+, which replaces the iPhone. **The iOS app (`app/`, Swift) is
+FROZEN at `8c87828`**: it still builds and passes its tests, but it receives no
+new measurement changes. The plan, what replaces each Apple framework, and the
+device tests the port still depends on are in `docs/ANDROID_PORT.md`.
 
 ## The rule that governs everything
 
 **`spike/sla_common.py` is the single source of truth for measurement.** The
-Swift in `app/Sources/Core/` is a port of it, pinned number-for-number by
-`app/Tests/ParityTests.swift` against `app/Tests/Fixtures/parity.json`.
+Kotlin in `android/core/` is a port of it, pinned number-for-number by the
+parity tests in `android/core/src/test/` against `spike/fixtures/parity.json`,
+which they read in place.
 
 To change any measurement:
 
 1. Edit `spike/sla_common.py`.
-2. `cd spike && python gen_parity_fixtures.py`
-3. Mirror into Swift.
-4. Run the tests. Parity must never go red.
+2. `cd spike && python gen_parity_fixtures.py` (writes `spike/fixtures/parity.json`).
+3. Mirror into Kotlin, `android/core`.
+4. `cd android && ./gradlew :core:test`. Parity must never go red.
 
-Never "improve" a number in Swift alone. If a value exists in both places and
+Never "improve" a number in Kotlin alone. If a value exists in both places and
 they drift, the tests are the only thing that will notice, and only if the value
 is in the fixtures — so add it there too.
 
-Two enums look similar and are deliberately separate: `SwingFlag` mirrors the
-Python's flag strings and is parity-pinned; `CaptureFlag` is app-only, for
-conditions the Python cannot know about (tripod level, dropped frames, imported
-clips). Adding an app-only flag to `SwingFlag` breaks `testFixturesCoverEveryFlag`.
+**Do not port measurement changes into the Swift.** The frozen iOS app is pinned
+to its own snapshot, `app/Tests/Fixtures/parity.json`, taken at the freeze and
+never regenerated, so it stays a working, green app at the numbers it was built
+to. The Swift is still the working specification for every screen and edge case
+the Android port must match — read it freely, change it only to keep it building.
+
+The Python tools that mirror the app (`replay_corpus.py`'s publish gates,
+`replay_trigger.py`'s trigger settings) read their numbers out of the Kotlin
+sources now, not the Swift.
+
+Two enums look similar and are deliberately separate (in Kotlin as in Swift):
+`SwingFlag` mirrors the Python's flag strings and is parity-pinned; `CaptureFlag`
+is app-only, for conditions the Python cannot know about (tripod level, dropped
+frames, imported clips). Adding an app-only flag to `SwingFlag` breaks
+`fixturesCoverEveryFlag`.
 
 ## The honest-measurement rule
 
@@ -51,6 +69,31 @@ is against the hitter's own history.
 
 ## Build and run
 
+**Android (the live app).** The cloud container can build all of it — Kotlin,
+the parity tests and the APK — so unlike the iOS side nothing is written blind:
+
+```
+cd android && ./gradlew :core:test              # measurement port vs the fixtures, seconds
+cd android && ./gradlew :app:assembleDebug      # the APK (needs the Android SDK)
+```
+
+The SDK lives in `/opt/android-sdk` when it has been installed in this session
+(`echo "sdk.dir=/opt/android-sdk" > android/local.properties`); a fresh container
+has to install it again (command-line tools from dl.google.com, then
+`sdkmanager "platforms/android-36" "build-tools/36.0.0" "platform-tools"`).
+Maven Central rate-limits this machine with HTTP 429 when Gradle fetches many
+artifacts at once: retry with `--max-workers=1`, and once everything is cached
+use `--offline`.
+
+`.github/workflows/android.yml` runs the same on every push that touches
+`android/` or the fixtures, and on `main` replaces `SwingLab.apk` on the
+`android-latest` release — the page the phone installs from. Every build is
+signed with one committed development key so each installs over the last
+without losing stored swings; `android/keystore/README.md` says why that is
+acceptable and when it stops being so.
+
+**iOS (frozen).**
+
 ```
 cd app && xcodegen generate && open SwingLab.xcodeproj
 ```
@@ -70,10 +113,11 @@ Any installed iPhone simulator works; the name above is only an example, and a
 retired one fails the build for a reason that has nothing to do with the code.
 CI picks the newest available automatically.
 
-**CI is the compiler of record.** `.github/workflows/ios.yml` generates the
-project, builds and tests on every push, and writes the errors into the run's
-job summary. Most of this app is edited from a machine with no Swift toolchain,
-so that summary — not a screenshot — is how a compile error gets read.
+**For the iOS app, CI is the compiler of record.** `.github/workflows/ios.yml`
+generates the project, builds and tests it — now only when something under
+`app/` changes — and writes the errors into the run's job summary. The cloud
+container has no Swift toolchain, so that summary is how a Swift compile error
+gets read.
 
 Python side:
 
@@ -110,8 +154,21 @@ own trigger over it.
 ## State of play
 
 **Nothing is validated against real footage.** `docs/VALIDATION.md` has never
-been filled in. The app compiles and runs on a phone; it has not yet
-successfully measured a real swing. Do not describe any output as accurate.
+been filled in. The iOS app compiled and ran on a phone; it never successfully
+measured a real swing. Do not describe any output as accurate — and nothing
+measured on the iPhone transfers to the S21+: a new phone is a new lens, a new
+rolling shutter and a new encoder.
+
+**The Android port** (`docs/ANDROID_PORT.md` has the phases): the measurement
+core is ported and green against every fixture block (189 tests). Known gaps,
+from an audit of that port, in priority order: `ClipAnalyzer.frameTiming` and
+its nine tests (it sets the fps every exit velocity scales with); `BatTracker`;
+`LevelSensor.tiltDown`/`rollOffSquare` plus an adapter from Android's sensor
+axes, whose gravity sign is the opposite of CoreMotion's; and the ball detector
+and audio trigger are pinned only to the Swift, not to the Python — the Swift
+detector differs from `detect_ball_candidates` in three places, one of which
+reads a notched ball 8% small, and the fix starts with a Python fixture block.
+The app module is still a placeholder screen.
 
 Open, in rough priority order:
 
@@ -139,6 +196,21 @@ Open, in rough priority order:
    remove the skip; it needs a signal the contact time does not supply.
 
 ## Gotchas that have already cost time
+
+Most of the Apple-API entries below are about the frozen iOS app, but the
+lesson usually has an Android twin (the capture session holding the hardware
+decoder, slow-motion originals versus their rendered edits, normalised
+coordinates on an oriented image). Check for the twin before assuming it does
+not apply.
+
+- **Swift and Kotlin disagree silently on numbers that look identical.** Swift
+  `x.rounded()` rounds half away from zero; Kotlin `round()` rounds half to
+  even. Swift's two-argument `max` falls through on NaN; Kotlin's propagates
+  it. Java's `String.format` follows the phone's locale (a comma decimal on a
+  German phone) and rounds the shortest decimal string, not the binary value.
+  `android/core`'s `SwiftNumerics.kt` holds the helpers (`rounded()`,
+  `swiftMax`, `formatFixed`); use them, never the stdlib look-alikes, anywhere
+  the Python or the Swift is being mirrored.
 
 - **A mask contour is not a measurement of the ball, and the mask's fitted
   minor axis is not the ball's.** The colour mask is ragged — holed by the

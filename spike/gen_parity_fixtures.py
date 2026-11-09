@@ -5,14 +5,19 @@
 """
 gen_parity_fixtures.py — freeze the reference math into golden vectors.
 
-sla_common.py is the single source of truth for tracking and physics; the Swift
-port must reproduce it number-for-number. This script evaluates the reference
-implementation on a fixed set of inputs and writes the results to
+sla_common.py is the single source of truth for tracking and physics; the
+Kotlin port in android/core must reproduce it number-for-number. This script
+evaluates the reference implementation on a fixed set of inputs and writes the
+results to
 
-    app/Tests/Fixtures/parity.json
+    spike/fixtures/parity.json
 
-which SwingLabTests/ParityTests.swift reads and asserts against. Re-run it
-whenever sla_common.py changes, and re-run the Swift tests:
+which android/core's parity tests read in place. Re-run it whenever
+sla_common.py changes, then run `cd android && gradle :core:test`:
+
+The iOS app is FROZEN and keeps its own snapshot at app/Tests/Fixtures/
+parity.json, taken at the freeze. This script never writes there: a frozen app
+pinned to numbers that keep moving would just be a red build forever.
 
     python gen_parity_fixtures.py
 
@@ -1187,7 +1192,7 @@ def main():
         })
 
     dst = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       "..", "app", "Tests", "Fixtures", "parity.json")
+                       "fixtures", "parity.json")
     dst = os.path.normpath(dst)
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     with open(dst, "w") as f:

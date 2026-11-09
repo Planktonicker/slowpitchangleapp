@@ -45,7 +45,7 @@ xcodebuild test -scheme SwingLab -destination 'platform=iOS Simulator,name=iPhon
 generated from `spike/sla_common.py`. If you change either side:
 
 ```
-python spike/gen_parity_fixtures.py    # regenerate app/Tests/Fixtures/parity.json
+python spike/gen_parity_fixtures.py    # regenerate spike/fixtures/parity.json
 ```
 
 and run the tests again. A failure means Swift and Python have drifted apart —

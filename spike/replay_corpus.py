@@ -67,8 +67,12 @@ import sla_common as sla
 HERE = os.path.dirname(os.path.abspath(__file__))
 CORPUS = os.path.join(HERE, "corpus")
 INDEX = os.path.join(CORPUS, "index.json")
-PLAUSIBILITY_SWIFT = os.path.join(
-    HERE, "..", "app", "Sources", "Core", "TrackPlausibility.swift")
+# The LIVE app's gates, which since the iOS freeze means the Kotlin port. The
+# frozen Swift still has its own copy and would go on agreeing with itself while
+# the phone moved on.
+PLAUSIBILITY_SRC = os.path.join(
+    HERE, "..", "android", "core", "src", "main", "kotlin", "app", "swinglab",
+    "core", "TrackPlausibility.kt")
 
 LABELS = ("hit", "no_swing", "unknown")
 LABEL_SOURCES = ("hitter", "inferred", "none")
@@ -96,12 +100,12 @@ _DEFAULT_GATES = {
 }
 
 
-def load_gates(path: str = PLAUSIBILITY_SWIFT) -> tuple[dict, str]:
-    """Gate thresholds, parsed from TrackPlausibility.swift.
+def load_gates(path: str = PLAUSIBILITY_SRC) -> tuple[dict, str]:
+    """Gate thresholds, parsed from TrackPlausibility.kt.
 
     Returns (gates, provenance). Falls back to the defaults above with a loud
     provenance string rather than failing: a harness that refuses to run
-    because a Swift file moved is a harness nobody runs.
+    because a source file moved is a harness nobody runs.
     """
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -109,14 +113,14 @@ def load_gates(path: str = PLAUSIBILITY_SWIFT) -> tuple[dict, str]:
     except OSError as exc:
         return dict(_DEFAULT_GATES), f"BUILT-IN DEFAULTS ({exc.strerror}) — VERIFY"
     found = {}
-    for name, raw in re.findall(r"static let (\w+)\s*=\s*(-?\d+(?:\.\d+)?)", src):
+    for name, raw in re.findall(r"(?:const\s+)?val (\w+)\s*(?::\s*\w+\s*)?=\s*(-?\d+(?:\.\d+)?)", src):
         found[name] = float(raw) if "." in raw else int(raw)
     missing = [k for k in _DEFAULT_GATES if k not in found]
     gates = dict(_DEFAULT_GATES)
     gates.update({k: v for k, v in found.items() if k in _DEFAULT_GATES})
     if missing:
-        return gates, f"TrackPlausibility.swift (missing {', '.join(missing)} — VERIFY)"
-    return gates, "TrackPlausibility.swift"
+        return gates, f"TrackPlausibility.kt (missing {', '.join(missing)} — VERIFY)"
+    return gates, "TrackPlausibility.kt"
 
 
 def speed_growth(track) -> float | None:
@@ -519,8 +523,8 @@ def selftest() -> int:
 
     # The gate thresholds must come from the Swift, not from the fallbacks.
     gates, provenance = load_gates()
-    check("gate thresholds read from TrackPlausibility.swift",
-          provenance == "TrackPlausibility.swift", provenance)
+    check("gate thresholds read from TrackPlausibility.kt",
+          provenance == "TrackPlausibility.kt", provenance)
 
     def synth(n, dx, dy, diameter, t0=1.0, fps_=240.0, grow=1.0):
         out, x, y, step = [], 0.0, 0.0, 1.0

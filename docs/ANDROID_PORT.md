@@ -16,7 +16,7 @@ applies here too.
   `android/core` is a port of it, pinned number-for-number by the *same*
   `app/Tests/Fixtures/parity.json` the Swift tests read — the file is read in
   place, never copied.
-- **The iOS app is frozen** (owner's decision). It stays in the repository and
+- **The iOS app is frozen at `8c87828`** (owner's decision). It stays in the repository and
   keeps building against a snapshot of the reference numbers taken at the
   freeze, but receives no further measurement changes — so a measurement change
   costs two edits, Python and Kotlin, not three. The Swift stays useful as the
@@ -58,7 +58,11 @@ phone installs from.
 0. **Skeleton** — done: modules, parity harness, signed APK, CI publishing.
 1. **Measurement core** — the Swift `Core` and the pure parts of `Vision`,
    ported to `android/core` and pinned by parity. The tests run on this
-   machine, so this part is built and checked here, not blind.
+   machine, so this part is built and checked here, not blind. **Ported: 189
+   tests, every fixture block covered in full at the Swift's tolerances.**
+   Still to do: `frameTiming`, `BatTracker`, the level-sensor maths with an
+   Android axis adapter, and pinning the detector and the trigger to the Python
+   rather than only to the Swift (see `CLAUDE.md`, State of play).
 2. **Import and analyse** — pick a clip from the Gallery, measure it on the
    phone, keep a history, export bundles the corpus can ingest. The first build
    worth installing. Depends on device test 2.

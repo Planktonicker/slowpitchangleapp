@@ -1,9 +1,10 @@
 # Builds, tests and publishes the SwingLab Android app.
 #
 # Two jobs in one: the measurement core's parity tests (plain JVM, seconds), and
-# an installable APK. The core tests read the SAME app/Tests/Fixtures/parity.json
-# the iOS tests read, so a change to spike/sla_common.py that regenerates the
-# fixtures re-runs this workflow too, which is the point of the paths filter.
+# an installable APK. The core tests read spike/fixtures/parity.json, the live
+# reference the Python writes, so a change to spike/sla_common.py that
+# regenerates the fixtures re-runs this workflow too — the point of the paths
+# filter.
 #
 # Publishing: every push to main replaces the APK on the `android-latest`
 # release, so the phone always installs from one fixed page —
@@ -22,12 +23,12 @@ on:
       - 'claude/**'
     paths:
       - 'android/**'
-      - 'app/Tests/Fixtures/parity.json'
+      - 'spike/fixtures/parity.json'
       - '.github/workflows/android.yml'
   pull_request:
     paths:
       - 'android/**'
-      - 'app/Tests/Fixtures/parity.json'
+      - 'spike/fixtures/parity.json'
       - '.github/workflows/android.yml'
   workflow_dispatch:
 

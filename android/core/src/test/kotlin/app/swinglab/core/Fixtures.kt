@@ -23,11 +23,12 @@ import kotlin.test.assertTrue
 import kotlin.test.fail
 
 /**
- * `app/Tests/Fixtures/parity.json`, the numbers `spike/sla_common.py` produced.
+ * `spike/fixtures/parity.json`, the numbers `spike/sla_common.py` produced.
  *
- * The SAME file the iOS `ParityTests` read — the Gradle test task passes its
- * path in. Never copy it into this module: two copies of the reference is how a
- * port drifts without any test noticing.
+ * Read in place — the Gradle test task passes its path in. Never copy it into
+ * this module: two copies of the reference is how a port drifts without any
+ * test noticing. (The frozen iOS app keeps its own snapshot under app/Tests;
+ * that one is deliberately not this module's reference.)
  */
 object Fixtures {
     val root: JsonObject by lazy {
